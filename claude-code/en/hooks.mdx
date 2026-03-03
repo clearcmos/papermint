@@ -1,0 +1,259 @@
+---
+title: Hooks reference
+description: Reference for Claude Code hook events, configuration schema, JSON input/output formats, exit codes, and hook types.
+---
+
+Hooks are user-defined shell commands, HTTP endpoints, or LLM prompts that execute automatically at specific points in Claude Code's lifecycle. Use hooks to enforce standards, automate workflows, and integrate with external tools.
+
+## Hook lifecycle
+
+Hooks fire at specific points during a Claude Code session. When an event fires and a matcher matches, Claude Code passes JSON context about the event to your hook handler. Your handler can then inspect the input, take action, and optionally return a decision.
+
+| Event                | When it fires                                                        |
+| :------------------- | :------------------------------------------------------------------- |
+| `SessionStart`       | When a session begins or resumes                                     |
+| `UserPromptSubmit`   | When you submit a prompt, before Claude processes it                 |
+| `PreToolUse`         | Before a tool call executes. Can block it                            |
+| `PermissionRequest`  | When a permission dialog appears                                     |
+| `PostToolUse`        | After a tool call succeeds                                           |
+| `PostToolUseFailure` | After a tool call fails                                              |
+| `Notification`       | When Claude Code sends a notification                                |
+| `SubagentStart`      | When a subagent is spawned                                           |
+| `SubagentStop`       | When a subagent finishes                                             |
+| `Stop`               | When Claude finishes responding                                      |
+| `TaskCompleted`      | When a task is being marked as completed                             |
+| `ConfigChange`       | When a configuration file changes during a session                   |
+| `WorktreeCreate`     | When a worktree is being created                                     |
+| `WorktreeRemove`     | When a worktree is being removed                                     |
+| `PreCompact`         | Before context compaction                                            |
+| `SessionEnd`         | When a session terminates                                            |
+
+### How a hook resolves
+
+Consider this `PreToolUse` hook that blocks destructive shell commands:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/block-rm.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+The script reads the JSON input from stdin, extracts the command, and returns a `permissionDecision` of `"deny"` if it contains `rm -rf`:
+
+```bash
+#!/bin/bash
+# .claude/hooks/block-rm.sh
+COMMAND=$(jq -r '.tool_input.command')
+
+if echo "$COMMAND" | grep -q 'rm -rf'; then
+  jq -n '{
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: "Destructive command blocked by hook"
+    }
+  }'
+else
+  exit 0  # allow the command
+fi
+```
+
+<Steps>
+  <Step title="Event fires">
+    The `PreToolUse` event fires. Claude Code sends the tool input as JSON on stdin to the hook:
+
+    ```json
+    { "tool_name": "Bash", "tool_input": { "command": "rm -rf /tmp/build" }, ... }
+    ```
+  </Step>
+
+  <Step title="Matcher checks">
+    The matcher `"Bash"` matches the tool name, so `block-rm.sh` runs. If you omit the matcher or use `"*"`, the hook runs on every occurrence of the event.
+  </Step>
+
+  <Step title="Hook handler runs">
+    The script extracts `"rm -rf /tmp/build"` from the input and finds `rm -rf`, so it prints a decision to stdout:
+
+    ```json
+    {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Destructive command blocked by hook"
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Claude Code acts on the result">
+    Claude Code reads the JSON decision, blocks the tool call, and shows Claude the reason.
+  </Step>
+</Steps>
+
+## Configuration
+
+Hooks are defined in JSON settings files. The configuration has three levels of nesting:
+
+1. Choose a hook event to respond to, like `PreToolUse` or `Stop`
+2. Add a matcher group to filter when it fires, like "only for the Bash tool"
+3. Define one or more hook handlers to run when matched
+
+<Note>
+  This page uses specific terms for each level: **hook event** for the lifecycle point, **matcher group** for the filter, and **hook handler** for the shell command, HTTP endpoint, prompt, or agent that runs. "Hook" on its own refers to the general feature.
+</Note>
+
+### Hook locations
+
+Where you define a hook determines its scope:
+
+| Location                          | Scope                         | Shareable                          |
+| :-------------------------------- | :---------------------------- | :--------------------------------- |
+| `~/.claude/settings.json`        | All your projects             | No, local to your machine          |
+| `.claude/settings.json`          | Single project                | Yes, can be committed to the repo  |
+| `.claude/settings.local.json`    | Single project                | No, gitignored                     |
+| Managed policy settings           | Organization-wide             | Yes, admin-controlled              |
+| Plugin `hooks/hooks.json`        | When plugin is enabled        | Yes, bundled with the plugin       |
+| Skill or agent frontmatter        | While the component is active | Yes, defined in the component file |
+
+### Matcher patterns
+
+The `matcher` field is a regex string that filters when hooks fire. Use `"*"`, `""`, or omit `matcher` entirely to match all occurrences.
+
+| Event                                                                          | What the matcher filters | Example matcher values                                           |
+| :----------------------------------------------------------------------------- | :----------------------- | :--------------------------------------------------------------- |
+| `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PermissionRequest`        | tool name                | `Bash`, `Edit\|Write`, `mcp__.*`                                  |
+| `SessionStart`                                                                 | how the session started  | `startup`, `resume`, `clear`, `compact`                          |
+| `SessionEnd`                                                                   | why the session ended    | `clear`, `logout`, `prompt_input_exit`, `other`                  |
+| `Notification`                                                                 | notification type        | `permission_prompt`, `idle_prompt`, `auth_success`               |
+| `SubagentStart`, `SubagentStop`                                                | agent type               | `Bash`, `Explore`, `Plan`, or custom agent names                  |
+| `PreCompact`                                                                   | what triggered compaction | `manual`, `auto`                                                 |
+| `ConfigChange`                                                                 | configuration source     | `user_settings`, `project_settings`, `local_settings`            |
+| `UserPromptSubmit`, `Stop`, `TaskCompleted`, `WorktreeCreate`, `WorktreeRemove` | no matcher support       | always fires on every occurrence                                  |
+
+This example runs a linting script only when Claude writes or edits a file:
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/path/to/lint-check.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+## Examples
+
+### Auto-format on file write
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "command": "npx prettier --write $CLAUDE_FILE_PATH"
+      }
+    ]
+  }
+}
+```
+
+### Run tests after code changes
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "command": "npm test -- --changed"
+      }
+    ]
+  }
+}
+```
+
+### Block dangerous commands
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo $CLAUDE_TOOL_INPUT | grep -qE 'rm -rf|git push --force' && echo 'BLOCKED: Dangerous command' && exit 1 || exit 0"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+<Warning>
+  Hook commands run with the same permissions as your shell. Be careful with hooks that execute user-provided input.
+</Warning>
+
+## Environment variables
+
+Hooks receive context through environment variables:
+
+| Variable             | Available in             | Description                          |
+| :------------------- | :----------------------- | :----------------------------------- |
+| `CLAUDE_TOOL_NAME`   | PreToolUse, PostToolUse  | Name of the tool being invoked       |
+| `CLAUDE_TOOL_INPUT`  | PreToolUse, PostToolUse  | JSON input to the tool               |
+| `CLAUDE_TOOL_OUTPUT` | PostToolUse              | Output from the tool                 |
+| `CLAUDE_FILE_PATH`   | PostToolUse (Write/Edit) | Path of the file modified            |
+| `CLAUDE_SESSION_ID`  | All hooks                | Current session identifier           |
+
+## Hooks in skills and agents
+
+Skills and subagents can define their own hooks in frontmatter:
+
+```yaml
+---
+name: safe-deploy
+description: Deploy with safety checks
+hooks:
+  PreToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: "./scripts/validate-deploy-cmd.sh"
+---
+```
+
+Hooks defined in skill/agent frontmatter:
+- Only run while that skill or agent is active
+- Are cleaned up when the skill/agent finishes
+- Support the same events and configuration as project-level hooks
+
+## Related resources
+
+- [Skills](/en/skills) — extend Claude with custom commands
+- [Sub-agents](/en/sub-agents) — delegate tasks to specialized agents
+- [Memory](/en/memory) — manage CLAUDE.md files for persistent context
+- [Permissions](/en/permissions) — control tool and skill access

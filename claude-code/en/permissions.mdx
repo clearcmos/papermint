@@ -1,0 +1,223 @@
+---
+title: Configure permissions
+description: Control what Claude Code can access and do with fine-grained permission rules, modes, and managed policies.
+---
+
+Claude Code supports fine-grained permissions so that you can specify exactly what the agent is allowed to do and what it cannot. Permission settings can be checked into version control and distributed to all developers in your organization, as well as customized by individual developers.
+
+## Permission system
+
+Claude Code uses a tiered permission system to balance power and safety:
+
+| Tool type         | Example          | Approval required | "Yes, don't ask again" behavior               |
+| :---------------- | :--------------- | :---------------- | :-------------------------------------------- |
+| Read-only         | File reads, Grep | No                | N/A                                           |
+| Bash commands     | Shell execution  | Yes               | Permanently per project directory and command |
+| File modification | Edit/write files | Yes               | Until session end                             |
+
+## Manage permissions
+
+You can view and manage Claude Code's tool permissions with `/permissions`. This UI lists all permission rules and the settings.json file they are sourced from.
+
+- **Allow** rules let Claude Code use the specified tool without manual approval.
+- **Ask** rules prompt for confirmation whenever Claude Code tries to use the specified tool.
+- **Deny** rules prevent Claude Code from using the specified tool.
+
+Rules are evaluated in order: **deny -> ask -> allow**. The first matching rule wins, so deny rules always take precedence.
+
+## Permission modes
+
+Claude Code supports several permission modes that control how tools are approved:
+
+| Mode                | Description                                                                           |
+| :------------------ | :------------------------------------------------------------------------------------ |
+| `default`           | Standard behavior: prompts for permission on first use of each tool                   |
+| `acceptEdits`       | Automatically accepts file edit permissions for the session                           |
+| `plan`              | Plan Mode: Claude can analyze but not modify files or execute commands                |
+| `dontAsk`           | Auto-denies tools unless pre-approved via `/permissions` or `permissions.allow` rules |
+| `bypassPermissions` | Skips all permission prompts (requires safe environment, see warning below)           |
+
+<Warning>
+  `bypassPermissions` mode disables all permission checks. Only use this in isolated environments like containers or VMs where Claude Code cannot cause damage.
+</Warning>
+
+## Permission rule syntax
+
+Permission rules follow the format `Tool` or `Tool(specifier)`.
+
+### Match all uses of a tool
+
+To match all uses of a tool, use just the tool name without parentheses:
+
+| Rule       | Effect                         |
+| :--------- | :----------------------------- |
+| `Bash`     | Matches all Bash commands      |
+| `WebFetch` | Matches all web fetch requests |
+| `Read`     | Matches all file reads         |
+
+### Use specifiers for fine-grained control
+
+Add a specifier in parentheses to match specific tool uses:
+
+| Rule                           | Effect                                                   |
+| :----------------------------- | :------------------------------------------------------- |
+| `Bash(npm run build)`          | Matches the exact command `npm run build`                |
+| `Read(./.env)`                 | Matches reading the `.env` file in the current directory |
+| `WebFetch(domain:example.com)` | Matches fetch requests to example.com                    |
+
+### Wildcard patterns
+
+Bash rules support glob patterns with `*`. This configuration allows npm and git commit commands while blocking git push:
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Glob",
+      "Grep",
+      "Bash(npm run *)",
+      "Bash(git commit *)",
+      "Bash(git * main)",
+      "Bash(* --version)",
+      "Bash(* --help *)"
+    ],
+    "deny": [
+      "Bash(git push *)"
+    ]
+  }
+}
+```
+
+The space before `*` matters: `Bash(ls *)` matches `ls -la` but not `lsof`, while `Bash(ls*)` matches both.
+
+## Tool-specific permission rules
+
+### Bash
+
+Bash permission rules support wildcard matching with `*`:
+
+- `Bash(npm run build)` matches the exact Bash command `npm run build`
+- `Bash(npm run test *)` matches Bash commands starting with `npm run test`
+- `Bash(npm *)` matches any command starting with `npm `
+- `Bash(* install)` matches any command ending with ` install`
+- `Bash(git * main)` matches commands like `git checkout main`, `git merge main`
+
+<Tip>
+  Claude Code is aware of shell operators (like `&&`) so a prefix match rule like `Bash(safe-cmd *)` won't give it permission to run the command `safe-cmd && other-cmd`.
+</Tip>
+
+<Warning>
+  Bash permission patterns that try to constrain command arguments are fragile. For example, `Bash(curl http://github.com/ *)` intends to restrict curl to GitHub URLs, but won't match variations like options before URL, different protocols, redirects, variables, or extra spaces.
+
+  For more reliable URL filtering, consider:
+  - **Restrict Bash network tools**: use deny rules to block `curl`, `wget`, and similar commands, then use the WebFetch tool with `WebFetch(domain:github.com)` permission
+  - **Use PreToolUse hooks**: implement a hook that validates URLs in Bash commands
+</Warning>
+
+### Read and Edit
+
+`Edit` rules apply to all built-in tools that edit files. Claude makes a best-effort attempt to apply `Read` rules to all built-in tools that read files like Grep and Glob.
+
+Read and Edit rules both follow the gitignore specification with four distinct pattern types:
+
+| Pattern            | Meaning                                | Example                          | Matches                        |
+| :----------------- | :------------------------------------- | :------------------------------- | :----------------------------- |
+| `//path`           | **Absolute** path from filesystem root | `Read(//Users/alice/secrets/**)` | `/Users/alice/secrets/**`      |
+| `~/path`           | Path from **home** directory           | `Read(~/Documents/*.pdf)`        | `/Users/alice/Documents/*.pdf` |
+| `/path`            | Path **relative to project root**      | `Edit(/src/**/*.ts)`             | `<project root>/src/**/*.ts`   |
+| `path` or `./path` | Path **relative to current directory** | `Read(*.env)`                    | `<cwd>/*.env`                  |
+
+<Warning>
+  A pattern like `/Users/alice/file` is NOT an absolute path. It's relative to the project root. Use `//Users/alice/file` for absolute paths.
+</Warning>
+
+<Note>
+  In gitignore patterns, `*` matches files in a single directory while `**` matches recursively across directories. To allow all file access, use just the tool name without parentheses: `Read`, `Edit`, or `Write`.
+</Note>
+
+### WebFetch
+
+- `WebFetch(domain:example.com)` matches fetch requests to example.com
+
+### MCP
+
+- `mcp__puppeteer` matches any tool provided by the `puppeteer` server
+- `mcp__puppeteer__puppeteer_navigate` matches the `puppeteer_navigate` tool specifically
+
+### Agent (subagents)
+
+Use `Agent(AgentName)` rules to control which subagents Claude can use:
+
+```json
+{
+  "permissions": {
+    "deny": ["Agent(Explore)", "Agent(my-custom-agent)"]
+  }
+}
+```
+
+## Permission flow
+
+When Claude wants to use a tool:
+
+1. Check **deny** rules — if matched, block the action
+2. Check **ask** rules — if matched, prompt for confirmation
+3. Check **allow** rules — if matched, proceed without asking
+4. Check the **permission mode** — ask or proceed based on mode
+5. **Prompt the user** if no rule matches and mode requires it
+
+<Warning>
+  Deny rules always take precedence over allow rules. If a tool matches both an allow and deny rule, it will be blocked.
+</Warning>
+
+## Extend permissions with hooks
+
+[Claude Code hooks](/en/hooks) provide a way to register custom shell commands to perform permission evaluation at runtime. When Claude Code makes a tool call, PreToolUse hooks run before the permission system, and the hook output can determine whether to approve or deny the tool call.
+
+## Working directories
+
+By default, Claude has access to files in the directory where it was launched. You can extend this access:
+
+- **During startup**: use `--add-dir <path>` CLI argument
+- **During session**: use `/add-dir` command
+- **Persistent configuration**: add to `additionalDirectories` in settings files
+
+Files in additional directories follow the same permission rules as the original working directory.
+
+## Per-session permissions
+
+When Claude asks for permission, you can choose:
+
+- **Allow once** — approve this specific use
+- **Allow for session** — approve all similar uses in this session
+- **Allow always** — add to your allow rules permanently
+- **Deny** — block this use
+
+## Managed settings
+
+For organizations that need centralized control over Claude Code configuration, administrators can deploy managed settings that cannot be overridden by user or project settings.
+
+### Managed-only settings
+
+Some settings are only effective in managed settings:
+
+| Setting                           | Description                                                                                             |
+| :-------------------------------- | :------------------------------------------------------------------------------------------------------ |
+| `disableBypassPermissionsMode`    | Set to `"disable"` to prevent `bypassPermissions` mode                                                  |
+| `allowManagedPermissionRulesOnly` | When `true`, prevents user and project settings from defining permission rules                          |
+| `allowManagedHooksOnly`           | When `true`, prevents loading of user, project, and plugin hooks                                        |
+| `allowManagedMcpServersOnly`      | When `true`, only managed MCP server configurations are respected                                       |
+
+## Settings precedence
+
+Permission rules follow the same settings precedence as all other Claude Code settings: managed settings have the highest precedence, followed by command line arguments, local project, shared project, and user settings.
+
+If a permission is allowed in user settings but denied in project settings, the project setting takes precedence and the permission is blocked.
+
+## See also
+
+- [Hooks](/en/hooks) — automate workflows and extend permission evaluation
+- [Skills](/en/skills) — extend Claude with custom commands
+- [Sub-agents](/en/sub-agents) — delegate tasks to specialized agents
+- [Memory](/en/memory) — manage CLAUDE.md files for persistent context

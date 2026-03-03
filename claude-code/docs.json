@@ -1,0 +1,65 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Claude Code",
+  "colors": {
+    "primary": "#0E0E0E",
+    "light": "#D4A27F",
+    "dark": "#0E0E0E"
+  },
+  "appearance": {
+    "default": "dark"
+  },
+  "background": {
+    "color": {
+      "light": "#FDFDF7",
+      "dark": "#09090B"
+    }
+  },
+  "favicon": "/favicon.svg",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "index"
+            ]
+          },
+          {
+            "group": "Features",
+            "pages": [
+              "en/skills",
+              "en/interactive-mode",
+              "en/sub-agents",
+              "en/hooks",
+              "en/memory",
+              "en/permissions"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "logo": {
+    "dark": "/logo-dark.svg",
+    "light": "/logo-light.svg"
+  },
+  "navbar": {},
+  "footer": {
+    "socials": {
+      "github": "https://github.com/anthropics/claude-code"
+    }
+  },
+  "code": {
+    "copy": true
+  },
+  "modeToggle": {
+    "default": "dark"
+  },
+  "seo": {
+    "indexHiddenPages": false
+  }
+}
