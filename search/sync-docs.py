@@ -181,10 +181,15 @@ def generate_mdx(content: str, title: str, description: str) -> str:
 def sync_docs(docs_dir: Path, output_dir: Path) -> dict[str, list[str]]:
     """Sync .md files from docs_dir into output_dir as .mdx files.
 
+    Only writes files whose content has changed (skip identical).
+    Deletes orphaned .mdx files whose source .md no longer exists.
+
     Returns a dict mapping category -> list of page paths (relative to project root).
     """
     categories: dict[str, list[str]] = {}
-    files_written = 0
+    written = 0
+    skipped = 0
+    expected_mdx: set[Path] = set()
 
     for md_file in sorted(docs_dir.rglob("*.md")):
         rel = md_file.relative_to(docs_dir)
@@ -206,15 +211,33 @@ def sync_docs(docs_dir: Path, output_dir: Path) -> dict[str, list[str]]:
 
         # Output path: <project>/<category>/<filename>.mdx
         out_path = output_dir / rel.with_suffix(".mdx")
+        expected_mdx.add(out_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(mdx_content, encoding="utf-8")
-        files_written += 1
+
+        # Only write if content differs (avoid unnecessary I/O and Mintlify hot-reload)
+        if out_path.exists() and out_path.read_text(encoding="utf-8") == mdx_content:
+            skipped += 1
+        else:
+            out_path.write_text(mdx_content, encoding="utf-8")
+            written += 1
 
         # Navigation page path (no extension, relative to project root)
         page_path = str(rel.with_suffix(""))
         categories.setdefault(category, []).append(page_path)
 
-    print(f"Wrote {files_written} .mdx files to {output_dir}")
+    # Delete orphaned .mdx files (source .md was removed from NAS)
+    deleted = 0
+    for mdx_file in sorted(output_dir.rglob("*.mdx")):
+        if mdx_file not in expected_mdx and mdx_file.name != "index.mdx":
+            mdx_file.unlink()
+            deleted += 1
+
+    # Clean up empty category directories
+    for subdir in sorted(output_dir.iterdir(), reverse=True):
+        if subdir.is_dir() and not any(subdir.iterdir()):
+            subdir.rmdir()
+
+    print(f"Sync: {written} written, {skipped} unchanged, {deleted} deleted in {output_dir}")
     return categories
 
 
@@ -253,6 +276,11 @@ def update_docs_json(docs_json_path: Path, site_name: str, categories: dict[str,
                 "group": display_name,
                 "pages": sort_pages(categories[cat]),
             })
+
+    # Prepend "Getting Started" with index page if index.mdx exists
+    index_path = docs_json_path.parent / "index.mdx"
+    if index_path.exists():
+        groups.insert(0, {"group": "Getting Started", "pages": ["index"]})
 
     docs_tab = {
         "tab": "Documentation",

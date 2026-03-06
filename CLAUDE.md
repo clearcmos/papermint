@@ -2,9 +2,25 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Documentation Maintenance (Self-Updating Directive)
+
+After completing any change, fix, or new feature, review `CLAUDE.md` and `README.md` for accuracy. Only update them when the change is relevant — not every code tweak needs a docs update.
+
+**Update when:**
+- Files/directories are added, removed, or renamed (update tree diagrams, references)
+- Commands, env vars, or API endpoints change (update tables, code blocks)
+- New features or architectural patterns are introduced (add sections)
+- Existing behavior is removed or changed (remove or edit stale descriptions)
+- Dependencies change (update prerequisites)
+
+**Do not update when:**
+- Bug fixes that don't change interfaces or behavior
+- Internal refactors with no user-facing impact
+- Minor code style changes
+
 ## What This Is
 
-**papermint** — a multi-project Mintlify documentation repo. Each subdirectory is an independent Mintlify site with its own `docs.json`, pages, and theme config. A shared search API provides hybrid keyword + semantic search and RAG across any project's docs.
+**papermint** — a multi-project Mintlify documentation repo. Each subdirectory is an independent Mintlify site with its own `docs.json`, pages, and theme config. A shared search API provides keyword search out of the box, with optional semantic search and RAG when Ollama is available.
 
 ## Repository Structure
 

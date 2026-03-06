@@ -56,7 +56,7 @@ async def do_index():
             print("Cache miss — embedding via Ollama...")
             chunk_embeddings = await embed_chunks(chunks, OLLAMA_URL, EMBED_MODEL)
             save_cache(PROJECT, fp, chunks, chunk_embeddings)
-        except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError) as e:
+        except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError, httpx.RemoteProtocolError) as e:
             print(f"Ollama unavailable ({e}) — keyword search only")
             chunk_embeddings = np.array([])
     else:
