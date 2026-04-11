@@ -1,0 +1,585 @@
+---
+title: "️ Security Dashboard"
+description: "Centralized security monitoring dashboard providing real-time visibility into authentication, authorization, and security posture across all web services."
+---
+
+**Last Updated:** 2025-11-02
+
+Centralized security monitoring dashboard providing real-time visibility into authentication, authorization, and security posture across all web services.
+
+---
+
+## 📋 Overview
+
+**URL:** https://security.bedrosn.com
+**Module:** `/etc/nixos/modules/services/security-dashboard.nix`
+**Authentication:** OAuth2-proxy (Keycloak group: `security-dashboard-access`)
+**Backend:** FastAPI (Python) on port 8091 (localhost only)
+**Frontend Proxy:** OAuth2-proxy on port 4182 (public)
+
+### What It Monitors
+
+The Security Dashboard provides a comprehensive view of:
+
+1. **Service Inventory** - All public-facing web services
+2. **Authentication Status** - Which services use OAuth2-proxy or built-in auth
+3. **User Access Control** - Who has access to each service (Keycloak group membership)
+4. **Security Posture Scores** - Mozilla Observatory-based security header analysis
+5. **TLS Configuration** - Certificate validity and HTTPS enforcement
+
+---
+
+## 🚀 Quick Start
+
+### Access the Dashboard
+
+**From LAN:**
+```bash
+# Direct access (no authentication required from 192.168.1.0/24)
+https://security.bedrosn.com
+```
+
+**From WAN:**
+```bash
+# Requires authentication via OAuth2-proxy
+# Must be a member of "security-dashboard-access" Keycloak group
+https://security.bedrosn.com
+```
+
+### Dashboard Layout
+
+The dashboard displays a table with 4 columns:
+
+| Column | Description | Example |
+|--------|-------------|---------|
+| **Service** | Service name and domain | `Glances` (glances.bedrosn.com) |
+| **Authentication** | Auth method and status | OAuth2-proxy (glances-access) |
+| **Users with Access** | Keycloak group members | (users in Keycloak group) |
+| **Security Posture** | Security score and breakdown | 85/100 (🔴 Missing HSTS, 🟢 CSP OK) |
+
+---
+
+## 🔒 Security Posture Scores (4th Column)
+
+### Overview
+
+**Added:** November 2, 2025
+**Purpose:** Quantify security header compliance for each service
+
+The 4th column displays a **security posture score** (0-100) based on HTTP security header analysis. Scores are calculated using the **Mozilla Observatory** methodology with real-time header fetching.
+
+### Scoring Algorithm
+
+**Starting Score:** 100 points
+**Deductions:**
+
+| Missing Header | Deduction | Purpose |
+|---------------|-----------|---------|
+| **HSTS** | -20 points | Forces HTTPS connections |
+| **CSP** | -20 points | Prevents XSS/injection attacks |
+| **X-Frame-Options** | -15 points | Prevents clickjacking |
+| **X-Content-Type-Options** | -10 points | Prevents MIME confusion attacks |
+| **Referrer-Policy** | -5 points | Controls referrer information leakage |
+| **Permissions-Policy** | -5 points | Controls browser feature access |
+
+**Formula:**
+```python
+score = 100
+if not has_hsts: score -= 20
+if not has_csp: score -= 20
+if not has_x_frame_options: score -= 15
+if not has_x_content_type_options: score -= 10
+if not has_referrer_policy: score -= 5
+if not has_permissions_policy: score -= 5
+```
+
+### Score Interpretation
+
+| Score Range | Rating | Meaning |
+|-------------|--------|---------|
+| **90-100** | 🟢 Excellent | Comprehensive security headers |
+| **75-89** | 🟡 Good | Most critical headers present |
+| **50-74** | 🟠 Fair | Missing some important headers |
+| **0-49** | 🔴 Poor | Missing critical security headers |
+
+### Visual Breakdown
+
+Each service shows a detailed breakdown of header status:
+
+```
+Security Posture: 85/100
+  🟢 HSTS: Enabled (max-age=31536000)
+  🟢 CSP: Configured
+  🔴 X-Frame-Options: Missing
+  🟢 X-Content-Type-Options: nosniff
+  🟡 Referrer-Policy: Default
+  🟢 Permissions-Policy: Configured
+```
+
+**Legend:**
+- 🟢 **Present**: Header configured correctly
+- 🟡 **Default**: Using browser default (not explicitly set)
+- 🔴 **Missing**: Header not present
+
+### Example Scores
+
+**Excellent Security (95/100):**
+```
+Glances (glances.bedrosn.com)
+  🟢 HSTS: max-age=31536000; includeSubDomains; preload
+  🟢 CSP: default-src 'self'; script-src 'self' 'unsafe-inline'
+  🟢 X-Frame-Options: DENY
+  🟢 X-Content-Type-Options: nosniff
+  🟢 Referrer-Policy: strict-origin-when-cross-origin
+  🔴 Permissions-Policy: Missing (-5 points)
+```
+
+**Poor Security (55/100):**
+```
+Legacy Service (legacy.bedrosn.com)
+  🔴 HSTS: Missing (-20 points)
+  🔴 CSP: Missing (-20 points)
+  🟢 X-Frame-Options: SAMEORIGIN
+  🔴 X-Content-Type-Options: Missing (-10 points)
+  🟡 Referrer-Policy: Default (-5 points)
+  🟡 Permissions-Policy: Default
+```
+
+---
+
+## ⚡ Background Caching System
+
+### Overview
+
+**Added:** November 2, 2025
+**Purpose:** Improve dashboard load times from 4.7s to 0.19s
+
+The security dashboard uses **background caching** with periodic refresh to avoid expensive API calls and HTTP header fetching on every page load.
+
+### How It Works
+
+**Architecture:**
+```python
+# Global cache dictionary
+security_posture_cache = {
+    "glances.bedrosn.com": {
+        "score": 95,
+        "breakdown": { ... },
+        "last_updated": "2025-11-02T10:15:00Z"
+    },
+    # ... other services
+}
+
+# Background refresh task
+@repeat_every(seconds=300)  # Every 5 minutes
+async def refresh_security_posture_cache():
+    for service in services:
+        # Parallel fetch with asyncio.gather()
+        headers = await fetch_headers_async(service.domain)
+        security_posture_cache[service.domain] = calculate_score(headers)
+```
+
+### Cache Refresh Strategy
+
+**Refresh Interval:** 5 minutes (300 seconds)
+**Refresh Method:** Background task (non-blocking)
+**Parallel Fetching:** Uses `asyncio.gather()` for concurrent HTTP requests
+
+**Timeline:**
+```
+T+0:00  - FastAPI starts, cache empty
+T+0:01  - First request triggers cache population
+T+0:02  - Cache populated, returns immediately (0.19s)
+T+5:00  - Background task refreshes cache (5 min interval)
+T+10:00 - Background task refreshes cache again
+```
+
+### Performance Impact
+
+**Before Caching (Per Request):**
+- Keycloak API calls: ~1.5s
+- HTTP header fetching (8 services): ~3.0s
+- **Total:** ~4.7s per page load
+
+**After Caching (Per Request):**
+- Cache lookup: ~0.01s
+- JSON serialization: ~0.18s
+- **Total:** ~0.19s per page load
+
+**Improvement:** 24.7x faster (~96% reduction in latency)
+
+### Cache Invalidation
+
+**Automatic Refresh:**
+- Every 5 minutes via background task
+- Ensures scores reflect current state
+
+**Manual Refresh:**
+- Restart `security-dashboard.service`
+- Cache repopulates on first request
+
+```bash
+# Force cache refresh
+systemctl restart security-dashboard.service
+```
+
+### Cache Warmup
+
+The cache is **lazily initialized** on the first request:
+
+1. User accesses https://security.bedrosn.com
+2. Dashboard detects empty cache
+3. Triggers immediate cache population
+4. Returns cached results
+5. Background task maintains cache every 5 minutes
+
+---
+
+## 🔧 Configuration
+
+### Service Definition
+
+**Location:** `/etc/nixos/modules/services/security-dashboard.nix`
+
+```nix
+systemd.services.security-dashboard = {
+  description = "Security Dashboard FastAPI Backend";
+  after = [ "network.target" "keycloak.service" ];
+  wantedBy = [ "multi-user.target" ];
+
+  serviceConfig = {
+    Type = "simple";
+    User = "security-dashboard";
+    Group = "security-dashboard";
+    ExecStart = ''
+      ${pkgs.python311}/bin/python -c "
+        import uvicorn
+        uvicorn.run(
+          'main:app',
+          host='127.0.0.1',
+          port=8091,
+          log_level='info'
+        )
+      "
+    '';
+
+    # Comprehensive systemd hardening
+    MemoryMax = "512M";
+    TasksMax = "64";
+    ProtectSystem = "strict";
+    ProtectHome = true;
+    NoNewPrivileges = true;
+    # ... (see security-dashboard-hardening.md for full hardening)
+  };
+};
+```
+
+### OAuth2-Proxy Configuration
+
+```nix
+systemd.services.oauth2-proxy-security = {
+  description = "OAuth2 Proxy for Security Dashboard";
+
+  serviceConfig = {
+    ExecStart = ''
+      ${pkgs.oauth2-proxy}/bin/oauth2-proxy \
+        --provider=oidc \
+        --oidc-issuer-url="https://keycloak.bedrosn.com/realms/web" \
+        --client-id="oauth2-proxy-security" \
+        --http-address="127.0.0.1:4182" \
+        --upstream="http://localhost:8091" \
+        --redirect-url="https://security.bedrosn.com/oauth2/callback" \
+        --allowed-group="security-dashboard-access" \
+        --cookie-domain=".bedrosn.com" \
+        --cookie-samesite="lax"
+    '';
+  };
+};
+```
+
+### Traefik Router
+
+```nix
+http.routers.security-dashboard = {
+  rule = "Host(`security.bedrosn.com`)";
+  service = "oauth2-proxy-security";
+  tls.certResolver = "le";
+  middlewares = [ "enhanced-security-headers" "strip-server-headers" ];
+};
+
+http.services.oauth2-proxy-security.loadBalancer.servers = [
+  { url = "http://localhost:4182"; }
+];
+```
+
+---
+
+## 📊 Data Sources
+
+### 1. Service Inventory
+
+**Source:** Hardcoded in `/etc/nixos/modules/services/security-dashboard.nix`
+
+```python
+services_data = [
+    {
+        "name": "Glances",
+        "domain": "glances.bedrosn.com",
+        "auth_type": "oauth2-proxy",
+        "keycloak_group": "glances-access"
+    },
+    # ... more services
+]
+```
+
+### 2. User Access Control
+
+**Source:** Keycloak Admin API (PostgreSQL query)
+
+```python
+# Query Keycloak database for group members
+query = """
+    SELECT ue.email
+    FROM user_entity ue
+    JOIN user_group_membership ugm ON ue.id = ugm.user_id
+    JOIN keycloak_group kg ON ugm.group_id = kg.id
+    WHERE kg.name = %s AND ue.realm_id = %s
+"""
+```
+
+**Note:** Service runs as `security-dashboard` user with access to `keycloak` group for database access.
+
+### 3. Immich Photo Count
+
+**Source:** SSH to jimmich, query PostgreSQL
+
+```python
+# SSH command
+ssh_command = [
+    "ssh", "-o", "StrictHostKeyChecking=no",
+    "jimmich.home.arpa",
+    "sudo", "-u", "postgres",
+    "psql", "-d", "immich",
+    "-t", "-c", "SELECT COUNT(*) FROM assets WHERE type = 'IMAGE'"
+]
+```
+
+**Note:** Requires SSH key from `/var/lib/security-dashboard/.ssh/id_ed25519` to be authorized on jimmich.
+
+### 4. Security Posture Scores
+
+**Source:** Live HTTP header fetching
+
+```python
+async def fetch_security_headers(domain: str):
+    async with aiohttp.ClientSession() as session:
+        async with session.get(f"https://{domain}") as response:
+            return {
+                "hsts": response.headers.get("Strict-Transport-Security"),
+                "csp": response.headers.get("Content-Security-Policy"),
+                "x_frame_options": response.headers.get("X-Frame-Options"),
+                # ... other headers
+            }
+```
+
+---
+
+## 🔍 API Endpoints
+
+### GET `/api/services`
+
+**Description:** Fetch all service information with security scores
+
+**Response:**
+```json
+{
+  "services": [
+    {
+      "name": "Glances",
+      "domain": "glances.bedrosn.com",
+      "auth_type": "oauth2-proxy",
+      "keycloak_group": "glances-access",
+      "users_with_access": ["user1@example.com", "user2@example.com"],
+      "security_posture": {
+        "score": 95,
+        "breakdown": {
+          "hsts": { "present": true, "value": "max-age=31536000; includeSubDomains; preload" },
+          "csp": { "present": true, "value": "default-src 'self'..." },
+          "x_frame_options": { "present": true, "value": "DENY" },
+          "x_content_type_options": { "present": true, "value": "nosniff" },
+          "referrer_policy": { "present": true, "value": "strict-origin-when-cross-origin" },
+          "permissions_policy": { "present": false, "value": null }
+        }
+      }
+    }
+  ],
+  "immich_photos": 1234
+}
+```
+
+**Caching:** Results served from `security_posture_cache` (refreshed every 5 minutes)
+
+### GET `/health`
+
+**Description:** Health check endpoint
+
+**Response:**
+```json
+{
+  "status": "healthy",
+  "cache_size": 8,
+  "last_cache_refresh": "2025-11-02T10:15:00Z"
+}
+```
+
+---
+
+## 🛡️ Security Considerations
+
+### OAuth2-Proxy Group Access
+
+**Required Keycloak Group:** `security-dashboard-access`
+
+**Whitelisted Users:**
+- Users configured in `keycloak-user-config.age` secret
+
+**Access Control:**
+```bash
+# Add user to security-dashboard-access group
+# Via Keycloak admin UI at https://keycloak.bedrosn.com
+
+# Or via API (requires admin token)
+curl -X PUT "https://keycloak.bedrosn.com/admin/realms/web/users/{userId}/groups/{groupId}"
+```
+
+### LAN Bypass
+
+**LAN Bypass (DISABLED for this service):**
+
+Security Dashboard uses **OAuth2-proxy** and does NOT have LAN bypass rules. Authentication is required from both LAN and WAN.
+
+**Reason:** Security-sensitive dashboard should always require authentication.
+
+### Information Disclosure
+
+The dashboard exposes:
+- Service domain names
+- Authentication methods
+- User email addresses
+- Security header configurations
+
+**Mitigation:** Already protected by OAuth2-proxy group membership (`security-dashboard-access`).
+
+### Systemd Hardening
+
+**Comprehensive sandboxing applied** - See [Security Dashboard Hardening](../security/security-dashboard-hardening.md) for full details.
+
+**Key Hardening:**
+- Non-root user (`security-dashboard`)
+- Memory limit: 512MB
+- Task limit: 64 processes
+- Filesystem: Read-only except `/var/lib/security-dashboard`
+- System calls: Filtered to `@system-service`
+- No capabilities, SUID, or privilege escalation
+
+**Security Score:** 2.0/10 (lower is better) via `systemd-analyze security`
+
+---
+
+## 🆘 Troubleshooting
+
+### Dashboard Returns "Error: Failed to fetch"
+
+**Symptom:**
+- Dashboard loads initially but shows error after 30 seconds
+- Browser console shows 401 Unauthorized on `/api/services` requests
+
+**Cause:**
+JavaScript `fetch()` using `credentials: 'same-origin'` instead of `credentials: 'include'`
+
+**Fix:**
+Ensure all fetch requests use `credentials: 'include'`:
+
+```javascript
+// ✅ Correct
+fetch('/api/services', { credentials: 'include' })
+
+// ❌ Wrong
+fetch('/api/services', { credentials: 'same-origin' })
+```
+
+**Reference:** Fixed in commit c5c7f72 (November 1, 2025)
+
+### Security Scores Not Updating
+
+**Symptom:**
+Security scores remain unchanged even after adding security headers to Traefik
+
+**Cause:**
+Cache not refreshed yet (5-minute interval)
+
+**Fix:**
+```bash
+# Force cache refresh
+systemctl restart security-dashboard.service
+
+# Wait 5-10 seconds for cache warmup
+# Reload dashboard in browser
+```
+
+### Service Shows "Access Denied"
+
+**Symptom:**
+User redirected to Keycloak login but gets "Access Denied" after authentication
+
+**Cause:**
+User not a member of `security-dashboard-access` Keycloak group
+
+**Fix:**
+```bash
+# Add user to group via Keycloak admin UI
+https://keycloak.bedrosn.com/admin/master/console/#/web/groups
+
+# Or check current group members
+ssh misc.home.arpa 'sudo -u postgres psql -d keycloak -c "SELECT ue.email FROM user_entity ue JOIN user_group_membership ugm ON ue.id = ugm.user_id JOIN keycloak_group kg ON ugm.group_id = kg.id WHERE kg.name = '"'"'security-dashboard-access'"'"'"'
+```
+
+### Immich Photo Count Shows 0
+
+**Symptom:**
+Dashboard shows "Immich Photos: 0" despite photos being uploaded
+
+**Cause:**
+SSH connection to jimmich failed
+
+**Check:**
+```bash
+# Verify SSH key is authorized on jimmich
+ssh misc.home.arpa 'sudo -u security-dashboard ssh jimmich.home.arpa echo test'
+
+# Check service logs for SSH errors
+journalctl -u security-dashboard.service | grep -i ssh
+```
+
+**Fix:**
+Ensure SSH key is in `/etc/nixos/modules/core/users.nix` under `users.users.root.openssh.authorizedKeys.keys`
+
+---
+
+## 📚 Related Documentation
+
+- **[Security Dashboard Hardening](../security/security-dashboard-hardening.md)** - Systemd sandboxing and security hardening
+- **[OAuth2-Proxy Configuration](../security/oauth2-proxy-technical-configuration.md)** - OAuth2-proxy setup
+- **[Keycloak Setup](keycloak.md)** - Identity provider configuration
+- **[Traefik Reverse Proxy](traefik.md)** - Reverse proxy and routing
+- **[Security Overview](../security/overview.md)** - Overall security architecture
+
+---
+
+**Last Updated:** 2025-11-02
+**Maintained By:** Infrastructure Security Team
+**Next Review:** December 2, 2025
+
+---
+
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🌐 [Services](overview.md) | 🔒 [Security](../security/overview.md)*

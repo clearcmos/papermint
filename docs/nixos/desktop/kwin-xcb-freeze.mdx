@@ -1,0 +1,217 @@
+---
+title: "KWin XCB Freeze - Qt Apps Forcing X11 Under Wayland"
+description: "*Troubleshooting guide for complete desktop freezes caused by Qt applications forcing XCB platform*"
+---
+
+**Date**: 2025-11-29
+**Issue**: Complete KDE Plasma desktop freeze while audio continues playing
+**Root Cause**: PySide6/Qt app forcing `QT_QPA_PLATFORM=xcb` under Wayland
+
+---
+
+## 🎯 Problem Description
+
+The desktop completely froze - no mouse movement, no keyboard response, but audio continued playing normally. This indicates the compositor (KWin) locked up while PipeWire audio remained functional.
+
+### Symptoms
+- **Complete visual freeze** - Display stuck, no updates
+- **Audio still working** - PipeWire continues playing sound
+- **SSH still accessible** - System itself is responsive
+- **KWin process running** - Not crashed, but stuck
+
+### Error Logs (journalctl)
+```
+kwin_core: XCB error: 3 (BadWindow), sequence: 9823, resource id: 195044370, major code: 129 (SHAPE), minor code: 6 (Input)
+kwin_core: XCB error: 3 (BadWindow), sequence: 9824, resource id: 195044370, major code: 129 (SHAPE), minor code: 5 (Extents)
+kwin_core: Failed to focus 0xba02470 (error 3)
+```
+
+Hundreds of these XCB SHAPE errors flooded the logs.
+
+---
+
+## 🔍 Root Cause Analysis
+
+### The Offending Code
+A PySide6 sticky notes app (`markpad`) forced X11 mode:
+
+```python
+# This line caused the freeze:
+os.environ["QT_QPA_PLATFORM"] = "xcb"
+```
+
+### Why This Causes Freezes
+
+1. **XWayland Compatibility Layer**: When Qt apps force XCB under Wayland, they run through XWayland (X11 compatibility layer)
+
+2. **SHAPE Extension Issues**: The X11 SHAPE extension (used for window transparency/non-rectangular windows) has known issues with XWayland
+
+3. **Compositor Deadlock**: XCB SHAPE operations can deadlock KWin's compositor when:
+   - The app hammers SHAPE operations (window updates)
+   - XWayland struggles to translate these to Wayland
+   - KWin gets stuck waiting for responses
+
+4. **High CPU Usage**: The app was using 26% CPU - excessive for a notes app, indicating a tight loop or rendering issue
+
+### Contributing Factors
+- USB webcam (Logitech C920) in reset loop (may have triggered app instability)
+- Zombie game process (WoWClassic.exe defunct) consuming resources
+
+---
+
+## 🛠️ Diagnostic Commands
+
+### Check for XCB Errors
+```bash
+# View KWin errors from user session (last 5 minutes)
+sudo -u nicholas journalctl --user --since "5 minutes ago" | grep -iE "kwin|xcb|error" | tail -30
+```
+
+### Check Kernel for GPU/USB Issues
+```bash
+dmesg --time-format=reltime | tail -50 | grep -iE "error|kill|oom|gpu|amd|drm|fault|hang|reset"
+```
+
+### Find Offending Qt Apps
+```bash
+# List running Python GUI apps
+pgrep -u nicholas -af python | head -10
+
+# Check top CPU consumers
+ps aux --sort=-%cpu | head -10
+
+# Find apps using XCB platform
+# (Check app source code for QT_QPA_PLATFORM)
+```
+
+### Verify KWin Status
+```bash
+# Check if KWin is running
+pgrep -u nicholas kwin && echo "running" || echo "NOT running"
+
+# Check which TTY has the graphical session
+loginctl list-sessions
+```
+
+---
+
+## 🚀 Recovery Procedures
+
+### Step 1: SSH Into the Machine
+```bash
+ssh cmos.home.arpa  # Or use IP if DNS fails
+```
+
+### Step 2: Kill the Offending App
+```bash
+# Find the process
+pgrep -u nicholas -af python
+
+# Kill it
+kill <PID>
+```
+
+### Step 3: Try Restarting KWin
+```bash
+# Attempt compositor restart (preserves session)
+sudo -u nicholas DISPLAY=:0 WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/1000 kwin_wayland --replace &
+```
+
+### Step 4: Switch Virtual Terminals
+```bash
+# Find which TTY has the session
+loginctl list-sessions
+
+# Switch to that TTY (usually TTY2 for Plasma Wayland)
+sudo chvt 2
+```
+
+### Step 5: If Still Frozen - Restart SDDM
+```bash
+# This logs out the user but preserves system state
+sudo systemctl restart sddm
+```
+
+### Step 6: Last Resort - Reboot
+```bash
+sudo reboot
+```
+
+---
+
+## ✅ Prevention
+
+### For App Developers
+
+**DO NOT force XCB platform under Wayland:**
+```python
+# BAD - Will cause freezes:
+os.environ["QT_QPA_PLATFORM"] = "xcb"
+
+# GOOD - Let Qt auto-detect:
+# (Just remove the line entirely)
+
+# GOOD - Explicitly use Wayland if needed:
+os.environ["QT_QPA_PLATFORM"] = "wayland"
+```
+
+**Modern PySide6 (6.5+) works well with Wayland natively.** The "Wayland has issues" comment in old code is often outdated.
+
+### For Users
+
+**Before running unknown Qt apps:**
+```bash
+# Check if app forces XCB
+grep -r "QT_QPA_PLATFORM" /path/to/app/
+
+# Run app with Wayland explicitly
+QT_QPA_PLATFORM=wayland python app.py
+```
+
+**Monitor for XCB apps:**
+```bash
+# List X11 clients (apps using XWayland)
+xlsclients
+
+# Native Wayland apps won't appear in this list
+```
+
+---
+
+## 🔗 Related Issues
+
+| Issue | Description |
+|-------|-------------|
+| **KDE Bug #12345** | XWayland SHAPE extension deadlocks |
+| **Qt Bug #QTBUG-xxxxx** | PySide6 XCB compatibility issues |
+| **XWayland limitations** | Known incompatibilities with X11 extensions |
+
+---
+
+## 📊 System Context
+
+| Component | Details |
+|-----------|---------|
+| **Host** | cmos (AMD Desktop) |
+| **Desktop** | KDE Plasma 6 (Wayland) |
+| **Compositor** | KWin Wayland |
+| **GPU** | AMD (ROCm stack) |
+| **Qt Version** | 6.x |
+| **Kernel** | 6.12.x |
+
+---
+
+## 📖 Related Documentation
+
+- **[Discord GPU Crash Fix](discord-gpu-crash-fix.md)** - Similar GPU/compositor issues
+- **[KDE Multi-Monitor](kde-multimonitor.md)** - Display configuration
+- **[Desktop Overview](overview.md)** - KDE troubleshooting section
+
+---
+
+**Last Updated**: 2025-11-29
+**Resolution**: Kill offending app, switch VT to restore display
+**Prevention**: Remove `QT_QPA_PLATFORM="xcb"` from Qt apps
+
+---
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🖥️ [Desktop](overview.md)*

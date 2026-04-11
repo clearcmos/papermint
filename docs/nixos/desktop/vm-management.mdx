@@ -1,0 +1,511 @@
+---
+title: "️ VM Management - Generic Virtualization"
+description: "*Flexible VM disk provisioning with manual VM creation*"
+---
+
+## 🎯 Overview
+
+The generic VM provisioner creates a pre-allocated QCOW2 disk for manual VM installation using libvirt/KVM. It provides management utilities without forcing auto-provisioning or specific VM configurations.
+
+**Key Features**:
+- **Generic Disk Provisioning**: Creates 60GB QCOW2 disk on first boot
+- **Manual VM Creation**: Use virt-manager or `vm-create` helper
+- **No Auto-start**: VMs only start when explicitly requested
+- **Bridge Networking**: VMs get DHCP IP from router (192.168.1.x)
+- **Management Commands**: Comprehensive vm-* utilities
+
+---
+
+## 📋 Disk Specifications
+
+**Pre-provisioned Disk**:
+- **Location**: `/mnt/data/vm/guest/guest-vm.qcow2`
+- **Size**: 60GB (thin-provisioned QCOW2)
+- **Format**: QCOW2 (sparse file, grows as used)
+- **Initial Size**: ~200KB (grows to actual usage)
+- **Maximum Size**: 60GB
+
+**QCOW2 Benefits**:
+- **Thin Provisioning**: Only uses space for actual data
+- **Snapshots**: Support for VM snapshots
+- **Compression**: Optional compression support
+- **Growing**: Expands as VM writes data (never exceeds 60GB)
+
+---
+
+## 🚀 Creating a VM
+
+### 🖱️ **GUI Method (virt-manager)**
+
+**Using the pre-provisioned disk**:
+1. Launch virt-manager
+2. Create new VM → Import existing disk image
+3. Browse to `/mnt/data/vm/guest/guest-vm.qcow2`
+4. Configure RAM, CPUs, network (br0)
+5. Complete setup and start installation
+
+### 💻 **Command-Line Method**
+
+**Quick Create Helper**:
+```bash
+vm-create <vm-name> <iso-path> [ram-gb] [vcpus]
+```
+
+**Examples**:
+```bash
+# Create VM with defaults (6GB RAM, 4 vCPUs)
+vm-create myvm /mnt/data/software/debian.iso
+
+# Create VM with custom resources (8GB RAM, 6 vCPUs)
+vm-create myvm /mnt/data/software/omarchy-3.0.2.iso 8 6
+
+# Create minimal VM (2GB RAM, 2 vCPUs)
+vm-create testvm /mnt/data/software/alpine.iso 2 2
+```
+
+**What it does**:
+- Uses the pre-provisioned disk at `/mnt/data/vm/guest/guest-vm.qcow2`
+- Configures VM with specified RAM and vCPUs
+- Attaches ISO as CD-ROM for installation
+- Sets up virtio drivers (disk, network, video)
+- Configures bridge networking (br0)
+- Uses UEFI boot
+
+---
+
+## 💻 Management Commands
+
+### 🔍 **VM Status and Info**
+
+```bash
+# List all VMs
+vm-list
+
+# View VM details
+vm-info <vm-name>
+
+# Get VM IP address
+virsh --connect qemu:///system domifaddr <vm-name>
+```
+
+### ⚡ **VM Control**
+
+```bash
+# Start VM
+vm-start <vm-name>
+
+# Graceful shutdown
+vm-stop <vm-name>
+
+# Force power off
+vm-kill <vm-name>
+
+# Reboot VM
+vm-restart <vm-name>
+
+# Connect to console (uses --attach for GL compatibility)
+vm-viewer <vm-name>
+```
+
+### 🗑️ **VM Deletion**
+
+```bash
+# Completely remove VM and its disks
+vm-purge <vm-name>
+
+# Will prompt for confirmation:
+# "Type VM name to confirm:"
+```
+
+**Warning**: `vm-purge` deletes:
+- VM definition from libvirt
+- All associated disk images
+- All snapshots
+- Cannot be undone
+
+---
+
+## 🌐 Network Configuration
+
+### 🌉 **Bridge Networking**
+
+**Architecture** (`hosts/cmos/default.nix`):
+```nix
+# Physical adapter enslaved to bridge
+systemd.network.networks."10-enp8s0" = {
+  matchConfig.Name = "enp8s0";
+  networkConfig.Bridge = "br0";
+};
+
+# Bridge gets static IP
+systemd.network.networks."20-br0" = {
+  matchConfig.Name = "br0";
+  networkConfig = {
+    Address = "192.168.1.2/24";
+    Gateway = "192.168.1.1";
+  };
+};
+```
+
+**Benefits**:
+- VM appears as first-class LAN device
+- No port forwarding required
+- Direct SSH/service access from other hosts
+- Router DHCP assigns IP automatically
+
+**Check Bridge Status**:
+```bash
+# Show bridge configuration
+ip addr show br0
+
+# Show bridge members
+bridge link show
+
+# Show VM network interfaces
+virsh --connect qemu:///system domiflist <vm-name>
+```
+
+---
+
+## 🛠️ Disk Management
+
+### 📊 **Check Disk Usage**
+
+```bash
+# Actual disk space used (grows over time)
+du -h /mnt/data/vm/guest/guest-vm.qcow2
+
+# Detailed disk information
+qemu-img info /mnt/data/vm/guest/guest-vm.qcow2
+
+# Example output:
+# virtual size: 60G
+# disk size: 8.2G  ← Actual space used
+```
+
+### 📈 **Resize Disk**
+
+**Increase disk size** (VM must be shut down):
+```bash
+# Stop VM first
+vm-stop <vm-name>
+
+# Increase disk to 100GB
+qemu-img resize /mnt/data/vm/guest/guest-vm.qcow2 100G
+
+# Then resize filesystem inside VM after starting
+vm-start <vm-name>
+```
+
+**Inside the VM**:
+```bash
+# For ext4 filesystem
+sudo resize2fs /dev/vda1
+
+# For XFS filesystem
+sudo xfs_growfs /
+```
+
+### 📸 **Snapshots**
+
+```bash
+# Create snapshot
+virsh --connect qemu:///system snapshot-create-as <vm-name> snapshot1 "Description"
+
+# List snapshots
+virsh --connect qemu:///system snapshot-list <vm-name>
+
+# Restore snapshot
+virsh --connect qemu:///system snapshot-revert <vm-name> snapshot1
+
+# Delete snapshot
+virsh --connect qemu:///system snapshot-delete <vm-name> snapshot1
+```
+
+---
+
+## 🔧 Advanced Configuration
+
+### ⚙️ **Manual VM Creation**
+
+**Using virt-install directly**:
+```bash
+virt-install \
+  --connect qemu:///system \
+  --name myvm \
+  --memory 8192 \
+  --vcpus 6 \
+  --disk path=/mnt/data/vm/guest/guest-vm.qcow2,bus=virtio,format=qcow2 \
+  --cdrom /mnt/data/software/debian.iso \
+  --os-variant linux2024 \
+  --network bridge=br0,model=virtio \
+  --graphics spice \
+  --video virtio \
+  --boot uefi,cdrom,hd \
+  --noautoconsole
+```
+
+### 🎨 **3D Acceleration (VirtIO-GL)**
+
+**Automatic for `nixvm`**: The `nixvm` VM is automatically configured with VirtIO 3D acceleration via the declarative `nixvm-define` systemd service.
+
+**Manual configuration for other VMs**:
+```bash
+# Stop VM
+vm-stop <vm-name>
+
+# Dump current config
+virsh --connect qemu:///system dumpxml <vm-name> > /tmp/vm-config.xml
+
+# Edit config to add GL acceleration
+vim /tmp/vm-config.xml
+
+# Find <graphics type='spice'> section and modify to:
+<graphics type='spice'>
+  <listen type='none'/>
+  <image compression='off'/>
+  <gl enable='yes' rendernode='/dev/dri/renderD128'/>
+</graphics>
+
+# Find <video> section and add acceleration:
+<video>
+  <model type='virtio' heads='1' primary='yes'>
+    <acceleration accel3d='yes'/>
+  </model>
+</video>
+
+# Undefine and redefine (preserves UUID)
+UUID=$(virsh --connect qemu:///system domuuid <vm-name>)
+virsh --connect qemu:///system undefine <vm-name> --nvram || \
+  virsh --connect qemu:///system undefine <vm-name>
+virsh --connect qemu:///system define /tmp/vm-config.xml
+
+# Start VM
+vm-start <vm-name>
+
+# Connect with GL-compatible viewer
+vm-viewer <vm-name>  # Uses --attach flag automatically
+```
+
+**Requirements**:
+- Host GPU with OpenGL support
+- `/dev/dri/renderD128` render node available
+- `vm-viewer` uses `--attach` flag (required for GL)
+- Guest OS with VirtIO GPU drivers (Linux kernel has built-in support)
+
+**Verify 3D acceleration inside VM**:
+```bash
+# Check for virgl support
+dmesg | grep -i "drm.*virtio"
+# Should show: [drm] features: +virgl
+
+# Verify OpenGL
+glxinfo | grep -i "opengl renderer"
+# Should show: virgl or similar
+```
+
+---
+
+## 🔍 Troubleshooting
+
+### ❌ **VM Won't Start**
+
+**Check libvirtd service**:
+```bash
+systemctl status libvirtd.service
+journalctl -u libvirtd -n 50
+```
+
+**Check VM configuration**:
+```bash
+virsh --connect qemu:///system dominfo <vm-name>
+```
+
+**Common issues**:
+- Disk file doesn't exist or wrong permissions
+- Bridge network (br0) not available
+- Insufficient host resources (RAM, CPU)
+
+### 🌐 **Network Not Working**
+
+**Check bridge status**:
+```bash
+# Verify bridge exists and is up
+ip link show br0
+
+# Check physical adapter is enslaved
+bridge link show
+```
+
+**Check VM network**:
+```bash
+# View VM network configuration
+virsh --connect qemu:///system domiflist <vm-name>
+
+# Try to get IP (may fail if VM not configured)
+virsh --connect qemu:///system domifaddr <vm-name>
+```
+
+**Inside VM**:
+- Ensure network interface is up: `ip link`
+- Check DHCP client is running: `systemctl status NetworkManager`
+- Verify can reach router: `ping 192.168.1.1`
+
+### 🖥️ **Console Won't Connect**
+
+**For VMs with 3D acceleration enabled**, use `--attach` flag:
+```bash
+# Use vm-viewer wrapper (has --attach built-in)
+vm-viewer <vm-name>
+
+# Or direct virt-viewer with --attach
+virt-viewer --connect qemu:///system --attach <vm-name>
+```
+
+**Alternative connection methods**:
+```bash
+# GUI management
+virt-manager
+
+# VNC console (if configured, incompatible with GL)
+virsh --connect qemu:///system vncdisplay <vm-name>
+```
+
+**Error: "display can only be attached through libvirt with --attach"**:
+- VM has OpenGL (`&lt;gl enable='yes'>`) enabled
+- Must use `--attach` flag with virt-viewer
+- `vm-viewer` command handles this automatically
+
+### 💾 **Disk Full or Performance Issues**
+
+**Check actual usage**:
+```bash
+qemu-img info /mnt/data/vm/guest/guest-vm.qcow2
+```
+
+**Compact disk** (reclaim unused space):
+```bash
+# Convert to new file (VM must be stopped)
+qemu-img convert -O qcow2 /mnt/data/vm/guest/guest-vm.qcow2 /tmp/compressed.qcow2
+
+# Replace original (backup first!)
+mv /mnt/data/vm/guest/guest-vm.qcow2 /mnt/data/vm/guest/guest-vm.qcow2.bak
+mv /tmp/compressed.qcow2 /mnt/data/vm/guest/guest-vm.qcow2
+```
+
+---
+
+## 🔐 Security Considerations
+
+**Network Exposure**:
+- VMs are fully accessible on LAN (192.168.1.x)
+- Configure VM firewall inside guest OS
+- No external exposure unless router forwards ports
+
+**Access Control**:
+- libvirtd access requires user in `libvirtd` group
+- nicholas user has libvirtd access
+- VM disk files owned by root
+
+**Isolation**:
+- VM runs in KVM virtualized environment
+- No direct hardware access (uses virtio)
+- Separate from host filesystem
+
+---
+
+## 📖 Related Documentation
+
+### 🖥️ Desktop Environment
+- **[Desktop Overview](../desktop/overview.md)** - Main desktop documentation
+- **[Virtualization](../modules/desktop/virtualization.nix)** - libvirt configuration
+
+### 🌐 Networking
+- **[Infrastructure Overview](../infrastructure/overview.md)** - LAN topology
+- **[CMOS Host](../infrastructure/hosts-cmos.md)** - Bridge networking setup
+
+### 🛠️ System Configuration
+- **[VM Provisioner Module](../modules/desktop/vm-disk-provisioner.nix)** - NixOS module
+- **[CMOS Config](../hosts/cmos/default.nix)** - Host configuration
+
+---
+
+**Last Updated**: 2025-12-03
+**VM Provisioner**: ✅ Active
+**Network**: Bridge mode (LAN accessible)
+**Auto-start**: Disabled (manual start only)
+**3D Acceleration**: ✅ Enabled for nixvm (declarative)
+**Module**: `/etc/nixos/modules/desktop/vm-disk-provisioner.nix`
+
+---
+
+## 🖥️ nixvm - Primary Development VM
+
+### Overview
+
+**nixvm** is a fully NixOS-managed VM with its own flake configuration, providing a lightweight Hyprland desktop environment for development and testing.
+
+| Specification | Value |
+|--------------|-------|
+| **IP Address** | 192.168.1.14 (static) |
+| **MAC Address** | 52:54:00:0c:1f:21 |
+| **Disk Location** | `/mnt/data/vm/nixvm/nixvm.qcow2` |
+| **Desktop** | Hyprland Wayland compositor |
+| **Config** | `/etc/nixos/hosts/nixvm/` + `/etc/nixos/modules/vm/` |
+
+### Desktop Environment
+
+**Hyprland Components**:
+- **Waybar**: Status bar with Catppuccin Mocha theme and wlr/taskbar
+- **Wofi**: Application launcher (Super+D)
+- **Mako**: Notification daemon
+- **Hyprshell**: Alt+Tab window switcher with visual preview
+- **Kitty**: Terminal emulator
+
+**Key Shortcuts**:
+| Shortcut | Action |
+|----------|--------|
+| `Super+Return` | Open terminal |
+| `Super+D` / `Super+Space` | App launcher |
+| `Super+Q` | Close window |
+| `Super+F` | Fullscreen |
+| `Alt+Tab` | Window switcher |
+| `Super+1-5` | Switch workspace |
+
+### Deployment
+
+```bash
+# Deploy from cmos
+nixos-rebuild switch --flake .#nixvm --target-host nixvm.home.arpa
+
+# SSH access
+ssh nixvm.home.arpa
+```
+
+### nixvm-specific Modules
+
+| Module | Purpose |
+|--------|---------|
+| `modules/vm/hyprland-nixvm.nix` | Hyprland + Waybar + Hyprshell config |
+| `modules/vm/xfce-nixvm.nix` | Alternative XFCE desktop (switchable) |
+| `hosts/nixvm/default.nix` | Host-specific settings, networking |
+
+### Hyprshell Configuration
+
+Hyprshell provides a visual Alt+Tab window switcher:
+
+```bash
+# Environment variable to disable automatic keybind registration
+HYPRSHELL_SKIP_KEYBINDS=1
+
+# Manual keybind in hyprland.conf
+bind = ALT, TAB, exec, hyprshell socat '{"OpenSwitch":{"reverse":false}}'
+bind = ALT SHIFT, TAB, exec, hyprshell socat '{"OpenSwitch":{"reverse":true}}'
+```
+
+Config files:
+- `/etc/xdg/hyprshell/config.ron` - Hyprshell settings
+- `/etc/xdg/hyprshell/styles.css` - Visual styling (Catppuccin theme)
+
+---
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🖥️ [Desktop](../desktop/overview.md)*

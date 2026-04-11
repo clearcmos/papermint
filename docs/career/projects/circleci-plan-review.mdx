@@ -1,0 +1,50 @@
+---
+title: "CircleCI Terraform Plan Review Pipeline"
+description: "Okta infrastructure changes are managed via Terraform with CI/CD through CircleCI. Every PR triggers a Terragrunt plan that must be reviewed before approval...."
+---
+
+## The Problem
+
+Okta infrastructure changes are managed via Terraform with CI/CD through CircleCI. Every PR triggers a Terragrunt plan that must be reviewed before approval. Reviewing plans manually requires: waiting for the pipeline to finish, navigating CircleCI's UI to find the right job, downloading plan output, and cross-referencing changes against the PR diff to separate expected changes from drift.
+
+This process is tedious, error-prone, and a bottleneck for the team.
+
+## What Was Built
+
+An automated plan review pipeline (~1,000 lines across 4 scripts) that polls, fetches, analyzes, and reports on CircleCI Terraform plan output.
+
+### Components
+
+| Script | Purpose |
+|--------|---------|
+| `review-circleci-plan.sh` | Wrapper script — single command that orchestrates the full pipeline |
+| `poll-plan-jobs.py` | Polls CircleCI API for plan job completion status |
+| `fetch-plan.py` | Fetches plan output from completed jobs |
+| `analyze-plan.py` | Parses Terraform plan output for safety analysis — counts adds, changes, destroys, identifies force replacements and unexpected resource modifications |
+| `config_reader.py` | Shared configuration reader for CircleCI API credentials |
+
+### Workflow
+
+1. Run `review-circleci-plan.sh --check` (or `--check --pr 1234` for a specific PR)
+2. Script polls CircleCI until plan jobs complete
+3. Fetches all plan outputs from completed jobs
+4. Analyzes for safety: destroys, force replacements, unexpected changes
+5. Reports findings with a safety verdict and exit code
+
+### Exit Codes
+
+- `0`: Plans ready and safe — proceed with review request
+- `1`: Error or critical issues — review before proceeding
+- `2`: Plans still running — check again later
+- `3`: Plans not started yet — wait for pipeline
+
+### Integration with Claude Code
+
+This pipeline is integrated into the `okta-pr-workflow` skill. After pushing a PR, the agent runs the review script, cross-references the plan output against the code diff, identifies drift from unmerged PRs by other team members, and reports findings to the user — all without manual CircleCI navigation.
+
+## Impact
+
+- Plan review that previously took 15-20 minutes of manual CI navigation now runs with one command
+- Safety analysis catches destructive changes (destroys, force replacements) before they reach human review
+- Drift detection identifies changes not caused by the current PR, preventing accidental infrastructure modifications
+- Exit codes enable automation — the Claude Code skill uses them to decide whether to proceed with the Slack review request

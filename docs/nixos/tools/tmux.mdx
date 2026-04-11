@@ -1,0 +1,114 @@
+---
+title: "Tmux Configuration and Best Practices"
+description: "This system auto-starts tmux for persistent terminal sessions. When you open a terminal, it automatically attaches to or creates a tmux session named \"main\"."
+---
+
+## Overview
+
+This system auto-starts tmux for persistent terminal sessions. When you open a terminal, it automatically attaches to or creates a tmux session named "main".
+
+## Auto-Start Configuration
+
+Located in `modules/core/system.nix:122-126`:
+
+```bash
+programs.bash.interactiveShellInit = ''
+  if [[ -z "$TMUX" && "$TERM_PROGRAM" != "vscode" && "$TERM_PROGRAM" != "cursor" ]]; then
+    tmux attach-session -t main || tmux new-session -s main
+  fi
+'';
+```
+
+## Persistence Behavior
+
+### Local Terminal (Konsole)
+- Jobs continue running when you close Konsole
+- All tabs attach to the same "main" tmux session
+- Processes persist because they run inside tmux, not directly in Konsole
+
+### SSH Sessions
+- SSH works perfectly with tmux windows and panes
+- Single SSH connection can manage multiple tmux windows/panes
+- Multiple SSH sessions can attach to the same tmux session
+- All work persists on the server regardless of network interruptions
+
+## Managing Multiple Terminals
+
+### Option 1: Named Sessions per Context
+```bash
+tmux new-session -s project1
+tmux new-session -s monitoring 
+tmux new-session -s development
+```
+
+### Option 2: Single Session with Multiple Windows
+- Stay in one tmux session, create multiple windows (Ctrl+b, c)
+- Switch between windows (Ctrl+b, 0-9 or Ctrl+b, n/p)
+
+### Option 3: Modified Auto-attach Logic
+```bash
+# Session based on current directory
+tmux attach-session -t "$(basename "$PWD")" || tmux new-session -s "$(basename "$PWD")"
+
+# Prompt for session name
+tmux list-sessions 2>/dev/null && read -p "Session name: " session_name
+tmux attach-session -t "$session_name" || tmux new-session -s "$session_name"
+```
+
+## Key Tmux Commands
+
+### Session Management
+- `tmux list-sessions` - List all sessions
+- `tmux attach-session -t &lt;name>` - Attach to session
+- `tmux new-session -s &lt;name>` - Create named session
+- `Ctrl+b, d` - Detach from current session
+
+### Windows and Panes
+- `Ctrl+b, c` - Create new window
+- `Ctrl+b, %` - Split pane vertically
+- `Ctrl+b, "` - Split pane horizontally
+- `Ctrl+b, arrow keys` - Navigate between panes
+- `Ctrl+b, 0-9` - Switch to window number
+
+## SSH Workflow Examples
+
+### Single SSH Connection
+```bash
+ssh user@server
+# Auto-attaches to tmux session "main"
+# Create windows: Ctrl+b, c
+# Split panes: Ctrl+b, % or Ctrl+b, "
+# All work persists on server
+```
+
+### Multiple SSH Sessions to Same Tmux
+```bash
+# Terminal 1
+ssh user@server  # Attaches to "main"
+
+# Terminal 2 (different local terminal)
+ssh user@server  # Also attaches to same "main"
+```
+
+Both see identical tmux environment with shared windows, panes, and processes.
+
+### Different Named Sessions
+```bash
+# SSH session 1
+ssh user@server
+tmux detach  # Ctrl+b, d
+tmux new-session -s project1
+
+# SSH session 2  
+ssh user@server
+tmux detach
+tmux new-session -s monitoring
+```
+
+## Advantages
+
+- **Persistence**: Processes survive terminal closures and network interruptions
+- **Portability**: Reconnect from any device and resume work
+- **Sharing**: Multiple users can attach to same session for collaboration
+- **Organization**: Use windows/panes instead of multiple terminal tabs
+- **Efficiency**: One SSH connection handles multiple workspaces

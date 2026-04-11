@@ -1,0 +1,384 @@
+---
+title: "Immich Photo Server"
+description: "*Self-hosted photo and video management with AI-powered search*"
+---
+
+## 🎯 Overview
+
+Immich is a high-performance self-hosted photo and video management solution running on the **jimmich** host. It provides Google Photos-like functionality with automatic backups, facial recognition, smart search, and mobile apps.
+
+**Key Features**:
+- 🔍 **AI-Powered Search**: Machine learning for photo recognition and keyword search
+- 📱 **Mobile Apps**: iOS and Android apps with automatic photo backup
+- 🗺️ **Geolocation**: Map view and reverse geocoding for photo locations
+- 🔐 **OAuth Authentication**: Google OAuth integration for secure login
+- 💾 **Network Storage**: Photos stored on CIFS mount for redundancy
+- 🗂️ **Smart Organization**: Automatic date-based folder structure
+
+---
+
+## 🏗️ Architecture
+
+### 📊 **Component Stack**
+```
+[Mobile/Web Client]
+        ↓
+[Traefik] (gallery.bedrosn.com:443)
+        ↓
+[Immich Server] (192.168.1.10:2283)
+        ├─ [PostgreSQL Database]
+        ├─ [Machine Learning Service]
+        ├─ [Google OAuth] (Authentication)
+        └─ [Storage] (/mnt/immich → NAS)
+```
+
+### 🖥️ **Host Information**
+- **Host**: jimmich (192.168.1.10)
+- **Port**: 2283 (backend), 443 (Traefik frontend)
+- **Domain**: https://gallery.bedrosn.com
+- **Storage**: `/mnt/immich` (CIFS mount to NAS)
+- **Database**: PostgreSQL (automatically created)
+
+---
+
+## 🔧 Configuration
+
+### 📁 **Storage Structure**
+
+Immich uses a multi-directory structure on the CIFS mount:
+
+```
+/mnt/immich/
+├── upload/          # Uploaded photos (staging)
+├── library/         # Permanent photo storage
+├── thumbs/          # Generated thumbnails
+├── profile/         # User profile pictures
+├── encoded-video/   # Transcoded videos
+└── backups/         # Database backups
+```
+
+**File Organization**: `{{y}}/{{MM}}/{{y}}-{{MM}}-{{dd}}_{{HH}}{{mm}}{{ss}}.{{ext}}`
+- Example: `2025/10/2025-10-20_143052.jpg`
+
+### 🔐 **Authentication**
+
+**OAuth2 Integration** (Google IDP):
+- **Provider**: Google Cloud OAuth
+- **Auto-register**: Disabled (security: prevents random signups)
+- **Admin User**: Pre-created with email matching OAuth account
+- **Mobile Support**: HTTPS redirect override for mobile apps
+
+**Redirect URIs** (Google OAuth configuration):
+- `https://gallery.bedrosn.com/auth/login` - Web login
+- `https://gallery.bedrosn.com/user-settings` - Web settings
+- `https://gallery.bedrosn.com/api/oauth/mobile-redirect` - Mobile app
+
+**Security Features**:
+- Password login disabled (OAuth-only)
+- First login auto-links to pre-created admin account by email match
+- No automatic user registration
+
+### 🔑 **Secrets Management**
+
+Immich uses three agenix-encrypted secrets:
+
+```nix
+# modules/core/agenix-secrets.nix
+age.secrets = {
+  immich-admin-email = {
+    file = ../secrets/immich-admin-email.age;
+    owner = "postgres";
+  };
+  immich-oauth-client-id = {
+    file = ../secrets/immich-oauth-client-id.age;
+    owner = "immich";
+  };
+  immich-oauth-client-secret = {
+    file = ../secrets/immich-oauth-client-secret.age;
+    owner = "immich";
+  };
+};
+```
+
+**Creating Secrets**:
+```bash
+# 1. Admin email
+echo "your-email@gmail.com" | \
+  ( cd /etc/nixos/secrets && nix run github:ryantm/agenix -- -e immich-admin-email.age -i ../keys/cmos-agenix.key )
+
+# 2. OAuth Client ID (from Google Cloud Console)
+echo "YOUR_CLIENT_ID.apps.googleusercontent.com" | \
+  ( cd /etc/nixos/secrets && nix run github:ryantm/agenix -- -e immich-oauth-client-id.age -i ../keys/cmos-agenix.key )
+
+# 3. OAuth Client Secret (from Google Cloud Console)
+echo "YOUR_CLIENT_SECRET" | \
+  ( cd /etc/nixos/secrets && nix run github:ryantm/agenix -- -e immich-oauth-client-secret.age -i ../keys/cmos-agenix.key )
+
+# 4. Backup to 1Password
+python3 /etc/nixos/scripts/backup-secrets.py
+```
+
+---
+
+## 🚀 Deployment
+
+### 📋 **Installation Steps**
+
+1. **Create OAuth Application** (Google Cloud Console):
+   - Go to https://console.cloud.google.com/apis/credentials
+   - Create OAuth 2.0 Client ID (Web application)
+   - Add authorized redirect URIs (see Authentication section above)
+   - Save Client ID and Client Secret
+
+2. **Configure Secrets**:
+   ```bash
+   # Create secrets (run commands from above)
+   # Add secrets to secrets.nix
+   # Update agenix-secrets.nix
+   ```
+
+3. **Enable Service**:
+   ```nix
+   # modules/services/immich.nix is already enabled for jimmich host
+   # Service auto-starts on jimmich
+   ```
+
+4. **Add DNS Record**:
+   ```nix
+   # modules/services/domains.nix
+   domains = [
+     # ...
+     "gallery.bedrosn.com"
+   ];
+   ```
+
+5. **Configure Traefik**:
+   ```nix
+   # modules/services/traefik.nix
+   routers.immich = {
+     rule = "Host(`gallery.bedrosn.com`)";
+     service = "immich";
+     tls.certResolver = "le";
+   };
+
+   services.immich = {
+     loadBalancer.servers = [
+       { url = "http://192.168.1.10:2283"; }
+     ];
+   };
+   ```
+
+6. **Deploy**:
+   ```bash
+   nixos-rebuild switch --flake .#jimmich --target-host jimmich.home.arpa
+   ```
+
+### ✅ **Verification**
+
+```bash
+# Check service status
+ssh root@jimmich.home.arpa systemctl status immich-server
+ssh root@jimmich.home.arpa systemctl status immich-machine-learning
+
+# Check logs
+ssh root@jimmich.home.arpa journalctl -u immich-server -n 50
+
+# Test web access
+curl -I https://gallery.bedrosn.com
+
+# Verify storage initialization
+ssh root@jimmich.home.arpa ls -la /mnt/immich/
+```
+
+---
+
+## 🛠️ Management
+
+### 📊 **Service Control**
+
+```bash
+# Status
+ssh root@jimmich.home.arpa systemctl status immich-server
+ssh root@jimmich.home.arpa systemctl status immich-machine-learning
+
+# Restart
+ssh root@jimmich.home.arpa systemctl restart immich-server
+ssh root@jimmich.home.arpa systemctl restart immich-machine-learning
+
+# Logs
+ssh root@jimmich.home.arpa journalctl -u immich-server -f
+ssh root@jimmich.home.arpa journalctl -u immich-machine-learning -f
+```
+
+### 💾 **Database Management**
+
+```bash
+# Connect to PostgreSQL
+ssh root@jimmich.home.arpa sudo -u postgres psql -d immich
+
+# Check database size
+ssh root@jimmich.home.arpa sudo -u postgres psql -d immich -c "SELECT pg_size_pretty(pg_database_size('immich'));"
+
+# Backup database
+ssh root@jimmich.home.arpa sudo -u postgres pg_dump immich > immich-backup.sql
+```
+
+### 🗂️ **Storage Management**
+
+```bash
+# Check storage usage
+ssh root@jimmich.home.arpa du -sh /mnt/immich/*
+
+# Verify folder structure
+ssh root@jimmich.home.arpa find /mnt/immich -name ".immich" -type f
+
+# Clean up deleted photos (after trash retention period)
+# Photos in trash are automatically deleted after 30 days
+```
+
+---
+
+## 🚨 Troubleshooting
+
+### ❌ **Service Won't Start**
+
+```bash
+# Check service status
+ssh root@jimmich.home.arpa systemctl status immich-server
+
+# Check dependencies
+ssh root@jimmich.home.arpa systemctl list-dependencies immich-server --failed
+
+# Verify CIFS mount
+ssh root@jimmich.home.arpa mount | grep immich
+
+# Check storage initialization
+ssh root@jimmich.home.arpa systemctl status immich-init-storage
+```
+
+### 🔐 **OAuth Login Issues**
+
+**Problem**: "Login with Google" button doesn't work
+
+**Solutions**:
+1. Verify redirect URIs in Google Cloud Console match exactly
+2. Check OAuth client ID and secret are correct:
+   ```bash
+   ssh root@jimmich.home.arpa cat /run/agenix/immich-oauth-client-id
+   ssh root@jimmich.home.arpa cat /run/agenix/immich-oauth-client-secret
+   ```
+3. Verify config generation:
+   ```bash
+   ssh root@jimmich.home.arpa systemctl status immich-generate-config
+   ssh root@jimmich.home.arpa cat /var/lib/immich/config.json | jq '.oauth'
+   ```
+
+### 📱 **Mobile App Issues**
+
+**Problem**: Mobile app can't authenticate
+
+**Solution**: Verify mobile redirect override is configured:
+```bash
+ssh root@jimmich.home.arpa cat /var/lib/immich/config.json | jq '.oauth.mobileOverrideEnabled'
+# Should return: true
+
+ssh root@jimmich.home.arpa cat /var/lib/immich/config.json | jq '.oauth.mobileRedirectUri'
+# Should return: "https://gallery.bedrosn.com/api/oauth/mobile-redirect"
+```
+
+### 💾 **Storage Issues**
+
+**Problem**: Photos not uploading
+
+**Solutions**:
+1. Check CIFS mount:
+   ```bash
+   ssh root@jimmich.home.arpa mount | grep immich
+   ssh root@jimmich.home.arpa ls -la /mnt/immich/
+   ```
+
+2. Verify permissions:
+   ```bash
+   ssh root@jimmich.home.arpa ls -ld /mnt/immich/upload
+   # Should be owned by immich:immich
+   ```
+
+3. Check disk space:
+   ```bash
+   ssh root@jimmich.home.arpa df -h /mnt/immich
+   ```
+
+### 🤖 **Machine Learning Issues**
+
+**Problem**: Face detection or smart search not working
+
+**Solutions**:
+1. Check ML service status:
+   ```bash
+   ssh root@jimmich.home.arpa systemctl status immich-machine-learning
+   ```
+
+2. Check ML logs:
+   ```bash
+   ssh root@jimmich.home.arpa journalctl -u immich-machine-learning -n 100
+   ```
+
+3. Restart ML service:
+   ```bash
+   ssh root@jimmich.home.arpa systemctl restart immich-machine-learning
+   ```
+
+---
+
+## 📱 Mobile Apps
+
+### 📥 **Installation**
+
+- **iOS**: https://apps.apple.com/app/immich/id1613945652
+- **Android**: https://play.google.com/store/apps/details?id=app.alextran.immich
+
+### ⚙️ **Configuration**
+
+1. **Server URL**: `https://gallery.bedrosn.com`
+2. **Login**: Click "Login with Google"
+3. **Auto-backup**: Enable in app settings
+4. **Background upload**: Enable for automatic photo backup
+
+---
+
+## 🔒 Security
+
+### 🛡️ **Security Features**
+
+- ✅ **OAuth-only authentication** - No password login
+- ✅ **HTTPS encryption** - TLS 1.3 via Traefik
+- ✅ **No auto-registration** - Admin must pre-create users
+- ✅ **Encrypted secrets** - Agenix for sensitive credentials
+- ✅ **Network isolation** - Backend not exposed to internet
+
+### 🔐 **Access Control**
+
+Currently **single-user** configuration:
+- Only the pre-created admin account can log in
+- Account auto-links by email match on first OAuth login
+- To add users: Create accounts in database or enable OAuth auto-registration
+
+---
+
+## 📖 Related Documentation
+
+- **[Services Overview](../services/overview.md)** - All infrastructure services
+- **[Traefik Configuration](../services/traefik.md)** - Reverse proxy setup
+- **[Secret Management](../security/secrets-agenix.md)** - Agenix workflow
+- **[OAuth2 Configuration](../security/oauth2-proxy-technical-configuration.md)** - OAuth setup
+- **[Host: jimmich](../infrastructure/hosts-jimmich.md)** - Host configuration
+
+---
+
+**Last Updated**: 2025-10-20
+**Service URL**: https://gallery.bedrosn.com
+**Documentation**: https://immich.app/docs
+**Mobile Apps**: iOS & Android available
+
+---
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🌐 [Services](../services/overview.md) | 🔐 [Security](../security/overview.md)*

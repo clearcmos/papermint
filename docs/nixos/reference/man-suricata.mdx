@@ -1,0 +1,302 @@
+---
+title: "suricata"
+description: "suricata - Manage Suricata alert suppression rules for Clear NDR"
+---
+
+# SYNOPSIS
+
+**suricata** [*OPTION*] [*SIG_ID*]
+
+# DESCRIPTION
+
+**suricata** is a command-line utility for managing Suricata alert suppression rules in the Clear NDR network intrusion detection system. It provides a safe, declarative way to suppress false-positive alerts by modifying the NixOS configuration.
+
+All changes are made to `/etc/nixos/modules/services/clear-ndr.nix` and require rebuilding the misc host to take effect.
+
+# OPTIONS
+
+## --suppress-add
+
+**suricata --suppress-add** *SIG_ID*
+: Add a suppression rule for the specified signature ID
+
+*SIG_ID*
+: Numeric signature ID to suppress (must be a valid Suricata signature ID)
+
+## --suppress-remove
+
+**suricata --suppress-remove** *SIG_ID*
+: Remove a suppression rule for the specified signature ID
+
+*SIG_ID*
+: Numeric signature ID to remove from suppressions
+
+## --suppress-list
+
+**suricata --suppress-list**
+: List all current suppression rules with signature IDs
+
+## --suppress-edit
+
+**suricata --suppress-edit**
+: Open suppression rules in text editor for manual editing
+
+## -h, --help
+
+**suricata -h**
+**suricata --help**
+: Show help message with usage examples
+
+# WORKFLOW
+
+## Adding Suppressions
+
+1. **Identify False Positive**: Review alerts in Clear NDR (https://suricata.bedrosn.com)
+2. **Note Signature ID**: Find the `sig_id` of the alert (e.g., 2027397)
+3. **Add Suppression**: `suricata --suppress-add 2027397`
+4. **Rebuild System**: Prompted to rebuild misc host automatically
+
+## Removing Suppressions
+
+1. **List Current Rules**: `suricata --suppress-list`
+2. **Remove Rule**: `suricata --suppress-remove 2027397`
+3. **Rebuild System**: Apply changes by rebuilding
+
+## Bulk Editing
+
+1. **Open Editor**: `suricata --suppress-edit`
+2. **Modify Rules**: Edit suppression rules directly
+3. **Save and Exit**: Rebuild when prompted
+
+# EXAMPLES
+
+## Add Suppression
+
+Suppress signature ID 2027397 (common false positive):
+```bash
+suricata --suppress-add 2027397
+```
+
+Output:
+```
+✓ Added suppression rule for sig_id 2027397
+
+Rebuild misc host now to apply changes? [y/N]
+```
+
+## Remove Suppression
+
+Remove suppression for signature 2027397:
+```bash
+suricata --suppress-remove 2027397
+```
+
+## List Suppressions
+
+View all current suppression rules:
+```bash
+suricata --suppress-list
+```
+
+Output:
+```
+Current Suricata suppression rules:
+-----------------------------------
+  • sig_id 2027397 - suppress gen_id 1, sig_id 2027397
+  • sig_id 2100498 - suppress gen_id 1, sig_id 2100498
+
+Total: 2 suppression rule(s)
+```
+
+## Edit Manually
+
+Open suppression section in editor:
+```bash
+suricata --suppress-edit
+```
+
+Opens `/etc/nixos/modules/services/clear-ndr.nix` at the suppression section.
+
+# CONFIGURATION FILE
+
+Suppression rules are stored in `/etc/nixos/modules/services/clear-ndr.nix`:
+
+```nix
+suppress.conf = ''
+  # Suricata suppression rules
+  # Format: suppress gen_id <gid>, sig_id <sid>
+  suppress gen_id 1, sig_id 2027397
+  suppress gen_id 1, sig_id 2100498
+  # Add more suppression rules below as needed
+'';
+```
+
+**Marker Line**: The comment `# Add more suppression rules below as needed` serves as an insertion point for new rules.
+
+# SUPPRESSION RULE FORMAT
+
+Suricata suppression rules follow this format:
+
+```
+suppress gen_id 1, sig_id <SIGNATURE_ID>
+```
+
+**gen_id**
+: Generator ID (always 1 for standard Suricata rules)
+
+**sig_id**
+: Signature ID of the alert to suppress
+
+**Advanced Formats** (for manual editing):
+```
+suppress gen_id 1, sig_id 2027397
+suppress gen_id 1, sig_id 2027397, track by_src, ip 192.168.1.0/24
+suppress gen_id 1, sig_id 2027397, track by_dst, ip 10.0.0.1
+```
+
+# EXIT STATUS
+
+**0**
+: Operation completed successfully
+
+**1**
+: Error occurred (file not found, invalid signature ID, rule not found, or user cancellation)
+
+# REBUILDING
+
+After making changes, the system prompts for rebuild:
+
+```
+Rebuild misc host now to apply changes? [y/N]
+```
+
+**Automatic Rebuild**:
+- Enter 'y' to rebuild immediately
+- Runs: `nixos-rebuild switch --flake .#misc --target-host misc.home.arpa`
+
+**Manual Rebuild**:
+- Enter 'n' to skip automatic rebuild
+- Rebuild later:
+  ```bash
+  cd /etc/nixos
+  nixos-rebuild switch --flake .#misc --target-host misc.home.arpa
+  ```
+
+# IDENTIFYING FALSE POSITIVES
+
+## Finding Signature IDs
+
+1. **Access Clear NDR**: https://suricata.bedrosn.com
+2. **View Alerts**: Navigate to Events → Alerts
+3. **Find sig_id**: Look for the signature ID in alert details
+4. **Verify Pattern**: Check if alert appears frequently with known-good traffic
+
+## Common False Positives
+
+**Internal Scanners**:
+- Network monitoring tools
+- Vulnerability scanners
+- IT management systems
+
+**Legitimate Traffic**:
+- VPN connections
+- File sharing between known hosts
+- Application-specific protocols
+
+**Research First**:
+```bash
+# Search for signature information
+grep -r "sid:2027397" /var/lib/clear-ndr/
+
+# Check if widely reported as false positive
+# (search online or Suricata community forums)
+```
+
+# SECURITY CONSIDERATIONS
+
+**Review Before Suppressing**:
+- ⚠️ Only suppress verified false positives
+- ✅ Research unfamiliar signatures before suppressing
+- ✅ Document reason for suppression (add comments in config)
+- ⚠️ Periodically review suppression list
+
+**Best Practices**:
+1. **Investigate alerts** before suppressing
+2. **Use specific suppressions** (by IP/network when possible)
+3. **Document decisions** in configuration comments
+4. **Regular audits** of suppression list
+5. **Monitor for changes** in alert patterns
+
+# TROUBLESHOOTING
+
+## File Not Found
+
+```
+Error: /etc/nixos/modules/services/clear-ndr.nix not found
+```
+
+**Solution**: Verify you're running on the correct host:
+```bash
+hostname  # Should be 'cmos' (where /etc/nixos is managed)
+ssh misc.home.arpa  # Clear NDR runs on misc, managed from cmos
+```
+
+## Signature Already Suppressed
+
+```
+Suppression rule for sig_id 2027397 already exists
+Current rule:
+suppress gen_id 1, sig_id 2027397
+```
+
+**Solution**: Rule already exists, no action needed.
+
+## Signature Not Found
+
+```
+Error: No suppression rule found for sig_id 2027397
+```
+
+**Solution**: Signature is not currently suppressed. Use `--suppress-list` to see active rules.
+
+## Changes Not Applied
+
+**Verify rebuild completed**:
+```bash
+# Check misc host
+ssh misc.home.arpa 'systemctl status clear-ndr.service | grep -A2 Active'
+
+# Check Suricata container
+ssh misc.home.arpa 'docker exec $(docker ps -qf name=suricata) \
+  cat /etc/suricata/suppress.conf'
+```
+
+# RELATED DOCUMENTATION
+
+**Clear NDR Documentation**:
+- [Clear NDR Guide](../guides/suricata.md) - Complete deployment and management guide
+- [Services Overview](../services/overview.md) - All deployed services
+
+**Suricata Resources**:
+- Official docs: https://docs.suricata.io/
+- Suppression docs: https://docs.suricata.io/en/latest/configuration/suricata-yaml.html#suppression
+
+# SEE ALSO
+
+**clear-ndr-status**(1) - Check Clear NDR container status
+**clear-ndr-logs**(1) - View Clear NDR container logs
+**journalctl**(1) - View systemd service logs
+
+# AUTHOR
+
+Part of the NixOS core modules defined in `/etc/nixos/modules/core/suricata-manage.nix`.
+
+---
+
+**Last Updated**: 2025-10-18
+**Module**: `/etc/nixos/modules/core/suricata-manage.nix`
+**Clear NDR Host**: misc (192.168.1.5)
+**Web Interface**: https://suricata.bedrosn.com
+
+---
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🔧 [Tools](../tools/overview.md) | 🛡️ [Suricata](../guides/suricata.md)*

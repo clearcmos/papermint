@@ -1,0 +1,116 @@
+---
+title: "Google Workspace Automation Suite"
+description: "Google Workspace administration at scale (1,000+ users) involves complex operations across Drive, Gmail, Calendar, Groups, and Admin SDK. Many operations — o..."
+---
+
+## The Problem
+
+Google Workspace administration at scale (1,000+ users) involves complex operations across Drive, Gmail, Calendar, Groups, and Admin SDK. Many operations — offboarding file transfers, shared drive ACL audits, Gmail Vault restorations, calendar management — require multi-step API workflows that the admin console doesn't support.
+
+## What Was Built
+
+28 purpose-built Google API automation tools (~15,900 lines of Python) plus GAMADV-XTD3 scripts and Apps Script integrations.
+
+### Drive & File Management
+
+| Tool | Purpose |
+|------|---------|
+| `transfer-drive-objects-ownership-and-report` | Bulk ownership transfer of Drive files with full reporting — critical for offboarding |
+| `move-domain-owned-files` | Move domain-owned files between accounts with permission management |
+| `export-shared-drive-acl` | Export access control lists for shared drives |
+| `report-shared-drive-acls-to-sheet` | ACL audit report written directly to Google Sheets |
+| `report-shared-drive-acls-to-sheet-optimized` | Performance-optimized version with threading |
+| `report-shared-drive-files-anyone-with-link-to-csv` | Security audit: find all "anyone with the link" shared files |
+| `audit-orphaned-shared-drives` | Detect shared drives with no active managers |
+| `export-drive-folder-contents-to-csv` | Recursive folder content export with metadata |
+| `list-drive-files-by-owner-in-folder-to-sheet` | Per-owner file listing for a specific folder |
+| `analyze-drive-folders-and-update-sheet` | Unified archive cleanup — Gmail labels + Drive folders with BigQuery last-access data, Google Sheets reporting, and outreach email generation (1,294 lines) |
+
+### Gmail Operations
+
+| Tool | Purpose |
+|------|---------|
+| `restore-vault-matter-to-mailbox` | Restore messages from Google Vault exports into destination mailboxes with preserved threading, timestamps, and attachments. Uses topological sorting for conversation thread reconstruction. (917 lines) |
+| `delete-gmail-label-and-messages-interactive` | Interactive Gmail label and message cleanup |
+| `delete-gmail-labels-and-messages-batch` | Batch version for large-scale label cleanup |
+| `email-label-checker` | Audit Gmail labels across accounts |
+| `gmail-label-confirm` | Verify label operations completed successfully |
+| `forward-emails-by-message-id-from-csv` | Bulk email forwarding from CSV input |
+| `investigate-gmail-access-by-ip` | Security investigation: trace Gmail access by IP address |
+| `email-forwarder` | Automated email forwarding configuration |
+
+### Calendar Management
+
+| Tool | Purpose |
+|------|---------|
+| `transfer-calendar-event-ownership-interactive` | Transfer calendar event ownership (critical for offboarding executive assistants) |
+| `check-calendar-availability-cli` | CLI tool for checking calendar availability across users |
+| `check-calendar-availability-gui` | GUI version for non-technical users |
+| `audit-public-calendar-sharing` | Security audit: detect calendars shared publicly |
+
+### Groups & Directory
+
+| Tool | Purpose |
+|------|---------|
+| `report-group-settings-and-members-to-sheet` | Export group settings + full membership to Google Sheets |
+| `groups-last-post-date` | Identify dormant Google Groups by last post date |
+| `assign-archived-user-licenses` | Manage Google Workspace Archive User licenses |
+
+### Meeting Intelligence
+
+| Tool | Purpose |
+|------|---------|
+| `meeting-analysis/detect-one-on-ones` | Analyze calendar data to detect one-on-one meeting patterns |
+
+### Notable Technical Details
+
+**Vault Matter Restoration (917 lines):**
+- Creates temporary Vault Matter for export (automatically cleaned up)
+- Rebuilds conversation threading using In-Reply-To and References headers
+- Topologically sorts messages so parent messages are inserted before replies
+- Uses Gmail `messages.insert()` API (100 msg/min rate limit management)
+- Checkpoint/resume system for large restorations
+- Progress tracking with estimated completion time
+
+**Archive Cleanup (1,294 lines):**
+- Combines Gmail label audit + Drive folder analysis in one workflow
+- Queries BigQuery for file last-access data
+- Concurrent processing with ThreadPoolExecutor
+- Writes results directly to dated Google Sheets tabs
+- Generates outreach emails to file owners about inactive content
+
+### Google Cloud Infrastructure Tools (10 shell scripts, ~950 lines)
+
+| Tool | Purpose |
+|------|---------|
+| `billing-iam-auditor` | Audit IAM roles on billing accounts |
+| `billing-iam-adder/remover` | Manage billing account IAM bindings |
+| `iam-permission-checker` | Check specific IAM permissions across projects |
+| `iam-member-remover` | Remove IAM members from projects |
+| `iam-project-billing-adder` | Link projects to billing accounts |
+| `dataflow-job-network-identifier` | Identify network configurations for Dataflow jobs |
+| `dataflow-auditor` | Audit Dataflow job configurations |
+| `gws-user-status-checker` | Check Google Workspace user status via Admin SDK |
+
+### Apps Script Integrations
+
+| Tool | Purpose |
+|------|---------|
+| `google-meet-participant-tracker` | Track Google Meet attendance via Calendar API and Apps Script |
+| `update-mailing-list-spreadsheet` | Sync mailing list memberships to a Google Sheet |
+
+### GAM Scripts
+
+| Tool | Purpose |
+|------|---------|
+| `strip-acls` | Bulk ACL removal using GAMADV-XTD3 |
+| `single-item-ownership-checker` | Check ownership of specific Drive items |
+
+## Impact
+
+- Offboarding file transfers that took hours of manual work are now automated with full audit trails
+- Vault matter restoration preserves conversation threading — previously, restored emails lost their thread context
+- Shared drive ACL audits that were impossible manually (thousands of drives, hundreds of thousands of files) now run on schedule
+- Security audits (public calendar sharing, "anyone with link" files, orphaned shared drives) catch exposure that was previously invisible
+- Archive cleanup with BigQuery access data enables data-driven decisions about content retention
+- The entire suite reduces Google Workspace administration from a full-time activity to automated workflows with human oversight

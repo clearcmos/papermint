@@ -1,0 +1,530 @@
+---
+title: "Firebase Cloud Messaging (FCM) Infrastructure"
+description: "Complete documentation for the Firebase Cloud Messaging notification infrastructure, including the test web app and server-side notification sending."
+---
+
+**Last Updated**: 2025-11-11
+
+Complete documentation for the Firebase Cloud Messaging notification infrastructure, including the test web app and server-side notification sending.
+
+---
+
+## 📋 Table of Contents
+- [Overview](#-overview)
+- [Architecture](#-architecture)
+- [Components](#-components)
+- [Web App Usage](#-web-app-usage)
+- [Server-Side Notifications](#-server-side-notifications)
+- [Secrets Management](#-secrets-management)
+- [Testing](#-testing)
+- [Troubleshooting](#-troubleshooting)
+
+---
+
+## 🎯 Overview
+
+The Firebase Cloud Messaging (FCM) infrastructure provides server-to-client push notifications for web and Android applications. The system includes:
+
+- **Test Web App** (`firebase.bedrosn.com`) - Browser-based FCM testing interface
+- **FCM Test Command** (`fcm-test`) - CLI tool for sending notifications from the server
+- **Android App** - FCM Notifier Android app (separate repository)
+
+**Key Features:**
+- High-priority, data-only FCM messages for reliable Android delivery
+- Agenix-encrypted secrets for device tokens and service accounts
+- Public web interface for testing FCM in browsers
+- Server-side Python script for programmatic notification sending
+
+---
+
+## 🏗 Architecture
+
+### Service Flow
+
+```
+┌─────────────────┐         ┌──────────────────┐
+│  Web Browser    │         │  Android Device  │
+│  (firebase.     │         │  (FCM Notifier   │
+│   bedrosn.com)  │         │   app)           │
+└────────┬────────┘         └────────┬─────────┘
+         │                           │
+         │ Register FCM Token        │ Register FCM Token
+         ▼                           ▼
+┌────────────────────────────────────────────────┐
+│         Firebase Cloud Messaging               │
+│         (Google Infrastructure)                │
+└────────────────┬───────────────────────────────┘
+                 │
+                 │ Store token in agenix
+                 ▼
+┌────────────────────────────────────────────────┐
+│         misc.home.arpa (NixOS Server)          │
+│  ┌──────────────────┐  ┌──────────────────┐   │
+│  │ firebase-test.   │  │ fcm-test         │   │
+│  │ service          │  │ command          │   │
+│  │ (Port 8107)      │  │ (Python script)  │   │
+│  └──────────────────┘  └──────────────────┘   │
+│                                                │
+│  Secrets (agenix):                             │
+│  - firebase-config.age (Web Push VAPID)        │
+│  - firebase-service-account.age (Admin SDK)    │
+│  - fcm-device-token.age (Target device)        │
+└────────────────────────────────────────────────┘
+```
+
+### Message Types
+
+**CRITICAL**: The system uses **data-only messages** for Android reliability:
+
+- **Data-Only Messages** (Used): Always trigger `onMessageReceived()` in Android app, even when app is in background
+- **Notification Messages** (Avoided): Android auto-handles when app is backgrounded, preventing custom handling
+
+---
+
+## 🔧 Components
+
+### 1. Firebase Test Web App
+
+**Location**: `modules/services/firebase-test.nix`
+**Source Files**: `apps/firebase-test/`
+**URL**: https://firebase.bedrosn.com
+**Port**: 8107 (localhost only, proxied via Traefik)
+
+**Service Details:**
+```nix
+systemd.services.firebase-test = {
+  description = "Firebase Cloud Messaging Test Web App";
+  # Serves static HTML/JS with Firebase SDK
+  # Python HTTP server on localhost:8107
+  # Secrets injected via sed at runtime
+};
+```
+
+**Files:**
+- `index.html` - Main HTML page with Firebase SDK integration
+- `app.js.template` - JavaScript with `__FIREBASE_CONFIG__` and `__VAPID_KEY__` placeholders
+- `firebase-messaging-sw.js.template` - Service Worker for background message handling
+- `manifest.json` - PWA manifest for installability
+
+**Security:**
+- No authentication (public test interface)
+- `strip-server-headers` middleware applied
+- Secrets (Firebase config, VAPID key) never exposed to source control
+- Injected at runtime from agenix secrets
+
+### 2. FCM Test Command
+
+**Location**: `scripts/fcm-test.py`
+**Command**: `fcm-test`
+**Configuration**: `modules/core/packages.nix`
+
+**Usage:**
+```bash
+# Send test notification (uses stored token from agenix)
+fcm-test
+
+# Custom message
+fcm-test --title "Alert" --body "Something happened"
+
+# Send to specific token
+fcm-test --token "fcm-token-here" --title "Test" --body "Message"
+```
+
+**Implementation:**
+```python
+# Data-only message structure (no 'notification' payload)
+message = messaging.Message(
+    data={
+        'title': title,
+        'body': body,
+    },
+    android=messaging.AndroidConfig(
+        priority='high',  # HIGH priority for immediate delivery
+    ),
+    token=token,
+)
+```
+
+**Dependencies:**
+- Python 3 with `firebase-admin` package
+- Reads from `/run/agenix/fcm-device-token` (device token)
+- Reads from `/run/agenix/firebase-service-account` (Admin SDK credentials)
+
+### 3. Traefik Routing
+
+**Router Configuration:**
+```nix
+firebase-test = {
+  rule = "Host(`firebase.bedrosn.com`)";
+  service = "firebase-test";
+  tls = {
+    certResolver = "le";
+  };
+  middlewares = [ "enhanced-security-headers" "strip-server-headers" ];
+};
+```
+
+**Why No Authentication?**
+- Public test interface for FCM token registration (Firebase configs are meant to be public)
+- No sensitive data exposed (Firebase Admin SDK credentials stay server-side in agenix)
+- Users can only register their own browser/device tokens
+- Actual notification sending requires server access (`fcm-test` command)
+- Security headers provide defense against clickjacking, XSS, and MITM attacks
+
+**Security Considerations:**
+- Firebase API keys are **intentionally public** (required for client-side SDK)
+- Restrict API key in Firebase Console: Settings → API Keys → HTTP referrers → Add `firebase.bedrosn.com/*`
+- Monitor Firebase quota usage to prevent abuse
+- Tokens expire periodically and can be revoked in Firebase Console
+
+---
+
+## 💻 Web App Usage
+
+### Accessing the Test App
+
+1. Navigate to https://firebase.bedrosn.com
+2. Click **"Request Permission"** to allow browser notifications
+3. Browser will prompt for notification permission - click **Allow**
+4. FCM token will be generated and displayed
+
+### Registering a Device Token
+
+**To use the token for server-side notifications:**
+
+1. Copy the FCM token from the web app
+2. Store it in agenix:
+   ```bash
+   cd /etc/nixos/secrets
+   echo "YOUR_FCM_TOKEN_HERE" | nix run github:ryantm/agenix -- -e fcm-device-token.age -i ../keys/cmos-agenix.key
+   ```
+3. Rebuild misc host:
+   ```bash
+   nixos-rebuild switch --flake .#misc --target-host misc.home.arpa
+   ```
+
+### Testing Notifications
+
+**From Web Interface:**
+- Use the "Send Test Message" button to send a notification to the same browser
+
+**From Server:**
+```bash
+ssh misc.home.arpa 'fcm-test --title "Test from server" --body "This works!"'
+```
+
+---
+
+## 🚀 Server-Side Notifications
+
+### Sending Notifications from NixOS
+
+The `fcm-test` command is available on all hosts but requires the Firebase Admin SDK credentials and device token (only configured on misc host).
+
+**Basic Usage:**
+```bash
+# Default test message
+fcm-test
+
+# Custom title and body
+fcm-test --title "Deployment Complete" --body "Your service is now live"
+
+# Send to specific token (bypassing stored token)
+fcm-test --token "fcm_token_string" --title "Alert" --body "Custom notification"
+```
+
+**Advanced Usage:**
+```bash
+# Custom paths (if secrets are in non-standard locations)
+fcm-test \
+  --token-file /path/to/token/file \
+  --service-account /path/to/service-account.json \
+  --title "Alert" \
+  --body "Message"
+```
+
+### Integration Examples
+
+**System Monitoring Alert:**
+```bash
+# Send notification when disk usage exceeds threshold
+DISK_USAGE=$(df -h / | awk 'NR==2 {print $5}' | sed 's/%//')
+if [ $DISK_USAGE -gt 90 ]; then
+  fcm-test --title "Disk Alert" --body "Disk usage is ${DISK_USAGE}%"
+fi
+```
+
+**Deployment Notification:**
+```bash
+# Notify after successful deployment
+nixos-rebuild switch --flake .#misc --target-host misc.home.arpa && \
+  ssh misc.home.arpa 'fcm-test --title "Deployment Complete" --body "misc host rebuilt successfully"'
+```
+
+**Fail2ban Ban Alert:**
+```bash
+# Trigger notification when IP is banned (add to Fail2ban action)
+fcm-test --title "Security Alert" --body "IP $BANNED_IP banned by Fail2ban"
+```
+
+---
+
+## 🔐 Secrets Management
+
+### Required Secrets
+
+The FCM infrastructure uses three agenix secrets:
+
+#### 1. `firebase-config.age`
+**Purpose**: Firebase SDK configuration for web app + VAPID key for web push
+**Format**: JSON with Firebase project config plus `vapidKey` field
+**Used By**: `firebase-test.service` (web app)
+
+**Structure:**
+```json
+{
+  "apiKey": "AIza...",
+  "authDomain": "your-project.firebaseapp.com",
+  "projectId": "your-project",
+  "storageBucket": "your-project.appspot.com",
+  "messagingSenderId": "123456789",
+  "appId": "1:123456789:web:abc123",
+  "vapidKey": "BN7x..."
+}
+```
+
+**How to Obtain:**
+1. Firebase Console → Project Settings → General
+2. Scroll to "Your apps" → Web app
+3. Copy Firebase SDK configuration
+4. Add `vapidKey` from Cloud Messaging settings
+
+#### 2. `firebase-service-account.age`
+**Purpose**: Firebase Admin SDK credentials for server-side notifications
+**Format**: JSON service account key
+**Used By**: `fcm-test` command
+
+**How to Obtain:**
+1. Firebase Console → Project Settings → Service Accounts
+2. Click **"Generate New Private Key"**
+3. Download JSON file
+
+**Encrypt and Store:**
+```bash
+cd /etc/nixos/secrets
+cat /path/to/downloaded-service-account.json | \
+  nix run github:ryantm/agenix -- -e firebase-service-account.age -i ../keys/misc-agenix.key
+```
+
+#### 3. `fcm-device-token.age`
+**Purpose**: Target device token for notifications
+**Format**: Plain text FCM token string
+**Used By**: `fcm-test` command (default token)
+
+**How to Obtain:**
+1. Visit https://firebase.bedrosn.com
+2. Click "Request Permission" and allow notifications
+3. Copy the displayed FCM token
+
+**Encrypt and Store:**
+```bash
+cd /etc/nixos/secrets
+echo "YOUR_FCM_TOKEN_HERE" | \
+  nix run github:ryantm/agenix -- -e fcm-device-token.age -i ../keys/misc-agenix.key
+```
+
+### Secret Definitions
+
+**Configuration**: `modules/core/security/secrets.nix`
+
+```nix
+# Firebase Cloud Messaging secrets
+age.secrets.firebase-config = {
+  file = ../../secrets/firebase-config.age;
+  mode = "0440";
+  group = "firebase-test";
+};
+
+age.secrets.firebase-service-account = {
+  file = ../../secrets/firebase-service-account.age;
+  mode = "0440";
+};
+
+age.secrets.fcm-device-token = {
+  file = ../../secrets/fcm-device-token.age;
+  mode = "0440";
+};
+```
+
+### Backup to 1Password
+
+```bash
+# Backup all secrets (including FCM secrets)
+python3 /etc/nixos/scripts/backup-secrets.py
+
+# Dry-run to preview
+python3 /etc/nixos/scripts/backup-secrets.py --dry-run
+```
+
+---
+
+## 🧪 Testing
+
+### Test Web Push Notifications
+
+**In Browser:**
+1. Visit https://firebase.bedrosn.com
+2. Allow notification permission
+3. Click "Send Test Message" button
+4. Verify notification appears in browser
+
+**From Server:**
+```bash
+# Test server-to-browser notification
+ssh misc.home.arpa 'fcm-test --title "Test" --body "Testing from server"'
+```
+
+### Test Android Notifications
+
+**Using FCM Notifier App:**
+1. Install FCM Notifier app on Android device
+2. Copy FCM token from app
+3. Store token in agenix (see "Registering a Device Token" above)
+4. Send test notification:
+   ```bash
+   ssh misc.home.arpa 'fcm-test --title "Android Test" --body "Testing Android delivery"'
+   ```
+
+### Verify Service Status
+
+```bash
+# Check if firebase-test service is running
+ssh misc.home.arpa 'systemctl status firebase-test'
+
+# View logs
+ssh misc.home.arpa 'journalctl -u firebase-test -n 50'
+
+# Test web app endpoint
+curl -I https://firebase.bedrosn.com
+```
+
+---
+
+## 🔍 Troubleshooting
+
+### Web App Issues
+
+**Problem**: Firebase web app not loading
+**Solution**:
+```bash
+# Check service status
+ssh misc.home.arpa 'systemctl status firebase-test'
+
+# Restart service
+ssh misc.home.arpa 'systemctl restart firebase-test'
+
+# Check logs for errors
+ssh misc.home.arpa 'journalctl -u firebase-test -n 50'
+```
+
+**Problem**: "Firebase SDK not initialized" error
+**Solution**:
+- Check that `firebase-config.age` secret is properly decrypted
+- Verify secret permissions: `ls -la /run/agenix/firebase-config`
+- Check that placeholders were replaced in generated files:
+  ```bash
+  ssh misc.home.arpa 'grep -c "__FIREBASE_CONFIG__" /var/lib/firebase-test/app.js'
+  # Should return 0 (no placeholders remaining)
+  ```
+
+### FCM Test Command Issues
+
+**Problem**: `fcm-test: command not found`
+**Solution**:
+- Ensure host has been rebuilt with updated `modules/core/packages.nix`
+- Verify Python script exists: `ls -la /etc/nixos/scripts/fcm-test.py`
+
+**Problem**: "firebase-admin package not installed"
+**Solution**:
+```bash
+# The fcm-test wrapper should handle this, but if needed:
+nix-shell -p python3Packages.firebase-admin --run 'fcm-test'
+```
+
+**Problem**: "Service account file not found"
+**Solution**:
+- Verify `firebase-service-account.age` is decrypted:
+  ```bash
+  ssh misc.home.arpa 'ls -la /run/agenix/firebase-service-account'
+  ```
+- Check secret is defined in `modules/core/security/secrets.nix`
+- Rebuild misc host
+
+**Problem**: Notification sent but not received
+**Solution**:
+- **Android Background**: Ensure using data-only messages (check `fcm-test.py` - should NOT have `notification` payload)
+- **Invalid Token**: Token may have expired, regenerate from web app or Android app
+- **Firebase Quota**: Check Firebase Console for quota limits
+- **Network**: Verify device has internet connectivity
+
+### Permission Issues
+
+**Problem**: Permission denied accessing agenix secrets
+**Solution**:
+```bash
+# Check secret permissions
+ssh misc.home.arpa 'ls -la /run/agenix/ | grep firebase'
+
+# Verify service user group membership
+ssh misc.home.arpa 'groups firebase-test'
+
+# Should include 'firebase-test' group
+```
+
+### Debugging Message Delivery
+
+**Enable Verbose Logging:**
+```bash
+# Modify fcm-test.py temporarily to add debug output
+ssh misc.home.arpa 'cat > /tmp/debug-fcm.py << "EOF"
+import firebase_admin
+from firebase_admin import credentials, messaging
+import sys
+
+# Enable debug logging
+import logging
+logging.basicConfig(level=logging.DEBUG)
+
+# ... rest of fcm-test.py code ...
+EOF'
+
+# Run with debug logging
+python3 /tmp/debug-fcm.py --title "Debug Test" --body "Testing"
+```
+
+**Check Firebase Console:**
+1. Go to Firebase Console → Cloud Messaging
+2. View delivery statistics and errors
+3. Check for quota exceeded or authentication errors
+
+---
+
+## 📚 Related Documentation
+
+- [Secrets Management](../security/secrets.md) - Complete agenix workflow
+- [Keycloak SSO](./keycloak.md) - Authentication infrastructure (not used for Firebase test app)
+- [Traefik](../infrastructure/traefik.md) - Reverse proxy configuration
+- [Service Overview](./overview.md) - All web services
+
+---
+
+## 🔗 External Resources
+
+- [Firebase Cloud Messaging Documentation](https://firebase.google.com/docs/cloud-messaging)
+- [Firebase Admin SDK for Python](https://firebase.google.com/docs/admin/setup)
+- [Web Push Protocol](https://web.dev/push-notifications-overview/)
+- [FCM Message Types](https://firebase.google.com/docs/cloud-messaging/concept-options#notifications_and_data_messages)
+
+---
+
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md)*

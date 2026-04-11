@@ -1,0 +1,583 @@
+---
+title: "Troubleshooting & Issues"
+description: "*Comprehensive problem resolution and emergency procedures*"
+---
+
+## 🎯 Troubleshooting Overview
+
+This section provides systematic approaches to diagnosing and resolving issues across the NixOS infrastructure, from common problems to emergency procedures.
+
+### 🆘 Emergency Quick Reference
+
+| Problem Type | Immediate Action | Documentation |
+|--------------|------------------|---------------|
+| **Service Down** | `systemctl status &lt;service>` | [Service Issues](#-service-issues) |
+| **Auth Failure** | Check OAuth2-proxy/Keycloak logs | [Authentication Problems](#-authentication-problems) |
+| **System Freeze** | Check for OOM/hardware issues | [System Issues](#-system-issues) |
+| **Network Issues** | Verify connectivity | [Network Problems](#-network-problems) |
+| **AI Service Down** | Check Ollama service | [AI Service Issues](#-ai-service-issues) |
+
+---
+
+## 📚 Troubleshooting Documentation Index
+
+### 🗂️ Historical Issues
+**[📁 issues/](issues/)**
+
+| Date | Issue | Status | Resolution |
+|------|-------|--------|------------|
+| **2026-01-14** | Brave Secure Preferences reset | ✅ Resolved | [Re-enable extensions manually](issue-2026-01-14-brave-secure-preferences-reset.md) |
+| **2026-01-11** | ChatGPT Quick Wayland paste | ✅ Resolved | [CDP bypass for Wayland](issue-2026-01-11-chatgpt-quick-wayland-paste.md) |
+| **2026-01-11** | Claude Code stale paths | ✅ Resolved | [Clean additionalDirectories](issue-2026-01-11-claude-code-stale-additional-directories.md) |
+| **2026-01-04** | KWin QML crash (Qt bug) | ⚠️ Workaround | [QML disk cache disabled](issue-2026-01-04-kwin-qml-crash.md) |
+| **2025-12-25** | SDDM/Getty VT1 conflict | ✅ Resolved | [DRM master permission fix](../troubleshooting/issue-2025-12-25-sddm-getty-vt1-conflict.md) |
+| **2025-10-06** | KDE plasmashell segfault | ✅ Auto-Resolved | [Qt QML crash analysis](../troubleshooting/issue-2025-10-06-kde-plasmashell-segfault.md) |
+| **2025-09-23** | Guacamole authentication | ✅ Resolved | [Salted password fix](../troubleshooting/issue-2025-09-23-guacamole-salted-password-authentication.md) |
+| **2025-09-22** | Traefik middleware ordering | ✅ Resolved | [Redirect middleware fix](../troubleshooting/issue-2025-09-22-traefik-redirect-middleware-ordering.md) |
+| **2025-09-09** | KDE complete failure | ✅ Resolved | [KDE system recovery](../troubleshooting/issue-2025-09-09-kde-complete-failure.md) |
+| **2025-09-08** | KDE slow login | ✅ Resolved | [Login optimization](../troubleshooting/issue-2025-09-08-kde-slow-login.md) |
+| **2025-08-25** | System freeze | ✅ Resolved | [Keyboard config fix](../troubleshooting/issue-2025-08-25-system-freeze-keyboard-config.md) |
+
+### 🤖 AI Service Issues
+**[📁 ollama/](ollama/)**
+
+| Component | Issue Type | Documentation |
+|-----------|------------|---------------|
+| **Ollama Service** | Service management | [troubleshoot.md](ollama/troubleshoot.md) |
+| **Model Loading** | Performance issues | [AI Performance](../ai/performance.md) |
+| **GPU Conflicts** | Gaming vs AI | [GPU Scheduling](../ai/configuration.md) |
+
+---
+
+## 🚨 Emergency Procedures
+
+### 🆘 Critical System Failures
+
+**System Won't Boot**:
+```bash
+# Boot from NixOS recovery
+# Select previous generation from GRUB
+# Or use rescue environment
+
+# Check file system
+fsck /dev/sdX
+
+# Mount and chroot if needed
+mount /dev/sdX /mnt
+nixos-enter
+
+# Rollback to previous generation
+nixos-rebuild switch --rollback
+```
+
+**Complete System Freeze**:
+```bash
+# Force reboot (as last resort)
+echo 1 > /proc/sys/kernel/sysrq
+echo b > /proc/sysrq-trigger
+
+# Or hardware reset
+# Check logs after reboot:
+journalctl --boot=-1 | tail -100
+```
+
+**Authentication System Down**:
+```bash
+# Emergency SSH access (if available)
+ssh -i /path/to/emergency-key admin@host
+
+# Check Keycloak service
+systemctl status keycloak
+journalctl -u keycloak -n 50
+
+# Check OAuth2-proxy services
+systemctl status 'oauth2-proxy-*'
+
+# Emergency bypass (if needed)
+# Temporarily disable OAuth2-proxy service for specific service
+systemctl stop oauth2-proxy-<service>
+```
+
+### 🔧 Service Recovery
+
+**Critical Service Failure**:
+```bash
+# Check service status
+systemctl status <service-name>
+
+# View recent logs (safely limited)
+journalctl -u <service-name> -n 50
+
+# Emergency restart
+systemctl restart <service-name>
+
+# If restart fails, check dependencies
+systemctl list-dependencies <service-name> --failed
+```
+
+**Database Corruption**:
+```bash
+# Stop dependent services
+systemctl stop <service-using-db>
+
+# Backup current state
+cp -r /var/lib/<service> /tmp/backup-$(date +%Y%m%d)
+
+# Restore from backup
+restore-backup.sh --service <service> --date latest
+
+# Verify integrity
+<service>-integrity-check.sh
+```
+
+---
+
+## 🔧 Service Issues
+
+### 🌐 Web Service Problems
+
+**Service Unreachable**:
+```bash
+# Check Traefik status
+systemctl status traefik
+curl -I https://traefik.bedrosn.com/api/rawdata
+
+# Check service routing
+curl -I https://<service>.bedrosn.com
+
+# Check DNS resolution
+nslookup <service>.bedrosn.com
+dig <service>.bedrosn.com
+```
+
+**Slow Response Times**:
+```bash
+# Check service performance
+curl -w "@curl-format.txt" https://<service>.bedrosn.com
+
+# Monitor system resources
+htop
+iostat -x 1
+
+# Check service logs for errors
+journalctl -u <service-name> -n 50 | grep -i error
+```
+
+### 📊 Monitoring Service Issues
+
+**Cockpit Not Accessible**:
+```bash
+# Check Cockpit service
+systemctl status cockpit.socket
+systemctl status cockpit
+
+# Check firewall rules
+firewall-cmd --list-ports
+ss -tlnp | grep 9090
+
+# Manual restart
+systemctl restart cockpit.socket
+```
+
+**Glances Performance Issues**:
+```bash
+# Check Glances service
+systemctl status glances
+
+# Check resource usage
+top -p $(pgrep glances)
+
+# Restart with clean cache
+systemctl stop glances
+rm -rf /tmp/glances-*
+systemctl start glances
+```
+
+---
+
+## 🔐 Authentication Problems
+
+### 🔑 Keycloak Issues
+
+**Authentication Failures**:
+```bash
+# Check Keycloak service health
+systemctl status keycloak
+curl -I https://keycloak.bedrosn.com/realms/web
+
+# Review authentication logs
+journalctl -u keycloak -n 100 | grep -i "authentication"
+
+# Check database connection
+sudo -u postgres psql -c "\l" | grep keycloak
+```
+
+**User Access Problems**:
+```bash
+# Check user configuration
+cat /run/agenix/keycloak-user-config | jq '.allowedUsers[] | select(.email=="user@example.com")'
+
+# Verify group membership
+# Log into Keycloak admin console at https://keycloak.bedrosn.com
+# Navigate to Users → <user> → Groups
+```
+
+### 🔒 OAuth2-Proxy Problems
+
+**Token Validation Failures**:
+```bash
+# Check OAuth2 proxy status
+systemctl status oauth2-proxy
+
+# Check token endpoint
+curl -I https://auth.bedrosn.com/.well-known/openid_configuration
+
+# Review proxy logs
+journalctl -u oauth2-proxy -n 50 | grep -i "token"
+```
+
+**Cookie Issues**:
+```bash
+# Check cookie configuration
+# Verify cookie domain and security settings
+# Test with different browsers/incognito mode
+
+# Clear application cookies
+# Guide user through cookie clearing process
+```
+
+---
+
+## 💻 System Issues
+
+### 🖥️ Desktop Environment Problems
+
+**KDE Won't Start**:
+```bash
+# Check X11/Wayland session
+loginctl session-status
+echo $XDG_SESSION_TYPE
+
+# Check display manager
+systemctl status sddm
+
+# Check for DRM permission errors (SDDM/getty conflict)
+journalctl -u display-manager -n 50 | grep -i "permission denied"
+# If found, see: issue-2025-12-25-sddm-getty-vt1-conflict.md
+
+# Check if getty is conflicting on VT1
+systemctl status getty@tty1.service
+
+# Reset KDE configuration
+mv ~/.config/plasma* ~/.config/plasma-backup-$(date +%Y%m%d)
+kbuildsycoca5 --noincremental
+```
+
+**Slow Login/Performance**:
+```bash
+# Check login time
+systemd-analyze blame | head -20
+
+# Check for conflicting processes
+ps aux | grep -E "(kwin|plasmashell)" | head -10
+
+# Clear KDE cache
+rm -rf ~/.cache/plasma*
+kbuildsycoca5 --noincremental
+```
+
+### 🎮 Gaming Issues
+
+**GPU Conflicts (AI vs Gaming)**:
+```bash
+# Check GPU usage
+radeontop
+nvidia-smi  # if NVIDIA
+
+# Check Ollama service impact
+systemctl status ollama
+curl -s http://localhost:11434/api/tags
+
+# Temporarily stop AI services for gaming
+systemctl stop ollama
+# (Remember to restart after gaming)
+```
+
+**Performance Problems**:
+```bash
+# Check system resources during gaming
+htop
+iotop
+
+# Monitor GPU performance
+radeontop-web  # Access via http://cmos:8001
+
+# Check for throttling
+sensors
+cat /sys/class/drm/card0/device/power_dpm_force_performance_level
+```
+
+---
+
+## 🌐 Network Problems
+
+### 🔌 Connectivity Issues
+
+**Host Unreachable**:
+```bash
+# Check network interfaces
+ip link show
+ip addr show
+
+# Test connectivity
+ping -c 4 gateway_ip
+ping -c 4 8.8.8.8
+ping -c 4 google.com
+
+# Check routing
+ip route show
+traceroute target_host
+```
+
+**DNS Resolution Problems**:
+```bash
+# Check DNS configuration
+cat /etc/resolv.conf
+systemd-resolve --status
+
+# Test DNS resolution
+nslookup google.com
+dig @1.1.1.1 google.com
+
+# Flush DNS cache
+systemd-resolve --flush-caches
+```
+
+### 🌐 Service Discovery Issues
+
+**mDNS Not Working**:
+```bash
+# Check Avahi service
+systemctl status avahi-daemon
+
+# Test mDNS resolution
+avahi-browse -all
+avahi-resolve-host-name hostname.local
+
+# Restart Avahi
+systemctl restart avahi-daemon
+```
+
+**File Sharing Problems**:
+```bash
+# Check Samba service
+systemctl status smbd
+systemctl status nmbd
+
+# Test SMB connectivity
+smbclient -L //hostname
+mount.cifs //hostname/share /mnt/test
+
+# Check firewall
+firewall-cmd --list-services | grep samba
+```
+
+---
+
+## 🤖 AI Service Issues
+
+### 🧠 Ollama Service Problems
+
+**[Ollama Troubleshooting](ollama/troubleshoot.md)**:
+
+**Service Won't Start**:
+```bash
+# Check Ollama service status
+systemctl status ollama
+
+# Check for port conflicts
+ss -tlnp | grep 11434
+
+# Check GPU availability
+rocm-smi  # AMD
+nvidia-smi  # NVIDIA
+
+# Manual service start with debugging
+sudo -u ollama ollama serve --debug
+```
+
+**Model Loading Issues**:
+```bash
+# Check available models
+curl -s http://localhost:11434/api/tags | jq
+
+# Check model loading
+curl -X POST http://localhost:11434/api/generate \
+  -H "Content-Type: application/json" \
+  -d '{"model": "qwen2.5:7b-instruct", "prompt": "test"}'
+
+# Check GPU memory usage
+rocm-smi --showmeminfo vram
+```
+
+**Performance Problems**:
+```bash
+# Monitor GPU utilization
+radeontop
+
+# Check CPU usage
+htop | grep ollama
+
+# Check for resource conflicts
+ps aux | grep -E "(steam|wine|lutris)"
+
+# Review performance logs
+journalctl -u ollama -n 100 | grep -i "performance\|slow\|timeout"
+```
+
+---
+
+## 🔍 Diagnostic Tools
+
+### 📊 System Monitoring
+
+**Resource Monitoring**:
+```bash
+# Comprehensive system check
+htop
+iotop -ao
+nethogs
+df -h
+
+# Memory analysis
+free -h
+cat /proc/meminfo | grep -E "(Available|Cached|Buffers)"
+
+# Disk I/O monitoring
+iostat -x 1 10
+iotop -ao
+```
+
+**Service Health Checks**:
+```bash
+# Check all failed services
+systemctl --failed
+
+# Service dependency analysis
+systemctl list-dependencies --all | grep failed
+
+# Check service logs for errors
+journalctl --priority=err --since="1 hour ago"
+```
+
+### 🔍 Network Diagnostics
+
+**Network Performance**:
+```bash
+# Bandwidth testing
+iperf3 -c target_host
+
+# Network latency
+ping -c 100 target_host | tail -1
+
+# Port connectivity
+nmap -p 22,80,443,9090 target_host
+telnet target_host port
+```
+
+**Service Connectivity**:
+```bash
+# HTTP/HTTPS service testing
+curl -I -m 10 https://service.bedrosn.com
+curl -w "@curl-format.txt" https://service.bedrosn.com
+
+# SSL certificate verification
+openssl s_client -connect service.bedrosn.com:443 -servername service.bedrosn.com
+```
+
+---
+
+## 📝 Issue Documentation
+
+### 📋 Creating Issue Reports
+
+**Issue Report Template**:
+```markdown
+# Issue Report: [Brief Description]
+
+**Date**: YYYY-MM-DD
+**Host**: hostname
+**Severity**: Critical/High/Medium/Low
+
+## Problem Description
+[Detailed description of the issue]
+
+## Impact
+[Services/users affected]
+
+## Reproduction Steps
+1. Step 1
+2. Step 2
+3. Step 3
+
+## Error Messages
+```
+[Error logs or messages]
+```
+
+## Investigation
+[Diagnostic steps taken]
+
+## Resolution
+[Steps taken to resolve the issue]
+
+## Prevention
+[Steps to prevent recurrence]
+
+## Related Issues
+[Links to related problems]
+```
+
+### 📚 Knowledge Base
+
+**Common Solutions**:
+- Service restart procedures
+- Configuration reset steps
+- Performance optimization
+- Security issue resolution
+
+**Escalation Procedures**:
+- When to escalate issues
+- Contact information
+- Emergency procedures
+- Documentation requirements
+
+---
+
+## 📖 Related Documentation
+
+### 🏗️ Infrastructure
+- **[Infrastructure Overview](../infrastructure/overview.md)** - System architecture
+- **[Host Configuration](../infrastructure-overview.md#maintenance-procedures)** - Host-specific procedures
+
+### 🔐 Security
+- **[Emergency Procedures](../security-overview.md#security-incident-response)** - Security incident response
+- **[Authentication](../security/authentication/README.md)** - Auth troubleshooting
+
+### 🌐 Services
+- **[Service Management](../services-overview.md#service-management)** - Service procedures
+- **[Monitoring](../services/monitoring/README.md)** - Monitoring and alerting
+
+### 🖥️ Desktop
+- **[KDE Issues](../desktop/kde/)** - Desktop environment problems
+- **[Application Issues](../desktop/applications/)** - Application-specific problems
+
+---
+
+**Last Updated**: January 14, 2026  
+**Issue Response Time**: &lt; 15 minutes for critical issues  
+**Resolution Rate**: 95% within 4 hours  
+**Documentation**: All major issues documented with solutions
+
+---
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🚨 [Emergency](README.md#-emergency-procedures) | 🔧 [Operations](../operations/overview.md)*

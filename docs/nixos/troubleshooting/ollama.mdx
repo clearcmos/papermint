@@ -1,0 +1,187 @@
+---
+title: "Ollama Troubleshooting Guide"
+description: "On September 25, 2025, the KDE session completely froze while audio continued playing. Investigation revealed:"
+---
+
+## KDE Session Freeze from VRAM Exhaustion (RESOLVED)
+
+### Problem
+On September 25, 2025, the KDE session completely froze while audio continued playing. Investigation revealed:
+- GPU VRAM usage at 96.54% (15.7GB of 16GB)
+- Ollama was holding 10.3GB VRAM and wouldn't release it
+- KWin compositor couldn't allocate GPU buffers for rendering
+- xdg-desktop-portal-kde DBus marshalling failures
+- System load average spiked to 19.12
+
+### Root Cause
+Ollama exhausted GPU memory, leaving insufficient VRAM for the KDE compositor to render the desktop.
+
+### Solution Implemented
+Added comprehensive VRAM protection in `/etc/nixos/modules/desktop/ollama.nix`:
+
+#### 1. Hard VRAM Limits
+```nix
+OLLAMA_GPU_MEMORY = "12GB";          # Max 12GB of 16GB (leaves 4GB for system)
+OLLAMA_MAX_LOADED_MODELS = "1";      # Only 1 model at a time (was 2)
+OLLAMA_KEEP_ALIVE = "1m0s";          # Unload after 1 minute (was 3m)
+OLLAMA_LOW_VRAM = "1";               # Enable low VRAM mode
+```
+
+#### 2. System Resource Limits
+```nix
+systemd.services.ollama = {
+  serviceConfig = {
+    MemoryMax = "12G";           # Hard RAM limit
+    MemoryHigh = "10G";          # Start throttling at 10GB
+    CPUQuota = "400%";           # Limit to 4 cores
+    Nice = 10;                   # Lower priority than desktop
+  };
+};
+```
+
+#### 3. GPU Memory Monitor Service
+- Checks VRAM every 10 seconds
+- At 85%: Logs warning
+- At 90%: Force-unloads all Ollama models
+- At 95%: Emergency restart of Ollama service
+
+#### 4. Automatic Cleanup Timer
+- Runs every 15 minutes
+- Unloads idle models if VRAM >70%
+- Prevents gradual memory leaks
+
+## Available Commands
+
+### Check GPU Status
+```bash
+gpu-status
+```
+Shows current VRAM usage and loaded Ollama models.
+
+### Force Unload Models
+```bash
+ollama-unload
+```
+Immediately unloads all Ollama models from VRAM.
+
+### Safe Model Loading
+```bash
+ollama-safe-load <model>
+```
+Loads a model with VRAM pre-check and warning if usage is already high.
+
+## Monitoring Services
+
+### Check Protection Status
+```bash
+# GPU monitor service
+systemctl status gpu-memory-monitor
+
+# Cleanup timer
+systemctl status ollama-cleanup.timer
+
+# View monitor logs
+journalctl -u gpu-memory-monitor -f
+```
+
+### Manual VRAM Check
+```bash
+# Using radeontop
+radeontop -d - -l 1 | grep vram
+
+# Using ROCm
+rocm-smi --showmeminfo vram
+```
+
+## Common Issues
+
+### High VRAM Usage After Boot
+If VRAM is high after boot with no models loaded:
+1. Check for zombie processes: `ps aux | grep defunct`
+2. Restart display manager: `systemctl restart sddm`
+3. As last resort: Reboot system
+
+### Models Not Unloading
+```bash
+# Force unload via API
+curl -X POST http://localhost:11434/api/generate \
+  -d '{"model": "cleanup", "keep_alive": 0}'
+
+# Restart Ollama
+systemctl restart ollama
+```
+
+### Monitor Service Not Running
+```bash
+# Check if enabled
+systemctl is-enabled gpu-memory-monitor
+
+# Enable and start
+systemctl enable --now gpu-memory-monitor
+```
+
+## Performance Impact
+
+The protection reduces some performance to ensure stability:
+- **Parallel requests**: Reduced from 6 to 4
+- **Max models**: Reduced from 2 to 1
+- **Keep-alive**: Reduced from 3m to 1m
+
+This trade-off prevents system freezes, which is far more disruptive than slightly slower AI response times.
+
+## Emergency Recovery
+
+If KDE freezes despite protections:
+
+1. **Switch to TTY**: Press `Ctrl+Alt+F2`
+2. **Login as root or your user**
+3. **Check VRAM**: `radeontop -d - -l 1 | grep vram`
+4. **Force cleanup**: `systemctl restart ollama`
+5. **Restart display**: `systemctl restart sddm`
+
+## Configuration Location
+
+All VRAM protection settings are in:
+- `/etc/nixos/modules/desktop/ollama.nix` - Main configuration
+- `/etc/nixos/hosts/cmos/ai-config.nix` - Host-specific settings
+
+## Logs and Debugging
+
+```bash
+# Check all AI-related logs
+journalctl -u ollama -u gpu-memory-monitor -u ollama-cleanup --since "1 hour ago"
+
+# Monitor in real-time
+watch -n 1 'gpu-status'
+
+# Debug Ollama API
+curl http://localhost:11434/api/ps | jq
+```
+
+## Prevention Best Practices
+
+1. **Always check VRAM before loading large models**
+   ```bash
+   gpu-status  # Check first
+   ollama-safe-load llama3.2-vision:11b  # Use safe loader
+   ```
+
+2. **Unload models when done**
+   ```bash
+   ollama-unload  # Clean up after use
+   ```
+
+3. **Monitor during heavy usage**
+   ```bash
+   journalctl -u gpu-memory-monitor -f  # Watch protection logs
+   ```
+
+4. **Use smaller models when possible**
+   - Prefer 7B models over 11B+ for routine tasks
+   - Use specialized models (coder for code, vision only when needed)
+
+## Related Documentation
+
+- [Ollama Configuration](../ollama.md)
+- [AI Services Overview](../ai/services.md)
+- [System Performance Tuning](../performance.md)

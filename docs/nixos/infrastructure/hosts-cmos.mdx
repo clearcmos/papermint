@@ -1,0 +1,406 @@
+---
+title: "️ cmos - Desktop Workstation"
+description: "*High-performance desktop workstation for AI/ML, gaming, and development*"
+---
+
+## 🎯 Overview
+
+**cmos** is the primary desktop workstation in the infrastructure, featuring a powerful AMD GPU for AI/ML acceleration, extensive development tools, and a complete gaming stack. This host serves as the control center for infrastructure management and handles computationally intensive workloads.
+
+**Role**: Desktop Workstation, AI/ML Platform, Gaming Station, Development Environment
+
+---
+
+## 💻 Hardware Specifications
+
+### System Information
+- **Hostname**: `cmos.home.arpa`
+- **Platform**: Custom desktop build
+- **CPU**: High-performance x86_64 processor
+- **RAM**: 32GB DDR4
+- **Swap**: 16GB swapfile (for AI workloads)
+
+### Graphics
+- **GPU**: AMD Radeon RX 6800 XT
+- **VRAM**: 16GB GDDR6
+- **Acceleration**: ROCm stack for AI/ML workloads
+- **Monitoring**: radeontop-web for real-time GPU metrics
+
+### Storage
+- **Root**: NVMe SSD (OS and applications)
+- **Data Disk**: `/mnt/data` - Additional storage mounted at `/dev/disk/by-uuid/60d4fb47-d8fd-4445-adb0-2fd303da775b`
+  - Mount options: `defaults,user,rw,exec`
+  - Permissions: `755`, owned by `nicholas:users`
+  - Backup directory: `/mnt/data/backups/cmos/` (Borg repositories + manual backups)
+
+### Peripherals
+- **Webcam**: Logitech C920 HD Pro (configured in `webcam-c920.nix`)
+- **Boot Loader**: systemd-boot with EFI
+
+---
+
+## 🌐 Network Configuration
+
+### Network Interface
+- **Interface**: `enp8s0` (PCIe network adapter)
+- **IP Address**: `192.168.1.2/24` (static)
+- **Gateway**: `192.168.1.1`
+- **DNS**: `192.168.1.1`
+- **Domain**: `home.arpa`
+
+### Firewall Configuration
+
+**Allowed TCP Ports**:
+- `22` - SSH (core service)
+- `139, 445` - Samba/CIFS file sharing
+- `8000` - Keeper app API server (external, not managed by Nix)
+- `8001` - radeontop-web GPU monitoring
+- `8003` - Investment Tracker (localhost only, personal finance)
+- `8084` - Claude Code WebUI
+- `9090` - Cockpit web management
+- `11434` - Ollama AI server
+- `27036` - Steam Remote Play
+- `47984-47990` - Sunshine game streaming (when enabled)
+
+**Allowed UDP Ports**:
+- `137, 138` - NetBIOS
+- `5353, 5355` - mDNS/LLMNR
+
+---
+
+## 🖥️ Desktop Environment
+
+### KDE Plasma 6
+- **Display Server**: Wayland (with X11 fallback)
+- **Window Manager**: KWin
+- **Session Manager**: SDDM
+- **Desktop Integration**: Full KDE suite
+
+### Display Configuration
+- **Resolution**: Auto-detected
+- **Rendering**: Hardware accelerated with AMD GPU
+- **Remote Access**: KDE Remote Desktop (KRDP) on port 8002
+
+---
+
+## 🤖 AI & ML Services
+
+### Ollama Configuration
+**Service**: Local LLM inference engine
+**Port**: 11434
+**Acceleration**: ROCm for AMD GPU
+**Configuration**: `/etc/nixos/hosts/cmos/ai-config.nix`
+
+**Features**:
+- VRAM protection (reserves memory for desktop)
+- Automatic model management
+- API compatible with OpenAI client libraries
+- GPU-accelerated inference
+
+**Models Available**: Configured per `ai-config.nix`
+
+### ROCm Stack
+**Purpose**: AMD GPU compute acceleration
+**Packages**: ROCm runtime, libraries, and tools
+**Integration**: System-wide GPU access for AI workloads
+
+**Monitoring**:
+- `radeontop-web` - Web-based GPU monitoring (port 8001)
+- Real-time VRAM usage, GPU utilization, clocks
+
+---
+
+## 🎮 Gaming Configuration
+
+### Steam Integration
+- **Steam Runtime**: Enabled
+- **Remote Play**: Port 27036
+- **Proton**: Latest compatibility layer for Windows games
+- **Controller Support**: Full Xbox/PlayStation controller support
+
+### World of Warcraft
+**Module**: `wow.nix`
+**Features**:
+- Declarative WoW installation
+- Automatic Wine/DXVK configuration
+- Steam shortcut integration
+- Auto-sync enabled
+
+**Configuration**:
+```nix
+wow.enable = true;
+wow.autoSync = true;
+wow.configureSteamShortcuts = true;
+```
+
+### Additional Gaming Tools
+- **Lutris**: Multi-platform game manager
+- **Wine/Proton**: Windows compatibility
+- **GameMode**: CPU governor optimization during gaming
+- **MangoHud**: In-game performance overlay
+
+---
+
+## 🛠️ Development Environment
+
+### Core Development Tools
+- **Git**: Version control with SSH agent integration
+- **VSCode**: Primary code editor
+- **Docker**: Container development (via virtualization.nix)
+- **Claude Code**: AI-assisted development (port 8084)
+
+### Build Tools
+- **Nix**: Package management and development shells
+- **GCC/Clang**: C/C++ compilation
+- **Python**: Multiple versions available
+- **Node.js**: JavaScript/TypeScript development
+
+### Virtualization
+**Module**: `virtualization.nix`
+**Features**:
+- Docker with socket access
+- QEMU/KVM for virtual machines
+- libvirt management
+- Bridge networking support
+
+---
+
+## 📁 File Services
+
+### Samba Share
+**Share Name**: `//cmos-home/`
+**Path**: `/home/nicholas/`
+**Access**: nicholas user with authentication
+**Purpose**: Cross-host file access and synchronization
+
+### Backup Configuration
+**Module**: `modules/core/backup-scripts.nix`
+**System**: BorgBackup (automated + manual)
+**Local Repository**: `/mnt/data/backups/cmos/borg`
+**Remote Repository**: `nicholas@offsite.bedrosn.com:/mnt/data/cmos/borg`
+**Schedule**: Daily at 5:00 AM (local → remote on success)
+**Retention**: 14 daily backups
+**Encryption**: repokey-blake2 with agenix-managed passphrase
+**Documentation**: See [storage-backup.md](../storage/backup.md)
+
+---
+
+## 🔐 Security Configuration
+
+### SSH
+**Service**: OpenSSH with key-only authentication
+**Port**: 22
+**Authentication**:
+- SSH keys (primary)
+- OAuth device flow via Keycloak (`ssh-oauth.nix`)
+
+**Authorized Keys**: Managed via agenix secrets
+
+### YubiKey Support
+**Service**: pcscd (smart card daemon)
+**Purpose**: Hardware authentication for:
+- Age encryption/decryption
+- SSH hardware tokens
+- PIV/PKCS#11 operations
+
+### Agenix Integration
+**Identity Path**: `/etc/nixos/keys/cmos-agenix.key`
+**Secrets**: Managed via age encryption
+**Runtime**: Secrets decrypted to `/run/agenix/`
+
+---
+
+## 📦 Installed Packages
+
+### Desktop Applications
+- **Brave Browser**: Privacy-focused web browser (configured with hardware acceleration)
+- **Discord**: Team communication (GPU-accelerated)
+- **OBS Studio**: Recording and streaming
+- **Flatpak**: Sandboxed application support
+
+### System Utilities
+- **Cockpit**: Web-based system management (port 9090)
+- **cpv**: Konsole clipboard utility (copies visible terminal text)
+- **htop**: Process monitoring
+- **radeontop**: GPU monitoring CLI
+- **v4l-utils**: Webcam configuration tools
+
+### AI/ML Tools
+- **Ollama**: LLM server
+- **Python AI libraries**: Via development shells
+- **ROCm tools**: GPU compute utilities
+
+See `modules/desktop/packages.nix` for complete package list.
+
+---
+
+## 🔄 Automated Tasks
+
+### Scheduled Tasks
+**Module**: `scheduled-tasks.nix`
+**Tasks**: Centralized cron jobs and systemd timers
+
+### Google Drive
+**Integration**: KDE Online Accounts + KIO worker
+**Access**: `gdrive:/` virtual filesystem in Dolphin
+**Features**:
+- Native KDE integration
+- On-demand streaming (not local sync)
+- OAuth2 authentication via signond
+
+---
+
+## 🚀 Deployment
+
+### Building Locally
+```bash
+# From /etc/nixos on cmos
+nixos-rebuild switch --flake .#cmos
+```
+
+### Remote Deployment
+```bash
+# From another host
+nixos-rebuild switch --flake .#cmos --target-host cmos.home.arpa
+```
+
+### Testing Changes
+```bash
+# Test without activating
+nixos-rebuild test --flake .#cmos
+
+# Dry run to see changes
+nixos-rebuild dry-run --flake .#cmos
+```
+
+---
+
+## 🧪 Troubleshooting
+
+### GPU Issues
+
+**Check ROCm availability**:
+```bash
+rocminfo
+```
+
+**Monitor GPU in real-time**:
+```bash
+# CLI
+radeontop
+
+# Web interface
+curl http://localhost:8001
+```
+
+**Check Ollama GPU usage**:
+```bash
+systemctl status ollama
+journalctl -u ollama -f
+```
+
+### Display Issues
+
+**Check Wayland session**:
+```bash
+echo $XDG_SESSION_TYPE
+```
+
+**Restart display manager**:
+```bash
+systemctl restart sddm
+```
+
+**Check KDE Remote Desktop**:
+```bash
+systemctl --user status krdp
+```
+
+### Storage Issues
+
+**Check data disk mount**:
+```bash
+df -h /mnt/data
+ls -la /mnt/data
+```
+
+**Verify backup status**:
+```bash
+# Check backup timer
+systemctl status borgbackup-job-cmos-automated.timer
+
+# Check backup repository
+export BORG_PASSPHRASE=$(sudo cat /run/agenix/borg-backup-passphrase)
+borg list /mnt/data/backups/cmos/borg
+```
+
+**Remount if needed**:
+```bash
+sudo mount -a
+```
+
+### Service Issues
+
+**Check all services**:
+```bash
+systemctl --failed
+```
+
+**Check Ollama**:
+```bash
+systemctl status ollama
+curl http://localhost:11434/api/tags
+```
+
+**Check Samba**:
+```bash
+systemctl status smbd
+smbclient -L localhost -U nicholas
+```
+
+---
+
+## 📊 Monitoring
+
+### System Monitoring
+- **Cockpit Dashboard**: http://cmos.home.arpa:9090
+- **htop**: Real-time process monitoring
+- **systemctl status**: Service health
+
+### GPU Monitoring
+- **radeontop-web**: http://cmos.home.arpa:8001
+- **radeontop**: CLI GPU monitoring
+- **rocm-smi**: ROCm GPU management
+
+### AI Service Monitoring
+- **Ollama API**: http://cmos.home.arpa:11434
+- **Model status**: `ollama list` (via Ollama CLI)
+
+---
+
+## 🔗 Related Documentation
+
+- **[AI Services](../ai/overview.md)** - Complete AI/ML documentation
+- **[Desktop Environment](../desktop/overview.md)** - KDE configuration
+- **[Gaming Setup](../desktop/wow.md)** - Gaming configuration
+- **[Ollama Configuration](../ai/configuration.md)** - Ollama setup details
+- **[Host Overview](../README.md)** - All hosts overview
+
+---
+
+## 📝 Configuration Files
+
+**Primary Config**: `/etc/nixos/hosts/cmos/default.nix`
+**AI Config**: `/etc/nixos/hosts/cmos/ai-config.nix`
+**SSH OAuth**: `/etc/nixos/hosts/cmos/ssh-oauth.nix`
+**Hardware Config**: `/etc/nixos/hosts/cmos/hardware-configuration.nix`
+
+---
+
+**Last Updated**: 2025-11-29
+**System State Version**: 24.11
+**Maintained By**: Infrastructure Team
+
+---
+
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🖥️ [Hosts](../README.md)*

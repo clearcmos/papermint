@@ -1,0 +1,72 @@
+---
+title: "Claude Code Plugin & Skill Distribution System"
+description: "Multiple teams (IT Operations, Security) need to share standardized AI agent workflows across the organization. Without a distribution mechanism, each team m..."
+---
+
+## The Problem
+
+Multiple teams (IT Operations, Security) need to share standardized AI agent workflows across the organization. Without a distribution mechanism, each team member would need to manually maintain their own skill files, leading to inconsistency, knowledge silos, and no way to propagate improvements from real usage back to the team.
+
+## What Was Built
+
+A complete plugin distribution system for Claude Code — a marketplace, versioned plugins, self-learning skills, and a self-governing convention framework. Skills operate across 12+ enterprise systems: Okta, JIRA, Slack, Notion, GitHub/Git, CircleCI, 1Password, HackerOne, Google Workspace (via GAMADV-XTD3 and direct API), Microsoft Graph, Kandji, and SentinelOne.
+
+### Architecture
+
+Three-tier hierarchy:
+- **Marketplace** (the repository) — contains a manifest listing all available plugins
+- **Plugins** (iss/, security/, shared/) — versioned collections of skills, one per team
+- **Skills** — self-contained agent instruction sets with progressive disclosure
+
+### Key Design Decisions
+
+**Version-driven auto-update:** Claude Code caches plugins by version. When a plugin's `plugin.json` version is bumped, all users receive the update automatically on their next session. No manual intervention required.
+
+**Progressive disclosure for token management:** `SKILL.md` (~500 lines) loads immediately on invocation. Supporting files load on demand as the workflow progresses. This prevents context window bloat — the agent gets enough to start working without loading knowledge it may never need.
+
+**Agent-visible vs. human-only boundary:** Everything in `skills/` is discoverable by the agent during execution. Everything in `docs/` is invisible to the agent — setup guides, contributor documentation, workflow visualizations. This separation is enforced by convention and validated by the audit checklist.
+
+### Self-Governing Properties
+
+1. **`CLAUDE.md` as injected governance** — loaded by the agent on every session. Repo conventions are followed because the agent has no choice — the rules are in its context.
+
+2. **`update-skill` directive** — every skill includes a self-learning mechanism. When a user says "update-skill," the agent reviews the session for mistakes, fixes documentation, adds new knowledge, and bumps the version. Real usage improves the skill over time.
+
+3. **`skill-creator` meta-wizard** — scaffolds new skills from templates while enforcing all conventions. New contributors can add skills without understanding the full architecture.
+
+4. **`AUDIT.md`** — a self-auditing checklist that validates the repo against its own rules. 12 check categories covering credentials, folder structure, frontmatter, version consistency, README alignment, and link integrity.
+
+### Skills Built
+
+| Skill | Plugin | Purpose |
+|-------|--------|---------|
+| `okta-pr-workflow` | ISS | Full Terraform PR lifecycle for Okta infrastructure changes — branch, JIRA ticket, commit, PR, CircleCI plan review, Slack RFR |
+| `it-support-ticket` | ISS | IT support ticket investigation with subagent delegation, 6 investigation classifications (access request, access issue, deprovisioning, app/group config, drive permissions, general IT), 8 app-specific resolution guides, Okta investigation toolkit, Notion search, Jira internal notes |
+| `google-expert` | ISS | Google Workspace administration via GAMADV-XTD3 and direct API access |
+| `ids-creator` | ISS | IDS (Identify, Discuss, Solve) document creation for L10 leadership meetings |
+| `hackerone-triage` | Security | HackerOne vulnerability report triage — fetch, deduplicate, assess severity, record in Notion |
+| `skill-creator` | Shared | Interactive wizard to scaffold new skills with convention validation |
+| `meeting-summarizer` | Shared | Meeting transcript summarization with Notion posting |
+| `find-conversation` | Shared | Search through Claude Code conversation history to locate past sessions |
+
+### Convention Framework
+
+- Semantic versioning per plugin (PATCH/MINOR/MAJOR)
+- Changelog required on every version bump
+- YAML frontmatter validation (name, description, trigger phrases)
+- Credential retrieval pattern (1Password + env var fallback)
+- Shared config template at plugin root (not per-skill)
+- Shared verify-setup.py at plugin root (not per-skill)
+- Pre-commit checklist enforced via CLAUDE.md
+
+## Impact
+
+- Skills improve over time through real usage without requiring the original author's involvement
+- New team members can use complex workflows (Okta PR lifecycle, IT ticket investigation) on day one — the skill contains all the knowledge
+- Convention compliance is self-enforcing — the agent follows CLAUDE.md because it's in context
+- The system scales to new teams and new skills without central coordination
+- Knowledge that was previously trapped in individual experience is now codified and distributed
+
+## Engineering Assessment
+
+The architecture — CLAUDE.md as injected governance, update-skill as self-improvement, skill-creator as self-replication, AUDIT.md as self-verification — demonstrates principal-level systems thinking. The system is designed to outlive its author and improve without centralized maintenance.

@@ -1,0 +1,192 @@
+---
+title: "gissue"
+description: "gissue - Unified GitHub issue management with AI-powered features"
+---
+
+# SYNOPSIS
+
+**gissue** [*subcommand*] [*arguments*]
+
+# DESCRIPTION
+
+**gissue** is a unified shell function for comprehensive GitHub issue management. It provides both an interactive menu interface and direct command-line operations for creating, viewing, editing, and managing GitHub issues.
+
+The function features AI-powered title generation using a local Qwen2.5-Instruct model running on port 8081, making it easy to create well-titled issues from simple descriptions.
+
+# USAGE MODES
+
+## Interactive Mode
+
+**gissue**
+: Launch interactive menu with numbered options for all issue operations
+
+## Direct Commands
+
+**gissue list** [*options*]
+: List GitHub issues with filtering options
+
+**gissue new** [*description*]
+: Create new issue with AI-generated title
+
+**gissue show** *issue_number*
+: Display detailed view of specific issue
+
+**gissue edit** *issue_number*
+: Edit issue title and body in editor
+
+**gissue close** *issue_number* [*comment*]
+: Close issue with optional closing comment
+
+**gissue help**
+: Display detailed usage information
+
+## Smart Shortcuts
+
+**gissue** *number*
+: View issue by number (e.g., `gissue 42`)
+
+**gissue** "*description*"
+: Create issue directly from description
+
+# OPTIONS
+
+## List Command Options
+
+**--closed**, **-c**
+: Show only closed issues
+
+**--all**, **-a**
+: Show all issues (open and closed)
+
+**--limit**, **-l** *NUMBER*
+: Limit number of results (default: 20)
+
+# PREREQUISITES
+
+- Must be run from within a Git repository
+- GitHub CLI (**gh**) must be installed and authenticated
+- Local AI service must be running on localhost:8081 (Qwen2.5-Instruct model)
+- Internet connection for GitHub API access
+
+# EXAMPLES
+
+## Interactive Mode
+
+Launch the interactive menu:
+```
+gissue
+```
+This displays a numbered menu allowing you to select from available actions.
+
+## Direct Commands
+
+List open issues:
+```
+gissue list
+```
+
+List all issues with a limit:
+```
+gissue list --all --limit 50
+```
+
+Create a new issue with AI title:
+```
+gissue new "The login system crashes with special characters"
+```
+
+Create issue directly (smart shortcut):
+```
+gissue "Add dark mode toggle to settings"
+```
+
+View issue details:
+```
+gissue show 42
+```
+
+View issue using smart shortcut:
+```
+gissue 42
+```
+
+Edit an issue:
+```
+gissue edit 15
+```
+
+Close issue with comment:
+```
+gissue close 42 "Fixed in version 2.1"
+```
+
+Close issue without comment:
+```
+gissue close 42
+```
+
+Show detailed help:
+```
+gissue help
+```
+
+# INTERACTIVE MENU
+
+The interactive mode presents these options:
+
+1. **List open issues** - Shows currently open issues (limit 20)
+2. **List all issues** - Shows all issues regardless of state (limit 20)
+3. **Create new issue** - Prompts for description, generates AI title
+4. **Show issue details** - Prompts for issue number, displays full details
+5. **Edit issue** - Prompts for issue number, opens in editor
+6. **Close issue** - Prompts for issue number and optional comment
+7. **Exit** - Return to shell
+
+# WORKFLOW
+
+## Issue Creation Process
+
+1. **Validation**: Checks Git repository and GitHub CLI authentication
+2. **Description Input**: Accepts description via argument or prompt
+3. **AI Title Generation**: Uses local AI service with retry logic (3 attempts)
+4. **Fallback**: Generates simple title if AI unavailable
+5. **Confirmation**: Shows generated title and description for approval
+6. **Creation**: Creates issue via GitHub CLI
+
+## Issue Management Process
+
+All operations validate repository status and authentication before proceeding. Interactive mode provides guided workflows with clear prompts and confirmations.
+
+# EXIT STATUS
+
+**0**
+: Operation completed successfully
+
+**1**
+: Error occurred (invalid repository, authentication failure, network error, user cancellation, or API error)
+
+# AI INTEGRATION
+
+The function integrates with a local Qwen2.5-Instruct model on port 8081:
+
+- **Temperature**: 0.3 (consistent, focused titles)
+- **Max tokens**: 20 (concise titles under 60 characters)
+- **Retry logic**: 3 attempts with 1-second delays
+- **Title style**: Sentence case, actionable language
+- **Fallback**: Simple title generation from description text
+
+# RELATED COMMANDS
+
+This unified command replaces the following individual functions:
+**glist**(1), **gshow**(1), **gmodify**(1), **gclose**(1)
+
+**gh**(1) - GitHub CLI (underlying tool)
+**ghelp**(1) - Git and GitHub workflow help
+
+# SEE ALSO
+
+**git**(1), **gh**(1), **gh-issue**(1)
+
+# AUTHOR
+
+Part of the NixOS Git workflow functions defined in `/etc/nixos/modules/core/git.nix`.

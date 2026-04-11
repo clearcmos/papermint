@@ -1,0 +1,193 @@
+---
+title: "Jellyfin SSO Setup Guide"
+description: "This guide explains how to set up Google SSO for Jellyfin using Keycloak and the jellyfin-plugin-sso."
+---
+
+**Last Updated**: 2025-10-30
+
+This guide explains how to set up Google SSO for Jellyfin using Keycloak and the jellyfin-plugin-sso.
+
+## Overview
+
+**Architecture:**
+- Users authenticate via Google
+- Keycloak acts as the OIDC provider (already configured with Google IDP)
+- Jellyfin SSO plugin receives OIDC tokens from Keycloak
+- Plugin automatically provisions users with configured permissions
+
+**User Setup:**
+- **Admin (nicholas)**: Traditional auth via declarative-jellyfin (no SSO)
+- **Normal users (francis, jbedros)**: Google SSO via Keycloak (auto-provisioned)
+
+## Step 1: Install jellyfin-plugin-sso
+
+1. Navigate to Jellyfin Dashboard (http://jimmich.home.arpa:8096)
+2. Go to **Administration** → **Plugins** → **Repositories**
+3. Click the **+** button to add a new repository
+4. Add repository:
+   - **Name**: `SSO-Auth`
+   - **URL**: `https://raw.githubusercontent.com/9p4/jellyfin-plugin-sso/manifest-release/manifest.json`
+5. Go to **Catalog** tab
+6. Find **SSO-Auth** and click **Install**
+7. Restart Jellyfin: `ssh jimmich.home.arpa 'sudo systemctl restart jellyfin.service'`
+
+## Step 2: Create Keycloak Client for Jellyfin
+
+Create an OIDC client in Keycloak for Jellyfin:
+
+```bash
+# SSH to misc (where Keycloak runs)
+ssh misc.home.arpa
+
+# Create Jellyfin client in Keycloak
+# Access Keycloak admin at http://localhost:8089 on misc
+```
+
+**Client Configuration:**
+- **Client ID**: `jellyfin`
+- **Client Protocol**: `openid-connect`
+- **Access Type**: `confidential`
+- **Valid Redirect URIs**:
+  - `http://jimmich.home.arpa:8096/sso/OID/redirect/Keycloak`
+  - `http://192.168.1.6:8096/sso/OID/redirect/Keycloak`
+  - `https://jellyfin.bedrosn.com/sso/OID/redirect/Keycloak` (if you add external access)
+- **Base URL**: `http://jimmich.home.arpa:8096`
+
+**After creating the client:**
+1. Go to **Credentials** tab
+2. Copy the **Client Secret**
+3. Save it as a secret:
+   ```bash
+   cd /etc/nixos/secrets
+   echo -n "YOUR_CLIENT_SECRET" | nix run github:ryantm/agenix -- -e jellyfin-oidc-client-secret.age -i ../keys/cmos-agenix.key
+   ```
+
+## Step 3: Configure SSO Plugin via API
+
+The plugin is configured via HTTP API calls. Here's the configuration:
+
+**OIDC Provider Configuration:**
+
+```bash
+# Get Jellyfin API key first:
+# 1. Login to Jellyfin as nicholas
+# 2. Go to Dashboard → API Keys
+# 3. Create new API key named "SSO-Config"
+# 4. Save the key
+
+# Set variables
+JELLYFIN_URL="http://jimmich.home.arpa:8096"
+API_KEY="YOUR_JELLYFIN_API_KEY"
+KEYCLOAK_URL="http://misc.home.arpa:8089"
+CLIENT_SECRET="YOUR_KEYCLOAK_CLIENT_SECRET"
+
+# Configure Keycloak as OIDC provider
+curl -X POST "${JELLYFIN_URL}/sso/OID/Add/Keycloak" \
+  -H "X-MediaBrowser-Token: ${API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "OidClientId": "jellyfin",
+    "OidSecret": "'"${CLIENT_SECRET}"'",
+    "OidEndpoint": "'"${KEYCLOAK_URL}/realms/master"'",
+    "Enabled": true,
+    "EnableAuthorization": true,
+    "EnableAllFolders": true,
+    "EnabledFolders": [],
+    "AdminRoles": [],
+    "Roles": [],
+    "EnableLiveTv": false,
+    "EnableLiveTvManagement": false,
+    "EnableMediaDeletion": false,
+    "EnableMediaConversion": false,
+    "EnablePlaybackRemuxing": true,
+    "EnablePublicSharing": false,
+    "EnableRemoteAccess": false,
+    "EnableRemoteControlOfOtherUsers": false,
+    "EnableSharedDeviceControl": false,
+    "EnableSyncTranscoding": false,
+    "EnableVideoPlaybackTranscoding": true,
+    "EnableContentDownloading": true,
+    "EnableContentDeletion": false,
+    "EnableSubtitleDownloading": true,
+    "EnableSubtitleManagement": false,
+    "EnableAudioPlaybackTranscoding": true,
+    "ForceRemoteSourceTranscoding": false,
+    "RemoteClientBitrateLimit": 0
+  }'
+```
+
+**Key Permission Settings:**
+- `EnableAllFolders`: true (access to all media libraries)
+- `EnableContentDeletion`: **false** (users cannot delete media)
+- `EnableMediaDeletion`: **false** (users cannot delete media)
+- `EnableVideoPlaybackTranscoding`: true (can watch with transcoding)
+- `EnableAudioPlaybackTranscoding`: true (can listen with transcoding)
+- `EnableContentDownloading`: true (can download for offline viewing)
+- `EnablePublicSharing`: false (no public sharing)
+- `AdminRoles`: [] (no admin rights for SSO users)
+
+## Step 4: Test SSO Login
+
+1. Open Jellyfin in a browser: `http://jimmich.home.arpa:8096`
+2. Click **"Sign in with Keycloak"** button
+3. Authenticate with Google via Keycloak
+4. User should be auto-created with configured permissions
+
+## Step 5: Android TV Setup (Quick Connect)
+
+For Android TV clients:
+
+1. Open Jellyfin app on Android TV
+2. Select server (jimmich.home.arpa or 192.168.1.10)
+3. Choose **"Quick Connect"**
+4. Note the 6-digit code displayed on TV
+5. On web browser (logged in via SSO):
+   - Go to `http://jimmich.home.arpa:8096/web/#/quickconnect`
+   - Enter the code from TV
+   - Approve the connection
+6. Android TV is now authenticated!
+
+## Verification
+
+**Check auto-provisioned users:**
+```bash
+ssh jimmich.home.arpa 'nix-shell -p sqlite --run "sudo sqlite3 /var/lib/jellyfin/data/jellyfin.db \"SELECT Username, Id FROM Users;\""'
+```
+
+**Check permissions:**
+```bash
+ssh jimmich.home.arpa 'nix-shell -p sqlite --run "sudo sqlite3 /var/lib/jellyfin/data/jellyfin.db \"SELECT u.Username, p.Kind, p.Value FROM Users u JOIN Permissions p ON u.Id = p.UserId WHERE u.Username IN ('"'"'francis'"'"', '"'"'jbedros'"'"');\""'
+```
+
+Permission Kind values:
+- **0**: IsAdministrator (should be 0 = false)
+- **10**: EnableContentDeletion (should be 0 = false)
+- **7**: EnableMediaPlayback (should be 1 = true)
+- **16**: EnableAllFolders (should be 1 = true)
+
+## Troubleshooting
+
+**SSO button not showing:**
+- Check plugin is enabled: Dashboard → Plugins → SSO-Auth
+- Restart Jellyfin: `systemctl restart jellyfin.service`
+
+**Authentication fails:**
+- Check Keycloak client redirect URIs match exactly
+- Verify client secret is correct
+- Check Jellyfin logs: `journalctl -u jellyfin.service -f`
+
+**Wrong permissions:**
+- Re-run the API configuration with correct permission settings
+- Delete user and let them re-authenticate to recreate with new permissions
+
+## Security Notes
+
+- SSO users are auto-provisioned on first login
+- Permissions are set via plugin configuration (not per-user)
+- Admin user (nicholas) does NOT use SSO - separate traditional auth
+- Content deletion is **disabled** for all SSO users
+- No admin rights for SSO users
+
+---
+
+*🏠 [Home](../README.md) | 📚 [Services Overview](./overview.md) | 📖 [Jellyfin Users](./jellyfin-users.md)*

@@ -1,0 +1,69 @@
+---
+title: "chhoto-url - URL Shortener"
+description: "*Lightweight self-hosted URL shortener at s.clearcmos.com*"
+---
+
+## Overview
+
+Minimal URL shortener service running as a Podman container on misc. Creates short 6-character URLs with API key authentication. No web frontend — API-only.
+
+**Module:** `modules/services/chhoto-url.nix`
+**Port:** 8111 (localhost, proxied via Traefik)
+**URL:** https://s.clearcmos.com
+**Host:** misc
+**Auth:** API key (no OAuth2-proxy)
+
+## Architecture
+
+```
+s.clearcmos.com → Traefik (misc:443) → localhost:8111 → Podman container (chhoto-url:4567)
+```
+
+- **Container:** `sintan1729/chhoto-url:latest` (auto-pulled on every start)
+- **Database:** SQLite at `/var/lib/chhoto-url/urls.sqlite`
+- **Slug style:** Random UID, 6 characters
+- **Redirect method:** HTTP 307 (temporary)
+- **Frontend:** Disabled (API-only)
+
+## Usage
+
+```bash
+# Create short URL
+curl -X POST https://s.clearcmos.com/api/shorten \
+  -H "X-API-Key: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com/very/long/path"}'
+
+# Visit short URL (public, no auth)
+curl -L https://s.clearcmos.com/abc123
+```
+
+## Secrets
+
+- `chhoto-url-api-key` - API key for POST/DELETE operations, stored in agenix
+
+## Troubleshooting
+
+```bash
+# Service status
+ssh misc.home.arpa 'systemctl status podman-chhoto-url'
+
+# Logs
+ssh misc.home.arpa 'journalctl -u podman-chhoto-url -n 50'
+
+# Check container
+ssh misc.home.arpa 'podman ps | grep chhoto-url'
+
+# Check database
+ssh misc.home.arpa 'ls -lh /var/lib/chhoto-url/urls.sqlite'
+
+# Restart
+ssh misc.home.arpa 'systemctl restart chhoto-url-env && systemctl restart podman-chhoto-url'
+```
+
+---
+
+**Last Updated**: 2026-03-06
+
+---
+*[Home](../README.md) | [Services Overview](overview.md)*

@@ -1,0 +1,69 @@
+---
+title: "Portfolio Gate"
+description: "*TOTP-protected static portfolio site for live demos*"
+---
+
+## Overview
+
+A lightweight Python web server that gates a static HTML portfolio behind a 6-digit TOTP code. Designed for live demo scenarios where the presenter reads the current code from their authenticator app.
+
+## Architecture
+
+```
+Internet → Traefik (portfolio.clearcmos.com) → portfolio-gate (misc:8113)
+                                                    ├── TOTP verification page
+                                                    └── Static HTML (from flake input)
+```
+
+**Components:**
+- **Gate script**: `scripts/portfolio-gate.py` - Python HTTP server with TOTP verification
+- **Module**: `modules/services/portfolio-gate.nix` - systemd service definition
+- **Static content**: Pulled from NAS via flake input (`portfolio-site`)
+- **TOTP secret**: `secrets/portfolio-totp-secret.age` (also in authenticator app)
+
+## Configuration
+
+| Setting | Value |
+|---------|-------|
+| **Port** | 8113 (misc host) |
+| **Domain** | portfolio.clearcmos.com |
+| **Auth** | TOTP (no OAuth2-proxy, public gate page) |
+| **Traefik** | Direct route, no OAuth2 middleware |
+
+## How It Works
+
+1. Visitor opens `portfolio.clearcmos.com`
+2. TOTP gate page shown with code input field
+3. Presenter reads 6-digit code from authenticator app
+4. Valid code grants access to static portfolio site
+5. Session persists via cookie until browser closes
+
+## Secret Management
+
+```bash
+# Edit TOTP secret (must match authenticator app)
+cd /etc/nixos/secrets && agenix -e portfolio-totp-secret.age -i ../keys/cmos-agenix.key
+```
+
+## Service Management
+
+```bash
+# Check status
+ssh misc.home.arpa 'systemctl status portfolio-gate'
+
+# View logs
+ssh misc.home.arpa 'journalctl -u portfolio-gate -n 20'
+```
+
+## Security
+
+- DynamicUser with full systemd hardening (NoNewPrivileges, ProtectSystem=strict)
+- TOTP secret loaded via systemd credentials (never in environment)
+- No persistent sessions — cookie cleared on browser close
+
+---
+
+**Last Updated**: 2026-03-10
+
+---
+*[Home](../README.md) | [Services](overview.md)*

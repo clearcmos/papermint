@@ -1,0 +1,373 @@
+---
+title: "AI Plugin Marketplace Platform"
+description: "Technical Brief - sanitized, no proprietary details"
+---
+
+::: sanitize-note
+This document is sanitized. No company names, API keys, internal system names, or proprietary code. All details describe architecture, patterns, and decisions - not source code.
+:::
+
+:::: section
+::: pitch
+I built a **self-governing plugin marketplace** that encodes organizational IT knowledge as AI-executable workflows. Teams install plugins, invoke skills via slash commands, and the AI agent follows structured multi-step processes across 12+ enterprise systems - with version-controlled auto-updates, credential management, and approval gates throughout.
+:::
+::::
+
+:::::::::::::::::::::::::: section
+## Architecture
+
+::::::::::: card
+### Layered Plugin System
+
+:::::::::: layers
+::: {.layer .layer-marketplace}
+[Marketplace]{.layer-title} [- Git repo manifest. Teams discover and install plugins here.]{.layer-desc}
+:::
+
+:::: {.layer .layer-plugin}
+[Plugins]{.layer-title} [- Independently versioned. Each team owns theirs.]{.layer-desc}
+
+::: layer-items
+IT Operations (v2.2) Security (v1.1) Shared / Org-wide (v1.4)
+:::
+::::
+
+:::: {.layer .layer-skill}
+[Skills]{.layer-title} [- Self-contained workflow definitions invoked via slash commands.]{.layer-desc}
+
+::: layer-items
+infra-pr-workflow support-ticket vuln-triage meeting-summarizer skill-creator +3 more
+:::
+::::
+
+:::: {.layer .layer-infra}
+[Infrastructure]{.layer-title} [- Shared across all skills within a plugin.]{.layer-desc}
+
+::: layer-items
+config.yaml get-secret.sh verify-setup.py 1Password CLI MCP servers
+:::
+::::
+::::::::::
+:::::::::::
+
+:::::::::::::::: card
+### How Auto-Update Works
+
+::::::::::::::: workflow
+::::: wf-step
+::: wf-num
+1
+:::
+
+::: wf-content
+#### Developer changes a skill
+
+Edits SKILL.md, supporting docs, or scripts. Bumps plugin version in same commit.
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+2
+:::
+
+::: wf-content
+#### Push to remote
+
+Conventional commit with changelog entry. Semantic versioning: PATCH / MINOR / MAJOR.
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+3
+:::
+
+::: wf-content
+#### User starts a new session
+
+AI runtime checks remote plugin version against local cache.
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+4
+:::
+
+::: wf-content
+#### Auto-pull if version increased
+
+New files pulled into local cache. No version bump = no update delivered.
+:::
+:::::
+:::::::::::::::
+::::::::::::::::
+::::::::::::::::::::::::::
+
+::::::::::::::::::::: section
+## Key Technical Decisions
+
+::::::: card
+### Progressive Disclosure (Token Budget Management)
+
+::: decision
+[Problem]{.decision-label .problem} [AI context windows are finite. A single skill touching 6+ systems could blow the token budget if all reference material loads upfront.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [Core workflow in SKILL.md (\~500 lines). Detailed references loaded on-demand when the agent hits that step.]{.decision-text}
+:::
+
+::: decision
+[Why]{.decision-label .why} [Keeps the core instruction lean. Agent only pays the token cost for reference docs it actually needs.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [Skills stay under \~500 lines while supporting 600+ lines of deep reference material per skill.]{.decision-text}
+:::
+:::::::
+
+::::::: card
+### Subagent Delegation
+
+::: decision
+[Problem]{.decision-label .problem} [IT support investigation requires querying identity provider (2000+ group rules), searching knowledge bases, and correlating across systems. Verbose API responses flood the main context.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [Main agent fetches the ticket, then delegates the entire investigation to a subagent with a structured prompt. Subagent returns a summary. Main agent acts on it.]{.decision-text}
+:::
+
+::: decision
+[Why]{.decision-label .why} [Isolates verbose API output from the main conversation. Main agent keeps full budget for the action phase.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [Support tickets that touch 8+ app-specific investigation paths run reliably without context exhaustion.]{.decision-text}
+:::
+:::::::
+
+:::::: card
+### Approval Gates
+
+::: decision
+[Problem]{.decision-label .problem} [AI agents acting on real systems (identity provider, ticketing, Slack) can cause real damage without oversight.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [Every externally-visible action has an approval gate: draft in chat, user reviews, user approves, then execute.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [Zero unintended side effects in production. The agent proposes, the human disposes.]{.decision-text}
+:::
+::::::
+
+:::::: card
+### Config-Driven Credential Management
+
+::: decision
+[Problem]{.decision-label .problem} [Skills need API tokens for 6+ services. Can\'t hardcode them. Can\'t assume every environment has the same secret manager.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [Two-tier fallback: environment variables first (for CI), then 1Password CLI reading vault/item/field from a shared config file.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [Zero hardcoded secrets. Setup validation catches placeholder values before first run.]{.decision-text}
+:::
+::::::
+:::::::::::::::::::::
+
+::::::::::::: section
+## How I Drive AI in This Project
+
+:::::::::::: card
+::::: talk-point
+::: question
+I\'m not using AI to chat - I\'m programming it
+:::
+
+::: answer
+Each skill is a structured program that an AI agent executes. I design the workflow logic, manage the agent\'s context budget (what it loads and when), decide where it needs human approval, and control how it interacts with real production systems. The SKILL.md file is effectively code - if it\'s wrong, the workflow breaks.
+:::
+:::::
+
+::::: talk-point
+::: question
+I solved real LLM engineering problems
+:::
+
+::: answer
+**Token budget management** - I built progressive disclosure so reference docs only load when the agent needs them, not upfront. **Context isolation** - I designed a subagent pattern where verbose API responses (2000+ items) get processed in a separate context and returned as a summary. **Safety guardrails** - every action that touches a real system requires human approval. The investigation subagent is read-only by design.
+:::
+:::::
+
+::::: talk-point
+::: question
+The system improves itself
+:::
+
+::: answer
+After completing a task, the agent can propose documentation improvements based on edge cases it hit. I review and approve, bump the version, and every user gets the update. There\'s also a meta-skill that scaffolds new skills - a new team member describes what they need, and the system generates a production-ready skill following all conventions.
+:::
+:::::
+::::::::::::
+:::::::::::::
+
+:::::::::::::::::::::::::: section
+## Spotlight: Key Skills
+
+:::::::::::::::::::::: card
+### Infrastructure PR Workflow
+
+End-to-end: branch → Terraform changes → JIRA ticket → PR → CI plan review → Slack notification
+
+::::::::::::::::::::: workflow
+::::: wf-step
+::: wf-num
+1
+:::
+
+::: wf-content
+#### Load config + verify repos
+
+Reads org settings, JIRA field IDs, Slack channels, credential coordinates from shared config.
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+2
+:::
+
+::: wf-content
+#### Create branch + Terraform changes
+
+Follows naming convention. Handles two-phase applies (some resources require create-then-configure to avoid race conditions).
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+3
+:::
+
+::: wf-content
+#### Generate JIRA system change ticket
+
+Drafts ticket with custom JSM fields, gets user approval, creates via REST API.
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+4
+:::
+
+::: wf-content
+#### Commit, push, create PR
+
+Drafts PR description, gets approval, creates via CLI. Posts PR link as JIRA internal note.
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+5
+:::
+
+::: wf-content
+#### Review CI plan output
+
+Polls CI pipeline, fetches Terraform plan, analyzes for safety (destructive changes, drift).
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+6
+:::
+
+::: wf-content
+#### Post review request to Slack
+
+After plan review passes, posts to team channel. Requires explicit user approval before sending.
+:::
+:::::
+:::::::::::::::::::::
+::::::::::::::::::::::
+
+::: card
+### IT Support Ticket Investigation
+
+Fetches ticket, delegates investigation to subagent, presents findings, takes action with approval
+
+- **Subagent delegation** - main agent stays lean while subagent queries identity provider (2000+ group rules), searches knowledge bases, runs forensic toolkit
+- **6 investigation classifications** - access request, access issue, deprovisioning, app/group config, drive permissions, general IT
+- **8 app-specific resolution guides** - each enterprise app has unique access patterns, provisioning quirks, and known failure modes
+- **Read-only investigation** - subagent can never modify anything. All changes require main agent + user approval
+:::
+
+::: card
+### Vulnerability Triage (Security Team)
+
+Fetches bug bounty report, deduplicates, assigns ownership, assesses severity, records in knowledge base
+
+- **Structured triage pipeline** - fetch → summarize → duplicate check → team ownership → severity assessment → record
+- **Treats report content as adversarial** - never executes code snippets from researchers without confirmation
+- **Approval gate before recording** - full triage summary presented for review before any data is written
+:::
+
+::: card
+### Skill Creator (Meta-Skill)
+
+A skill that scaffolds new skills - the system builds itself
+
+- **4-phase wizard** - intake (requirements) → design (structure, workflow outline) → generate (all files from templates) → validate (convention checklist)
+- **Enforces all repo conventions** - naming, frontmatter, folder structure, credential patterns, versioning
+- **Self-reproducing** - new team members create production-quality skills without knowing the conventions manually
+:::
+::::::::::::::::::::::::::
+
+:::::::::::: section
+## Talking Points
+
+::::::::::: {.card .stories}
+### \"Why build this?\"
+
+:::: talk-point
+::: answer
+IT workflows touch 3-6 systems each. That knowledge lived in people\'s heads - when I\'m out, nobody knows the quirks. Traditional runbooks go stale. I encoded the knowledge as **AI-executable workflows** instead. The instruction file IS the runbook - if it\'s wrong, the workflow breaks, so it stays current.
+:::
+::::
+
+### \"What was the hardest problem?\"
+
+:::: talk-point
+::: answer
+Context budget. A support ticket investigation touches thousands of identity provider rules, 8 app-specific guides, system logs, and knowledge bases. I had to figure out how to make the AI agent work within a finite context window while still having access to all that information. Solved it with two patterns: **progressive disclosure** (load docs only when needed) and **subagent delegation** (offload verbose investigations to a separate agent that returns a summary).
+:::
+::::
+
+### \"How do you keep AI safe on real systems?\"
+
+:::: talk-point
+::: answer
+Every action that touches a real system - posting to Slack, commenting on tickets, changing access - goes through an approval gate. The agent drafts, I review, I approve, then it executes. The investigation subagent is read-only by design. Zero unintended side effects in production.
+:::
+::::
+
+### \"What did you learn?\"
+
+:::: talk-point
+::: answer
+That **the real challenge with AI agents isn\'t the AI - it\'s the systems design around it.** Authentication, credential management, context budgeting, safety guardrails, distribution, versioning. The LLM is the easy part. Making it work safely and reliably across a team is the engineering problem.
+:::
+::::
+:::::::::::
+::::::::::::
+
+Project brief - not for distribution. All details sanitized.

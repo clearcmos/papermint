@@ -1,0 +1,91 @@
+---
+title: "Cloud Functions Automation Platform — Event-Driven Lifecycle Management"
+description: "Several critical IT operations required automated execution without human intervention:"
+---
+
+## The Problem
+
+Several critical IT operations required automated execution without human intervention:
+
+1. **License deprovisioning**: When users leave the organization, their Microsoft 365 licenses and billing admin access must be revoked automatically — failure to do so creates security exposure and unnecessary licensing costs
+2. **Locked device reporting**: Kandji-managed devices that become locked (lost/stolen/compliance failure) need automated detection and escalation
+3. **Work-from-abroad compliance**: Employees approved to work from non-standard locations need their app access cross-referenced against policy, with action items generated per responsible team
+4. **Error monitoring**: Failures across all cloud functions need instant alerting — errors can't go unnoticed in automated systems
+
+## What Was Built
+
+Four Google Cloud Functions deployed to production as an event-driven automation platform, triggered by webhooks and scheduled events, integrating across multiple systems.
+
+### Trigger Layer — Three Authentication Models
+
+The deploy script auto-detects which model to use based on marker files in each function's directory:
+
+- **Model A — Webhook (HMAC):** JIRA sends a signed webhook. Function validates with timing-safe comparison. Token accepted in header only, never URL params (prevents log exposure).
+- **Model B — Cloud Scheduler (OIDC):** GCP rejects unauthorized requests at infrastructure level before code runs. Marker file: `.authenticated`.
+- **Model C — Pub/Sub:** Cloud event trigger from a log sink. Marker file: `.pubsub-topic` containing the topic name.
+
+### Deploy Convention
+
+Convention over configuration: marker files in the function directory tell the deploy script which trigger type and auth model to use. The deploy script also skips unchanged functions via source hash comparison.
+
+### Function 1: License Deprovisioning (~1,734 lines)
+
+The most complex function. JIRA webhook fires on a deprovisioning ticket.
+
+**Flow:**
+1. JIRA webhook fires (supports specific ticket key in payload or search for open tickets as fallback)
+2. Extract user, revoke Microsoft 365 licenses via Graph API (OAuth2 client credentials flow)
+3. Remove identity provider group memberships — errors accumulate but don't stop processing
+4. Log to Google Sheets, post structured comment to JIRA, auto-close or escalate
+
+**Systems integrated:**
+- Okta — Group membership monitoring, user status checks
+- Microsoft Graph API — License management, Teams Exploratory license removal
+- Jira Service Desk — Automated ticket creation with @mentions for escalation
+- Google Sheets — Audit logging of all actions taken
+- Google Cloud Secret Manager — Credential storage
+
+**Key features:**
+- Error accumulation pattern (not fail-fast) — if removing one group fails, the rest still get processed
+- Hardcoded watchlist for critical billing admin accounts — function removes what it can, @mentions the responsible person, adds a warning panel, and leaves the ticket open
+- Test mode for local development without affecting production systems
+- Retry logic with exponential backoff for all API calls
+- Escalation tickets created on any partial failure — no ticket ever closes with incomplete deprovisioning
+
+### Function 2: Locked Device Report
+
+Weekly scheduled scan (Cloud Scheduler, Fridays at 9 AM) that identifies devices locked via MDM that haven't been recovered.
+
+- Concurrent scanning with 10 worker threads across the full device fleet
+- 5-step filtering: lock command exists, status isn't failed, device wasn't re-enrolled, hasn't checked in post-lock, still has active unlock PIN
+- Creates a JIRA service desk ticket with a formatted table of locked devices
+- Two-step ticket creation: JSM API for portal layout, then REST API for ADF content
+
+### Function 3: Compliance Scanner (Work-From-Abroad)
+
+JIRA webhook trigger on compliance parent tickets when an employee is approved to work from a non-standard location.
+
+- Pulls the user's full application list from the identity provider
+- Cross-references against a policy spreadsheet (app name, action required, notes)
+- Splits work into subtasks by responsible team with round-robin assignment
+- Creates a calendar event on the team calendar for tracking
+- Auto-closes subtasks if no action needed
+
+### Function 4: Error Notifier
+
+Catches errors from all other cloud functions and sends instant Slack alerts.
+
+- Pub/Sub trigger from a Cloud Logging sink that captures ERROR-level logs
+- Self-excluding filter prevents infinite loops (this function's own errors are filtered out)
+- Zero suppression — every error gets a notification, no batching or deduplication
+- Catches its own exceptions without re-raising to prevent Pub/Sub retry storms
+
+## Impact
+
+- License revocation: "whenever IT notices" to automated on webhook trigger
+- Error accumulation pattern ensures partial failures don't block other operations
+- Escalation tickets ensure no deprovisioning event goes unnoticed
+- Locked device detection catches lost/stolen devices faster than manual monitoring
+- Compliance work items are automatically distributed across responsible teams
+- Error alerting provides instant visibility across all functions — no silent failures
+- Deploy convention (marker files + source hashing) makes adding new functions trivial

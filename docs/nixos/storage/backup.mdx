@@ -1,0 +1,716 @@
+---
+title: "️ Backup System Documentation"
+description: "*Automated Borg-based backup system for cmos with local and remote repositories*"
+---
+
+**Last Updated**: 2025-12-20
+
+---
+
+## 🎯 Overview
+
+The NixOS backup system provides automated, encrypted, deduplicated backups using [BorgBackup](https://www.borgbackup.org/) with dual-destination strategy: local backup to `/mnt/data` and remote backup to `offsite.bedrosn.com`.
+
+### 🏗️ Architecture
+
+```
+┌──────────────────────────────────────────┐
+│          CMOS Backup System              │
+├──────────────────────────────────────────┤
+│                                          │
+│  Daily at 5:00 AM (systemd timer)       │
+│         ↓                                │
+│  ┌─────────────────────────────────┐    │
+│  │  Local Borg Backup              │    │
+│  │  /mnt/data/backups/cmos/borg    │    │
+│  └──────────┬──────────────────────┘    │
+│             │ On Success                │
+│             ↓                            │
+│  ┌─────────────────────────────────┐    │
+│  │  Remote Borg Backup             │    │
+│  │  nicholas@offsite.bedrosn.com   │    │
+│  └─────────────────────────────────┘    │
+│                                          │
+└──────────────────────────────────────────┘
+```
+
+### ✨ Key Features
+
+- **🔐 Encrypted**: repokey-blake2 encryption with agenix-managed passphrase
+- **📦 Deduplicated**: Borg's intelligent chunking saves storage space
+- **🗜️ Compressed**: zstd level 3 compression optimized for i7-13700K
+- **🔄 Automated**: Daily backups at 5 AM with persistent timers
+- **🌐 Dual Destination**: Local + remote backup for redundancy
+- **🔔 Monitored**: Systemd journal logging
+- **📊 Retention**: 14 daily backups automatically managed
+
+---
+
+## 📋 What Gets Backed Up
+
+### 🎯 Explicit Path Strategy
+
+The backup uses **explicit paths only** - no complex patterns or wildcards. This ensures clarity about what's backed up and makes restoration straightforward.
+
+### 📁 Backup Paths
+
+**System Configuration**:
+- `/etc/nixos` - Complete NixOS configuration (flake, modules, secrets)
+
+**Nicholas User Data**:
+- `/home/nicholas/.bash_history` - Command history
+- `/home/nicholas/.config/kdeglobals` - KDE global settings
+- `/home/nicholas/.config/konsolerc` - Konsole terminal config
+- `/home/nicholas/.config/kwinrc` - KWin window manager config
+- `/home/nicholas/.config/plasma-org.kde.plasma.desktop-appletsrc` - Plasma desktop config
+- `/home/nicholas/.ssh` - SSH keys and configuration
+- `/home/nicholas/Desktop` - Desktop files
+- `/home/nicholas/Documents` - All documents
+- `/home/nicholas/Downloads` - Download directory
+- `/home/nicholas/git` - All git repositories
+- `/home/nicholas/Pictures` - All pictures
+- `/home/nicholas/Videos` - All videos
+
+**Root User Data**:
+- `/root/.gnupg` - GPG keys
+- `/root/.ssh` - Root SSH keys and configuration
+
+### 🚫 Exclusions
+
+**Third-Party Repositories**:
+- `/home/nicholas/git/reference` - Third-party reference repos (excluded)
+
+**Build Artifacts & Caches**:
+- `**/.next` - Next.js build output
+- `**/.venv` - Python virtual environments
+- `**/__pycache__` - Python bytecode
+- `**/build` - Generic build directories
+- `**/dist` - Distribution directories
+- `**/node_modules` - Node.js dependencies
+- `**/out` - Output directories
+- `**/target` - Rust/Cargo build output
+- `**/venv` - Python virtual environments
+
+---
+
+## 🤖 Automated Backups
+
+### ⏰ Schedule
+
+**Local Backup**:
+- **Service**: `borgbackup-job-cmos-automated.service`
+- **Timer**: `borgbackup-job-cmos-automated.timer`
+- **Schedule**: Daily at 5:00 AM EDT
+- **Persistent**: Runs on boot if system was off at scheduled time
+
+**Remote Backup**:
+- **Service**: `borgbackup-job-cmos-remote.service`
+- **Trigger**: Automatically runs when local backup succeeds
+- **Destination**: `nicholas@offsite.bedrosn.com:/mnt/data/cmos/borg`
+
+### 🔧 Configuration
+
+**Repository Settings**:
+- **Encryption**: repokey-blake2 (high security, stored in repo)
+- **Compression**: zstd,3 (balanced speed/ratio for i7-13700K)
+- **Archive Naming**: `cmos-TIMESTAMP` (local), `cmos-remote-TIMESTAMP` (remote)
+
+**Retention Policy**:
+- **Daily**: Keep last 14 daily backups
+- **Auto-prune**: Old backups automatically removed
+
+**Secret Management**:
+- **Passphrase**: Encrypted with agenix (`borg-backup-passphrase.age`)
+- **Location**: `/run/agenix/borg-backup-passphrase` (decrypted at runtime)
+- **Owner**: root:root (mode 0600)
+
+### 📊 Backup Output
+
+**Statistics Shown**:
+- Files added, modified, errors (filter=AME)
+- Compression ratio
+- Deduplicated size vs original size
+- Duration
+
+**Example Output**:
+```
+=========================================
+Starting CMOS automated borg backup: Wed Oct 14 05:00:01 EDT 2025
+=========================================
+
+Archive name: cmos-20251014-050001
+Archive fingerprint: abc123...
+
+                       Original size      Compressed size    Deduplicated size
+This archive:               12.5 GB              8.2 GB              156 MB
+All archives:              175.0 GB            115.0 GB               12.3 GB
+
+                       Unique chunks         Total chunks
+Chunk index:                   15420               28945
+
+=========================================
+✓ CMOS automated borg backup completed: Wed Oct 14 05:06:45 EDT 2025
+=========================================
+```
+
+---
+
+## 🔍 Manual Backup Commands
+
+### 📦 Manual Borg Backup
+
+Create an on-demand Borg backup with the same settings as automated backups:
+
+```bash
+# Full manual backup
+backup-cmos-manual-borg
+
+# Dry-run (see what would be backed up without creating archive)
+backup-cmos-manual-borg-dry
+```
+
+**Features**:
+- Same paths and exclusions as automated backup
+- Archive name: `cmos-manual-TIMESTAMP`
+- Auto-elevates to root
+- Repository auto-initialized if needed
+- Logs to systemd journal
+
+### 📁 Manual rsync Backup
+
+Legacy rsync-based backup with timestamped snapshots (no automatic retention):
+
+```bash
+backup-cmos-manual
+```
+
+**Output Structure**:
+```
+/mnt/data/backups/cmos/manual/
+└── YYYYMMDD-HHMMSS/
+    ├── home/
+    │   ├── nicholas/     (filtered by include patterns)
+    │   └── root/         (filtered by include patterns)
+    ├── nixos/            (full /etc/nixos except .git)
+    └── log/
+        ├── backup-summary.log
+        ├── nicholas-home.log
+        ├── root-home.log
+        └── nixos-config.log
+```
+
+**When to use**:
+- Quick file-level access without Borg extraction
+- Testing include/exclude patterns
+- One-time backup before major changes
+- Manual retention control needed
+
+---
+
+## 🔎 Managing Backups
+
+### 📊 Check Backup Status
+
+```bash
+# Check timer status
+systemctl status borgbackup-job-cmos-automated.timer
+
+# View next scheduled run
+systemctl list-timers | grep borg
+
+# Check last backup service status
+systemctl status borgbackup-job-cmos-automated.service
+
+# View recent backup logs
+journalctl -u borgbackup-job-cmos-automated.service -n 50
+
+# Follow live backup logs
+journalctl -u borgbackup-job-cmos-automated.service -f
+```
+
+### 📁 Borg Repository Operations
+
+**List all archives**:
+```bash
+# Local repository
+export BORG_PASSPHRASE=$(sudo cat /run/agenix/borg-backup-passphrase)
+borg list /mnt/data/backups/cmos/borg
+
+# Remote repository
+borg list nicholas@offsite.bedrosn.com:/mnt/data/cmos/borg
+```
+
+**View archive contents**:
+```bash
+# List files in specific archive
+borg list /mnt/data/backups/cmos/borg::cmos-20251014-050001
+
+# Search for specific file
+borg list /mnt/data/backups/cmos/borg::cmos-20251014-050001 | grep filename
+```
+
+**Repository information**:
+```bash
+# Repository statistics
+borg info /mnt/data/backups/cmos/borg
+
+# Specific archive statistics
+borg info /mnt/data/backups/cmos/borg::cmos-20251014-050001
+```
+
+**Manual pruning** (if needed):
+```bash
+# Prune old backups manually (matches automated retention: 14 daily)
+borg prune --keep-daily=14 --list /mnt/data/backups/cmos/borg
+```
+
+---
+
+## ☁️ Nextcloud Client Backup
+
+### 🎯 Overview
+
+Automated backup of the Nextcloud client sync folder (`/mnt/data/nextcloud/`) to Google Drive using zstd compression and rclone.
+
+### 🏗️ Architecture
+
+```
+┌──────────────────────────────────────────┐
+│     Nextcloud Client Backup              │
+├──────────────────────────────────────────┤
+│                                          │
+│  Daily at 4:00 AM (systemd timer)        │
+│         ↓                                │
+│  ┌─────────────────────────────────┐     │
+│  │  Change Detection               │     │
+│  │  (SHA256 of paths+mtimes+sizes) │     │
+│  └──────────┬──────────────────────┘     │
+│             │ If changed                 │
+│             ↓                            │
+│  ┌─────────────────────────────────┐     │
+│  │  zstd Compression               │     │
+│  │  tar -I 'zstd -T0 --fast=3'    │     │
+│  └──────────┬──────────────────────┘     │
+│             │                            │
+│             ↓                            │
+│  ┌─────────────────────────────────┐     │
+│  │  Upload to Google Drive         │     │
+│  │  gdrive:/Backups/nextcloud/    │     │
+│  │  (rclone, keeps only latest)   │     │
+│  └─────────────────────────────────┘     │
+│                                          │
+└──────────────────────────────────────────┘
+```
+
+### ✨ Key Features
+
+- **🔄 Change Detection**: SHA256 hash of all file paths, mtimes, and sizes
+- **🗜️ Fast Compression**: zstd with multi-threading (`-T0 --fast=3`)
+- **☁️ Cloud Backup**: Uploads to Google Drive via rclone
+- **💾 Single Archive**: Only keeps latest backup (overwrites previous)
+- **🗑️ Trash Cleanup**: Automatically empties Google Drive trash after deleting old backup
+- **👤 User-Runnable**: Can be run manually by user `nicholas`
+
+> **⚠️ Note**: The archive is compressed but **not encrypted**. Security relies on Google Drive access controls. If encryption is needed, consider wrapping with GPG or using Borg for Nextcloud data.
+
+### ⏰ Schedule
+
+- **Service**: `backup-nextcloud.service`
+- **Timer**: `backup-nextcloud.timer`
+- **Schedule**: Daily at 4:00 AM EDT (5-minute random delay)
+- **Persistent**: Runs on boot if system was off at scheduled time
+
+### 🔧 Configuration
+
+**Paths**:
+- **Source**: `/mnt/data/nextcloud/`
+- **State File**: `/var/lib/nextcloud-backup/state.sha256`
+- **Destination**: `gdrive:/Backups/nextcloud/nextcloud.tar.zst`
+
+**rclone Remote**:
+- **Name**: `gdrive` (configured in `/home/nicholas/.config/rclone/rclone.conf`)
+- **Type**: Google Drive with OAuth2
+
+### 📊 Commands
+
+**Manual Backup**:
+```bash
+# Run backup manually (as user nicholas)
+backup-nextcloud
+
+# Check last backup status
+systemctl status backup-nextcloud.service
+
+# View backup logs
+journalctl -u backup-nextcloud -n 50
+
+# Check timer status
+systemctl list-timers backup-nextcloud.timer
+```
+
+**Force Backup** (ignore change detection):
+```bash
+# Force backup regardless of changes
+sudo /etc/nixos/scripts/backup-nextcloud.py --force
+
+# Alternative: Delete state file to force re-backup
+sudo rm /var/lib/nextcloud-backup/state.sha256
+backup-nextcloud
+```
+
+### 🛠️ Troubleshooting
+
+**Backup not running**:
+```bash
+# Check timer status
+systemctl status backup-nextcloud.timer
+
+# Enable if disabled
+sudo systemctl enable backup-nextcloud.timer
+sudo systemctl start backup-nextcloud.timer
+```
+
+**rclone errors**:
+```bash
+# Test rclone remote
+rclone lsd gdrive:/Backups/
+
+# Re-authorize if needed
+rclone config reconnect gdrive:
+```
+
+**"No such file or directory: sudo" or "rclone" errors**:
+The systemd service may be missing required binaries in its PATH. Check that `backup-scripts.nix` includes all required packages:
+```nix
+path = with pkgs; [
+  python3
+  coreutils
+  gnutar
+  zstd
+  rclone  # Required for Google Drive upload
+  sudo    # Required to run rclone as user nicholas
+];
+```
+After fixing, rebuild: `nixos-rebuild switch --flake .#cmos`
+
+**Configuration**:
+- **Script**: `/etc/nixos/scripts/backup-nextcloud.py`
+- **NixOS Module**: `/etc/nixos/modules/core/backup-scripts.nix`
+
+---
+
+## 🔄 Restoring from Backups
+
+### 📂 Extract Specific Files
+
+**Extract single file**:
+```bash
+# Set passphrase
+export BORG_PASSPHRASE=$(sudo cat /run/agenix/borg-backup-passphrase)
+
+# Extract to current directory
+borg extract /mnt/data/backups/cmos/borg::cmos-20251014-050001 home/nicholas/Documents/important.txt
+
+# Extract to specific location
+borg extract --stdout /mnt/data/backups/cmos/borg::cmos-20251014-050001 home/nicholas/Documents/important.txt > /tmp/important.txt
+```
+
+**Extract directory**:
+```bash
+# Extract entire directory
+borg extract /mnt/data/backups/cmos/borg::cmos-20251014-050001 home/nicholas/Documents
+
+# Extract with original paths
+borg extract /mnt/data/backups/cmos/borg::cmos-20251014-050001 home/nicholas/Documents
+# (Creates ./home/nicholas/Documents in current directory)
+```
+
+### 🏠 Full Home Directory Restore
+
+**Complete user restore**:
+```bash
+# Set passphrase
+export BORG_PASSPHRASE=$(sudo cat /run/agenix/borg-backup-passphrase)
+
+# Extract to temporary location first
+cd /tmp
+borg extract /mnt/data/backups/cmos/borg::cmos-20251014-050001 home/nicholas
+
+# Review extracted files
+ls -la home/nicholas/
+
+# Copy to actual home (run as root)
+rsync -avH --numeric-ids /tmp/home/nicholas/ /home/nicholas/
+chown -R nicholas:users /home/nicholas
+```
+
+**Root user restore**:
+```bash
+# Extract root home
+cd /tmp
+borg extract /mnt/data/backups/cmos/borg::cmos-20251014-050001 root
+
+# Copy to /root (run as root)
+rsync -avH --numeric-ids /tmp/root/ /root/
+chown -R root:root /root
+```
+
+### ⚙️ System Configuration Restore
+
+**NixOS configuration restore**:
+```bash
+# Extract /etc/nixos
+cd /tmp
+borg extract /mnt/data/backups/cmos/borg::cmos-20251014-050001 etc/nixos
+
+# Review and copy
+sudo rsync -avH /tmp/etc/nixos/ /etc/nixos/
+
+# Rebuild system
+cd /etc/nixos
+sudo nixos-rebuild switch --flake .#cmos
+```
+
+### 🆘 Disaster Recovery
+
+**Complete system restoration**:
+1. Fresh NixOS install on new hardware
+2. Configure network and install Borg
+3. Mount `/mnt/data` or use remote repository
+4. Extract `/etc/nixos` configuration
+5. Rebuild NixOS from configuration
+6. Restore user data
+7. Verify all services and data
+
+**Remote repository restore** (if local disk failed):
+```bash
+# Use remote backup as source
+export BORG_PASSPHRASE=$(sudo cat /run/agenix/borg-backup-passphrase)
+borg extract nicholas@offsite.bedrosn.com:/mnt/data/cmos/borg::cmos-remote-20251014-050001
+```
+
+---
+
+## 🔔 Monitoring
+
+Backup status is monitored via systemd journal:
+
+**Check last backup**:
+```bash
+journalctl -u borgbackup-job-cmos-automated.service -n 50
+journalctl -u borgbackup-job-cmos-remote.service -n 50
+```
+
+**Optional enhancements**:
+- Configure systemd `OnFailure` units for email alerts
+- Set up external monitoring to check backup freshness
+
+---
+
+## 🛠️ Troubleshooting
+
+### ❌ Common Issues
+
+**Timer not running**:
+```bash
+# Check timer status
+systemctl status borgbackup-job-cmos-automated.timer
+
+# Enable timer if disabled
+sudo systemctl enable borgbackup-job-cmos-automated.timer
+
+# Start timer
+sudo systemctl start borgbackup-job-cmos-automated.timer
+```
+
+**Backup failed**:
+```bash
+# Check service logs
+journalctl -u borgbackup-job-cmos-automated.service -n 100
+
+# Check remote SSH connectivity
+ssh nicholas@offsite.bedrosn.com
+
+# Test Borg access
+export BORG_PASSPHRASE=$(sudo cat /run/agenix/borg-backup-passphrase)
+borg info /mnt/data/backups/cmos/borg
+```
+
+**Repository locked**:
+```bash
+# If backup was interrupted, repository may be locked
+borg break-lock /mnt/data/backups/cmos/borg
+
+# Or for remote
+borg break-lock nicholas@offsite.bedrosn.com:/mnt/data/cmos/borg
+```
+
+**Storage space issues**:
+```bash
+# Check disk usage
+df -h /mnt/data
+
+# Check repository size
+borg info /mnt/data/backups/cmos/borg
+
+# Manual prune to free space
+borg prune --keep-daily=7 --list /mnt/data/backups/cmos/borg
+```
+
+**Passphrase errors**:
+```bash
+# Verify secret is decrypted
+sudo cat /run/agenix/borg-backup-passphrase
+
+# Re-encrypt secret if needed (from /etc/nixos/secrets)
+cd /etc/nixos/secrets
+nix run github:ryantm/agenix -- -e borg-backup-passphrase.age -i ../keys/cmos-agenix.key
+```
+
+### 🔍 Verification
+
+**Verify backup integrity**:
+```bash
+# Check repository consistency
+borg check /mnt/data/backups/cmos/borg
+
+# Verify specific archive
+borg check /mnt/data/backups/cmos/borg::cmos-20251014-050001
+
+# Deep verification (slower)
+borg check --verify-data /mnt/data/backups/cmos/borg
+```
+
+**Test restore**:
+```bash
+# Extract to temporary directory
+mkdir /tmp/restore-test
+cd /tmp/restore-test
+borg extract /mnt/data/backups/cmos/borg::cmos-20251014-050001 home/nicholas/Documents
+
+# Verify files
+ls -la home/nicholas/Documents
+```
+
+---
+
+## 📖 Configuration Files
+
+### 📂 File Locations
+
+**Backup Configuration**:
+- **Main config**: `/etc/nixos/modules/core/backup-scripts.nix`
+- **Host import**: `/etc/nixos/hosts/cmos/default.nix` (imports backup-scripts.nix)
+- **Secret definition**: `/etc/nixos/modules/core/agenix-secrets.nix` (borg-backup-passphrase)
+- **Encrypted secret**: `/etc/nixos/secrets/borg-backup-passphrase.age`
+
+**Runtime Paths**:
+- **Local repository**: `/mnt/data/backups/cmos/borg`
+- **Remote repository**: `nicholas@offsite.bedrosn.com:/mnt/data/cmos/borg`
+- **Decrypted passphrase**: `/run/agenix/borg-backup-passphrase` (runtime only)
+- **Service logs**: `journalctl -u borgbackup-job-cmos-automated.service`
+
+### 🔧 Modifying Backup Configuration
+
+**Change backup schedule**:
+Edit `/etc/nixos/modules/core/backup-scripts.nix`:
+```nix
+startAt = "*-*-* 03:00:00";  # Change to 3 AM
+```
+
+**Add new paths**:
+```nix
+paths = [
+  # ... existing paths ...
+  "/home/nicholas/NewDirectory"
+];
+```
+
+**Add new exclusions**:
+```nix
+exclude = [
+  # ... existing exclusions ...
+  "**/new-pattern-to-exclude"
+];
+```
+
+**Change retention**:
+```nix
+prune.keep = {
+  daily = 7;    # Change from 14 to 7 days
+  weekly = 4;   # Add weekly retention
+  monthly = 12; # Add monthly retention
+};
+```
+
+**Apply changes**:
+```bash
+cd /etc/nixos
+sudo nixos-rebuild switch --flake .#cmos
+```
+
+---
+
+## 🎯 Best Practices
+
+### ✅ Do's
+
+- ✅ Monitor backup logs regularly
+- ✅ Test restore procedures monthly
+- ✅ Verify remote backup connectivity
+- ✅ Keep backup passphrase secure in agenix
+- ✅ Check `/mnt/data` disk space weekly
+- ✅ Review backup size trends
+
+### ❌ Don'ts
+
+- ❌ Don't hardcode backup passphrase
+- ❌ Don't disable backups without planning
+- ❌ Don't skip testing restore procedures
+- ❌ Don't ignore backup failure notifications
+- ❌ Don't run `borg delete` without verification
+- ❌ Don't modify repository manually
+
+---
+
+## 📊 Backup Metrics
+
+**Typical Backup Performance** (cmos with i7-13700K):
+- **Initial backup**: ~30-45 minutes (full data set)
+- **Daily incremental**: ~2-5 minutes (changed files only)
+- **Deduplication ratio**: ~85% (typical)
+- **Compression ratio**: ~35% (with zstd,3)
+- **Repository size**: ~12-15 GB (14 daily backups of ~12 GB original)
+
+**Storage Requirements**:
+- **Local repository**: ~15 GB (with deduplication)
+- **Remote repository**: ~15 GB (identical to local)
+- **Growth rate**: ~500 MB/day (varies with changes)
+
+---
+
+## 📚 Related Documentation
+
+### 🔐 Security
+- **[Secret Management](../security/secrets.md)** - agenix passphrase management
+- **[SSH Configuration](../security/overview.md)** - Remote backup SSH keys
+
+### 🗄️ Storage
+- **[Storage Overview](../storage/overview.md)** - Complete storage architecture
+- **[Google Drive](../storage/google-drive.md)** - Cloud storage integration
+
+### 🏗️ Infrastructure
+- **[CMOS Host](../infrastructure/hosts-cmos.md)** - Desktop host configuration
+- **[Jimmich Host](../infrastructure/hosts-jimmich.md)** - Backup target server
+
+### 🚨 Operations
+- **[Operations Overview](../operations/overview.md)** - System operations
+- **[Troubleshooting](../troubleshooting/overview.md)** - Issue resolution
+
+---
+
+**Last Updated**: 2025-12-20
+**Backup System**: ✅ Active and healthy (Borg + Nextcloud to Google Drive)
+
+---
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🗄️ [Storage](../storage/overview.md) | 🔐 [Security](../security/overview.md)*

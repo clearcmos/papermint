@@ -1,0 +1,300 @@
+---
+title: "LibreChat - AI Chat Platform"
+description: "LibreChat is an open-source ChatGPT-style interface that provides:"
+---
+
+**Last Updated**: 2025-10-20
+
+## 🎯 Overview
+
+LibreChat is an open-source ChatGPT-style interface that provides:
+- **Ollama Integration**: Chat with local AI models (qwen2.5, qwen2.5-coder, llama3.2-vision)
+- **RAG Support**: Query your personal Obsidian knowledge base using semantic search
+- **Privacy-First**: Everything runs locally - no external API calls
+- **Multi-Modal**: Support for text and vision models
+
+**Architecture:**
+- LibreChat app (port 8090, localhost only)
+- RAG API with LangChain (port 8099, internal)
+- MongoDB (app state, internal only)
+- PostgreSQL + PGVector (RAG embeddings, internal only)
+
+---
+
+## 🔧 Configuration
+
+**Module Location**: `modules/desktop/librechat.nix`
+**Host**: cmos (desktop only)
+**Status**: Active
+
+**Ports:**
+- 8090/tcp - LibreChat web interface (localhost only)
+- 8099/tcp - RAG API (internal, used by `ragrefresh` command)
+
+**Dependencies:**
+- Ollama (port 11434) - provides chat models and embeddings
+- Docker - container runtime
+
+**Secrets (agenix):**
+- `librechat-encryption-key.age` - Database encryption key
+- `librechat-jwt-secret.age` - JWT session signing key
+
+---
+
+## 🚀 Usage
+
+### Accessing LibreChat
+
+Open in your browser:
+```
+http://localhost:8090
+```
+
+On first visit, create an account (stored locally in MongoDB).
+
+### Available Models
+
+LibreChat automatically detects Ollama models. You'll see:
+- **qwen2.5:7b-instruct** - General-purpose chat
+- **qwen2.5-coder:7b-instruct** - Code-focused conversations
+- **llama3.2-vision:11b** - Image analysis
+- **qwen2.5vl:7b** - Vision/multimodal tasks
+
+### Uploading Knowledge Base (RAG)
+
+Use the `ragrefresh` command to upload your Obsidian markdown files:
+
+```bash
+ragrefresh
+```
+
+This scans and uploads all `.md` files from configured directories (edit `ragrefresh` script to customize):
+- `/home/nicholas/Documents/Obsidian/IT` (example)
+- `/home/nicholas/Documents/Personal` (example)
+
+Files are:
+1. Split into chunks
+2. Converted to embeddings using `bge-m3` (via Ollama)
+3. Stored in PostgreSQL PGVector database
+
+**After uploading**, you can chat with your knowledge base:
+- LibreChat automatically searches relevant chunks
+- Feeds them to the LLM for context-aware answers
+- No hallucinations about your personal notes
+
+### Manual File Upload
+
+You can also upload files via the LibreChat UI:
+1. Click the paperclip icon in chat
+2. Select "Upload as Text" for `.md` files
+3. Or use "Chat with Files" (RAG) for persistent storage
+
+---
+
+## 📋 Management Commands
+
+### Check Status
+```bash
+librechat-status
+```
+
+Shows:
+- Container status (running/stopped)
+- RAG API health
+- LibreChat accessibility
+- Ollama connection and available models
+
+### View Logs
+```bash
+# Main app logs
+librechat-logs
+
+# Specific container
+librechat-logs librechat-rag-api
+librechat-logs librechat-mongo
+librechat-logs librechat-postgres
+```
+
+### Refresh Knowledge Base
+```bash
+ragrefresh
+```
+
+**Output example:**
+```
+=== LibreChat RAG Refresh ===
+Uploading Obsidian markdown files to LibreChat RAG API...
+
+✅ RAG API is accessible
+
+📂 Scanning: /home/nicholas/Documents/Obsidian/IT
+📤 Uploading: nixos-secrets.md
+   ✅ Success
+📤 Uploading: docker-compose.md
+   ✅ Success
+
+=== Summary ===
+Total files found: 47
+Successfully uploaded: 47
+Failed: 0
+
+✅ All files uploaded successfully!
+```
+
+### Restart Services
+```bash
+systemctl restart docker-librechat-app
+systemctl restart docker-librechat-rag-api
+```
+
+---
+
+## 🛠️ Troubleshooting
+
+### LibreChat Won't Start
+
+**Check dependencies:**
+```bash
+systemctl status ollama
+systemctl status docker-librechat-mongo
+systemctl status docker-librechat-postgres
+```
+
+**Common fix:**
+```bash
+# Restart in order
+systemctl restart docker-librechat-postgres
+systemctl restart docker-librechat-mongo
+systemctl restart docker-librechat-rag-api
+systemctl restart docker-librechat-app
+```
+
+### RAG API Not Responding
+
+**Check logs:**
+```bash
+librechat-logs librechat-rag-api
+```
+
+**Common issues:**
+- Ollama not running: `systemctl start ollama`
+- PostgreSQL not ready: `systemctl restart docker-librechat-postgres`
+- Model not found: Ensure `bge-m3` is installed (`ollama list`)
+
+### `ragrefresh` Fails
+
+**Error: "RAG API is not running"**
+```bash
+curl http://localhost:8099/health
+systemctl status docker-librechat-rag-api
+```
+
+**Error: "Failed to upload files"**
+- Check Ollama is running and has `bge-m3` model
+- Check disk space in `/var/lib/librechat/pg`
+- Check logs: `librechat-logs librechat-rag-api`
+
+### Models Not Appearing
+
+**Verify Ollama connection:**
+```bash
+curl http://localhost:11434/api/tags
+```
+
+**Restart LibreChat to re-detect models:**
+```bash
+systemctl restart docker-librechat-app
+```
+
+### High Memory Usage
+
+LibreChat containers can use significant memory if many files are indexed.
+
+**Check container resource usage:**
+```bash
+docker stats librechat-app librechat-rag-api
+```
+
+**Limit embeddings:**
+- Only upload essential markdown files
+- Delete old embeddings via LibreChat UI (Files panel)
+
+---
+
+## 🔐 Security
+
+**Secrets Management:**
+- Encryption keys stored in agenix (encrypted at rest)
+- Created on systemd preStart from agenix secrets
+- Stored in `/var/lib/librechat/env` (0600 permissions, owned by librechat)
+
+**Network Exposure:**
+- LibreChat only accessible on localhost (127.0.0.1:8090)
+- RAG API only accessible on localhost (127.0.0.1:8099)
+- MongoDB and PostgreSQL internal to Docker network
+
+**To expose externally** (not recommended without authentication):
+1. Add Traefik router in `modules/services/traefik.nix`
+2. Create OAuth2-proxy service module (see `modules/services/oauth2-proxy-*.nix` examples)
+3. Add Keycloak client and group-based access control
+4. Update `modules/desktop/librechat.nix` firewall
+
+---
+
+## 📂 Data Locations
+
+**Application Data:**
+- MongoDB: `/var/lib/librechat/mongo`
+- PostgreSQL (RAG): `/var/lib/librechat/pg`
+- Uploaded Files: `/var/lib/librechat/uploads`
+- Environment (secrets): `/var/lib/librechat/env`
+
+**Backups:**
+To backup your chat history and RAG database:
+```bash
+# MongoDB (chat history, user accounts)
+docker exec librechat-mongo mongodump --out /data/db/backup
+
+# PostgreSQL (RAG embeddings)
+docker exec librechat-postgres pg_dump -U librechat librechat_rag > /tmp/rag-backup.sql
+```
+
+---
+
+## 🧪 Advanced Configuration
+
+### Adding More Ollama Models
+
+LibreChat auto-detects new models:
+```bash
+ollama pull deepseek-r1:7b
+# Refresh LibreChat UI - new model appears automatically
+```
+
+### Custom librechat.yaml
+
+Not currently configured, but you can add:
+1. Create `/etc/librechat/librechat.yaml`
+2. Mount in container: update `modules/desktop/librechat.nix` volumes
+3. Set `CONFIG_PATH=/app/librechat.yaml` in environment
+
+### Using Remote Embeddings
+
+By default, RAG uses local `bge-m3` via Ollama. To use OpenAI embeddings:
+1. Add `openai-api-key.age` to agenix secrets
+2. Update `docker-librechat-rag-api` environment:
+   ```nix
+   RAG_OPENAI_API_KEY = "<secret>";
+   ```
+3. Remove `RAG_OLLAMA_BASE_URL` (switches to OpenAI)
+
+---
+
+## 🔗 Related Documentation
+
+- **AI/Ollama**: [desktop-ai-ollama.md](../desktop/ai-ollama.md) - Ollama setup and model management
+- **Secrets**: [security-secrets.md](../security/secrets.md) - Agenix secret workflow
+
+---
+
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md)*

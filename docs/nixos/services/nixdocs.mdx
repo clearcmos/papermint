@@ -1,0 +1,272 @@
+---
+title: "NixDocs Documentation Site"
+description: "*Comprehensive infrastructure documentation with MkDocs Material theme*"
+---
+
+## 🎯 Overview
+
+NixDocs is the centralized documentation site for the entire NixOS infrastructure, providing a beautiful, organized, and easily navigable interface for all technical documentation. It renders the `/etc/nixos/docs/` directory structure as a professional documentation website using [MkDocs Material](https://squidfunk.github.io/mkdocs-material/) theme.
+
+**Service URL**: https://nixdocs.bedrosn.com
+**Backend Port**: 3080 (Nginx → Traefik)
+**Host**: misc.home.arpa
+
+---
+
+## 🏗️ Architecture
+
+### 📋 Build System
+
+**MkDocs Material via mkdocs-flake**:
+
+The documentation is built using [mkdocs-flake](https://github.com/applicative-systems/mkdocs-flake), a Nix-native MkDocs distribution with Material theme pre-configured.
+
+```nix
+# flake.nix input
+mkdocs-flake = {
+  url = "github:applicative-systems/mkdocs-flake";
+  inputs.nixpkgs.follows = "nixpkgs";
+};
+```
+
+**Build Process** (`modules/services/nixdocs.nix`):
+```nix
+mkdocsSite = pkgs.runCommand "nixos-infrastructure-docs" {
+  buildInputs = [ mkdocsPackage ];
+} ''
+  # Create build directory with mkdocs.yml and docs/
+  mkdir -p build/docs
+  cp ${inputs.self}/mkdocs.yml build/
+  cp -r ${inputs.self}/docs/* build/docs/
+
+  # Build with MkDocs
+  cd build
+  mkdocs build -d $out
+'';
+```
+
+**Configuration**: `/etc/nixos/mkdocs.yml`
+- Navigation structure defined declaratively
+- Material theme with dark/light toggle
+- Full-text search enabled
+- Code syntax highlighting with copy button
+
+### 🎨 Theme Features
+
+**Material Design**:
+- Dark mode (default) with light mode toggle
+- Responsive design for mobile/tablet/desktop
+- Navigation tabs at top level
+- Expandable sidebar sections
+- Built-in search with suggestions and highlighting
+
+**Markdown Extensions**:
+- Admonitions (note, warning, tip boxes)
+- Code blocks with syntax highlighting
+- Tables with proper styling
+- Table of contents with permalinks
+- Tabbed content blocks
+
+---
+
+## 🧭 Navigation System
+
+### 📁 Sidebar Organization
+
+Navigation is defined in `/etc/nixos/mkdocs.yml`:
+
+```yaml
+nav:
+  - Home: README.md
+  - Infrastructure:
+    - Overview: infrastructure/overview.md
+    - Hosts: infrastructure/hosts.md
+    # ... more pages
+  - Services:
+    - Overview: services/overview.md
+    # ... more pages
+```
+
+**Categories**:
+- 🏗️ Infrastructure - System architecture, hosts, networking
+- 🔧 Services - Web services, monitoring, file management
+- 🔒 Security - Authentication, secrets, network security
+- 🖥️ Desktop - KDE, applications, gaming configuration
+- 🤖 AI - Machine learning, models, GPU configuration
+- 💾 Storage - Backup, file systems, cloud sync
+- ⚙️ Operations - Deployment, maintenance, procedures
+- 🔧 Tools - Development tools, utilities, scripts
+- 🐛 Troubleshooting - Issues, debugging, problem resolution
+- 📚 Reference - Man pages, quick references, cheatsheets
+
+---
+
+## 🔧 Configuration
+
+### 📄 Service Configuration
+
+**NixOS Module**: `/etc/nixos/modules/services/nixdocs.nix`
+```nix
+services.nginx.virtualHosts."nixdocs.bedrosn.com" = {
+  listen = [ { addr = "127.0.0.1"; port = 3080; } ];
+  root = "${mkdocsSite}";
+
+  locations."/" = {
+    tryFiles = "$uri $uri/ $uri.html /index.html";
+    extraConfig = ''
+      # Security headers
+      add_header X-Frame-Options "SAMEORIGIN" always;
+      add_header X-Content-Type-Options "nosniff" always;
+
+      # Cache static assets
+      location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+      }
+    '';
+  };
+};
+```
+
+**Traefik Integration**: Defined in `modules/services/traefik.nix`
+```nix
+nixdocs = {
+  rule = "Host(`nixdocs.bedrosn.com`)";
+  service = "oauth2-proxy-nixdocs";
+  tls = {
+    certResolver = "le";
+  };
+  middlewares = [ "enhanced-security-headers" "strip-server-headers" ];
+};
+```
+
+### 🔐 Authentication
+
+**OAuth2-Proxy Configuration**: Protected via `modules/services/oauth2-proxy-nixdocs.nix`
+- **Port**: 4189 (OAuth2-proxy) → 3080 (Nginx backend)
+- **Group**: `nixdocs-access` in Keycloak
+- **Identity Provider**: Keycloak with Google SSO
+- **Session Duration**: 4 hours with 15-minute refresh
+
+**Access Control**:
+- **Authentication**: OAuth2-proxy with Keycloak (Google SSO)
+- **Authorization**: Group-based via Keycloak (`nixdocs-access` group)
+- **Security Headers**: Enhanced CSP, HSTS, X-Frame-Options via Traefik middlewares
+- **HTTPS Only**: TLS termination via Traefik with Let's Encrypt
+
+---
+
+## 🚀 Deployment
+
+### 📦 Deployment Process
+
+**Automatic Deployment**:
+1. **Edit Docs**: Modify markdown files in `/etc/nixos/docs/`
+2. **Update Nav**: Add new pages to `/etc/nixos/mkdocs.yml` if needed
+3. **Git Add**: `git add` new files (critical for flake inclusion)
+4. **Build**: `nixos-rebuild switch --flake .#misc --target-host misc.home.arpa`
+5. **Verify**: Site automatically rebuilds and redeploys
+
+**Manual Validation**:
+```bash
+# Check service status
+ssh misc.home.arpa "systemctl status nginx"
+
+# Test site accessibility (should redirect to OAuth2)
+curl -I https://nixdocs.bedrosn.com
+```
+
+### 🔄 Adding New Documentation
+
+**Adding a New Page**:
+1. Create the markdown file in appropriate `/etc/nixos/docs/` subdirectory
+2. Add entry to `nav:` section in `/etc/nixos/mkdocs.yml`
+3. `git add` the new file
+4. Rebuild misc
+
+**Adding a New Section**:
+1. Create new directory in `/etc/nixos/docs/`
+2. Add `overview.md` as section index
+3. Add section to `nav:` in mkdocs.yml
+4. Rebuild misc
+
+---
+
+## 📊 Monitoring & Maintenance
+
+### 🔍 Health Checks
+
+```bash
+# Check Nginx status
+ssh misc.home.arpa "systemctl status nginx"
+
+# Check OAuth2-proxy
+ssh misc.home.arpa "systemctl status oauth2-proxy-nixdocs"
+
+# Test site (should get 302 redirect to Keycloak)
+curl -sI https://nixdocs.bedrosn.com | head -5
+```
+
+### 📈 Performance
+
+**Caching Strategy**:
+- **Static Assets**: 1-year cache with immutable flag
+- **HTML Content**: No caching for dynamic updates
+- **CDN**: Cloudflare edge caching for global performance
+
+---
+
+## 🐛 Troubleshooting
+
+### 🔧 Common Issues
+
+**Site Not Loading**:
+```bash
+# Check Nginx service
+ssh misc.home.arpa "systemctl status nginx"
+
+# Check logs
+ssh misc.home.arpa "journalctl -u nginx -n 20"
+```
+
+**Build Failures**:
+```bash
+# Check MkDocs build logs
+nix log /nix/store/...-nixos-infrastructure-docs.drv
+
+# Common issues:
+# - Missing page in nav that doesn't exist in docs/
+# - YAML syntax error in mkdocs.yml
+# - File not git-added before rebuild
+```
+
+**Authentication Issues**:
+```bash
+# Check OAuth2-proxy service
+ssh misc.home.arpa "systemctl status oauth2-proxy-nixdocs"
+
+# Check Keycloak
+ssh misc.home.arpa "systemctl status keycloak"
+
+# Test OAuth2 endpoint (should redirect)
+curl -I https://nixdocs.bedrosn.com
+```
+
+---
+
+## 🔗 Related Files
+
+| File | Purpose |
+|------|---------|
+| `/etc/nixos/mkdocs.yml` | MkDocs configuration and navigation |
+| `/etc/nixos/modules/services/nixdocs.nix` | Nginx and build configuration |
+| `/etc/nixos/modules/services/oauth2-proxy-nixdocs.nix` | OAuth2-proxy authentication |
+| `/etc/nixos/docs/` | Documentation source files |
+
+---
+
+**Last Updated**: 2025-12-26
+**Service Status**: ✅ Active and fully operational
+
+---
+*🏠 [Home](../README.md) | 📚 [Services](overview.md) | 🔐 [Security](../security/overview.md)*

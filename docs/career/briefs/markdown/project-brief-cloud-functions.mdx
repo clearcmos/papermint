@@ -1,0 +1,270 @@
+---
+title: "Cloud Functions Automation Platform"
+description: "Technical Brief - sanitized, no proprietary details"
+---
+
+::: sanitize-note
+This document is sanitized. No company names, API keys, internal system names, or proprietary code. All details describe architecture, patterns, and decisions - not source code.
+:::
+
+:::: section
+::: pitch
+Built a production **event-driven automation platform on Google Cloud Functions** that connects ticketing, identity management, device management, and collaboration systems. Webhooks and scheduled triggers fire serverless functions that handle license deprovisioning, compliance scanning, lost device detection, and error alerting - all with zero manual intervention, full audit trails, and escalation when something goes wrong.
+:::
+::::
+
+:::::::::::::: section
+## Architecture
+
+:::::::::::: card
+### Platform Layers
+
+::::::::::: layers
+:::: {.layer .layer-trigger}
+[Trigger Layer]{.layer-title} [- Three authentication models auto-detected by the deploy script based on marker files.]{.layer-desc}
+
+::: layer-items
+JIRA webhooks (HMAC) Cloud Scheduler (OIDC) Pub/Sub events
+:::
+::::
+
+:::: {.layer .layer-logic}
+[Business Logic]{.layer-title} [- Each function solves one operational problem end-to-end with error accumulation and conditional escalation.]{.layer-desc}
+
+::: layer-items
+License deprovisioning Compliance scanning Device lock detection Error alerting
+:::
+::::
+
+:::: {.layer .layer-integrations}
+[System Integrations]{.layer-title} [- Each function orchestrates 3-5 external APIs with per-API auth patterns.]{.layer-desc}
+
+::: layer-items
+Identity provider (SSWS) Microsoft Graph (OAuth2) JIRA REST + JSM MDM platform (Bearer) Google Sheets Google Calendar Slack webhooks
+:::
+::::
+
+:::: {.layer .layer-observe}
+[Observability]{.layer-title} [- Every function logs to Sheets for audit, Cloud Logging for debugging, and Slack for alerting.]{.layer-desc}
+
+::: layer-items
+Google Sheets audit logs Cloud Logging Slack alerts (zero suppression) JIRA escalation comments
+:::
+::::
+:::::::::::
+::::::::::::
+
+::: card
+### Three Authentication Models
+
+The deploy script auto-detects which model to use based on marker files in each function\'s directory.
+
+- **Model A - Webhook (HMAC):** JIRA sends a signed webhook. Function validates with timing-safe comparison. Token accepted in header only, never URL params (prevents log exposure).
+- **Model B - Cloud Scheduler (OIDC):** GCP rejects unauthorized requests at infrastructure level before code runs. Marker file: `.authenticated`.
+- **Model C - Pub/Sub:** Cloud event trigger from log sink. Marker file: `.pubsub-topic` containing the topic name.
+:::
+::::::::::::::
+
+:::::::::::::::::::: section
+## Spotlight: The Functions
+
+:::::::::::::::: card
+### License Deprovisioning
+
+When an employee leaves, a JIRA ticket triggers automatic revocation of their cloud licenses and identity provider access.
+
+::::::::::::::: workflow
+::::: wf-step
+::: wf-num
+1
+:::
+
+::: wf-content
+#### JIRA webhook fires on deprovisioning ticket
+
+Supports two modes: specific ticket key in payload (preferred) or search for open tickets (backwards compatible).
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+2
+:::
+
+::: wf-content
+#### Extract user, revoke licenses via Microsoft Graph
+
+OAuth2 client credentials flow. Removes all licenses except one exploratory license that can\'t be programmatically removed.
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+3
+:::
+
+::: wf-content
+#### Remove identity provider group memberships
+
+Pulls user\'s groups and app assignments, removes each one. Errors accumulate but don\'t stop the process.
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+4
+:::
+
+::: wf-content
+#### Log, comment, close (or escalate)
+
+Logs to Sheets, posts structured comment to JIRA. Auto-closes ticket unless errors occurred or user is a monitored billing admin.
+:::
+:::::
+:::::::::::::::
+::::::::::::::::
+
+::: card
+### Locked Device Report
+
+Weekly scheduled scan that identifies devices locked via MDM that haven\'t been recovered.
+
+- Cloud Scheduler fires every Friday at 9 AM
+- Concurrent scanning with 10 worker threads across the full device fleet
+- 5-step filtering: lock command exists, status isn\'t failed, device wasn\'t re-enrolled, hasn\'t checked in post-lock, still has active unlock PIN
+- Creates a JIRA service desk ticket with a formatted table of locked devices
+- Two-step ticket creation: JSM API for portal layout, then REST API for ADF content
+:::
+
+::: card
+### Compliance Scanner
+
+When an employee is approved to work from a non-standard location, this function cross-references their application access against policy and generates action items.
+
+- JIRA webhook trigger on compliance parent tickets
+- Pulls the user\'s full application list from identity provider
+- Cross-references against a policy spreadsheet (app name, action required, notes)
+- Splits work into subtasks by responsible team with round-robin assignment
+- Creates a calendar event on the team calendar for tracking
+- Auto-closes subtasks if no action needed
+:::
+
+::: card
+### Error Notifier
+
+Catches errors from all other cloud functions and sends instant Slack alerts.
+
+- Pub/Sub trigger from a Cloud Logging sink that captures ERROR-level logs
+- Self-excluding filter prevents infinite loops (this function\'s own errors are filtered out)
+- Zero suppression - every error gets a notification, no batching or deduplication
+- Catches its own exceptions without re-raising to prevent Pub/Sub retry storms
+:::
+::::::::::::::::::::
+
+::::::::::::::::::: section
+## Key Technical Decisions
+
+:::::: card
+### Error Accumulation, Not Fail-Fast
+
+::: decision
+[Problem]{.decision-label .problem} [Deprovisioning touches multiple systems (licenses, groups, apps). If removing one group fails, you still want to remove the rest. But you also can\'t silently close the ticket with partial completion.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [Errors accumulate in an array. Processing continues through all systems. At the end, if any errors exist, the ticket stays open and an escalation comment with \@mentions gets posted to JIRA.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [Maximum work completed per run. Failures are visible and escalated. No ticket ever closes with incomplete deprovisioning.]{.decision-text}
+:::
+::::::
+
+:::::: card
+### Marker-File Deploy Convention
+
+::: decision
+[Problem]{.decision-label .problem} [Different functions need different trigger types and auth models. Manually specifying flags per function during deployment is error-prone.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [Convention over configuration. Drop a `.authenticated` file for OIDC auth, a `.pubsub-topic` file for Pub/Sub triggers. The deploy script reads these and sets the correct gcloud flags automatically.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [Adding a new function means writing the code and dropping a marker file. The deploy script handles the rest, including skipping unchanged functions via source hash comparison.]{.decision-text}
+:::
+::::::
+
+:::::: card
+### Special Handling for Critical Accounts
+
+::: decision
+[Problem]{.decision-label .problem} [A small number of accounts have billing admin access to a third-party platform that can\'t be deprovisioned via API. Auto-closing these tickets would leave active billing access.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [Hardcoded watchlist of monitored emails. When one is detected, the function removes what it can, \@mentions the responsible person in JIRA, adds a warning panel, and leaves the ticket open for manual follow-up.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [Automation handles 95% of deprovisioning. The 5% that needs human judgment gets flagged immediately instead of falling through the cracks.]{.decision-text}
+:::
+::::::
+
+:::::: card
+### Self-Excluding Error Alerting
+
+::: decision
+[Problem]{.decision-label .problem} [The error notifier monitors all cloud functions. If it monitors itself and fails, it triggers itself, which fails, which triggers itself - infinite loop.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [The Cloud Logging sink filter explicitly excludes the error notifier\'s own service name. The function also catches exceptions without re-raising, preventing Pub/Sub from retrying and causing notification storms.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [Robust alerting with no risk of runaway loops. Every other function\'s errors are caught and reported instantly.]{.decision-text}
+:::
+::::::
+:::::::::::::::::::
+
+:::::::::::: section
+## Talking Points
+
+::::::::::: {.card .stories}
+### \"Tell me about this project\"
+
+:::: talk-point
+::: answer
+I built an event-driven automation platform on Google Cloud Functions that handles IT operations tasks that used to be manual. The biggest one is **automated license deprovisioning** - when someone leaves, a JIRA ticket fires a webhook that revokes their cloud licenses, removes their identity provider access, logs everything to a spreadsheet, and either closes the ticket or escalates to a human. There\'s also a weekly device lock scanner, a compliance checker, and an error alerting system that monitors the whole platform.
+:::
+::::
+
+### \"What was the hardest part?\"
+
+:::: talk-point
+::: answer
+Getting the error handling right. These functions touch 3-5 external APIs each, and **any one of them can fail independently**. You can\'t just fail-fast - if removing one license fails, you still need to remove the other four. So errors accumulate in an array, processing continues, and at the end the function decides: close the ticket (all good), or leave it open and escalate (something failed). The error notifier was also tricky - it monitors all functions for errors, so I had to make sure it doesn\'t monitor itself or you get an infinite loop.
+:::
+::::
+
+### \"How do you handle the different trigger types?\"
+
+:::: talk-point
+::: answer
+There are three authentication models - webhook with HMAC validation, Cloud Scheduler with OIDC, and Pub/Sub events. Instead of configuring each one manually during deployment, I use **marker files as a convention**. Drop a `.authenticated` file in the function directory for OIDC, a `.pubsub-topic` file for Pub/Sub. The deploy script auto-detects the right flags and also skips functions whose source hasn\'t changed. Adding a new function is just writing the code and dropping a marker file.
+:::
+::::
+
+### \"What did you learn?\"
+
+:::: talk-point
+::: answer
+That **serverless doesn\'t mean simple**. The actual cloud function code is straightforward. The complexity is in the operational concerns - how do you test safely (separate test mode that reads but never writes), how do you handle partial failures (error accumulation), how do you make deployment repeatable (marker files + source hashing), how do you monitor the monitor (self-excluding log sinks). Those patterns matter more than the business logic.
+:::
+::::
+:::::::::::
+::::::::::::
+
+Project brief - not for distribution. All details sanitized.

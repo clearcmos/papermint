@@ -1,0 +1,67 @@
+---
+title: "UKG Document Extraction — Reverse-Engineered HRIS Data Migration"
+description: "System decommissioning required migrating 4,000+ sensitive employee documents (pay stubs, tax forms, employment records). The vendor provided no bulk export ..."
+---
+
+## The Problem
+
+System decommissioning required migrating 4,000+ sensitive employee documents (pay stubs, tax forms, employment records). The vendor provided no bulk export API. The only option was a web portal designed for one-at-a-time downloads. Hard deadline, no vendor support.
+
+## What Was Built
+
+A 5,200-line Python extraction pipeline that reverse-engineered the entire HRIS web platform — authentication, navigation, document retrieval — with checkpoint/resume, corruption detection, and full audit trail. Total UKG export suite: ~15,600 lines across 7 tools.
+
+### Authentication Chain (5 Layers)
+
+The most complex part. Each layer hands off to the next with different protocols:
+
+1. **SSO Login:** POST to identity provider, extract state token
+2. **SAML Exchange:** SAML response with RelayState parameters
+3. **WS-Federation Handoff:** Active Directory integration, redirect loop management between SSO provider and HRIS
+4. **Multi-Factor Authentication:** Supports push notification, SMS verification (with 4-minute countdown management), and TOTP. Saves device token for 7-day MFA bypass.
+5. **Session Establishment:** Extracts and stores session cookies. Persistent `requests.Session` maintains state across all subsequent operations.
+
+Credentials retrieved from 1Password at runtime — nothing hardcoded.
+
+### Data Extraction Engine
+
+- Reverse-engineered ASP.NET GridView form parsing
+- Pagination across 82+ pages of employee listings, 4,000+ employees
+- Dynamic field detection: parses HTML table header at runtime, builds CSV export from whatever columns exist (47+ employee fields extracted without hardcoding a single column name)
+- JavaScript popup URL conversion (regex extraction — URLs weren't real HTTP links)
+- CloudFlare email obfuscation handling (XOR decryption to decode employee emails)
+- Per-employee document downloads with organized directory structure
+
+### Checkpoint/Resume System
+
+Multi-hour export across thousands of employees. Network interruptions, session timeouts, and auth expiration are inevitable.
+
+- JSON checkpoint auto-saves every 60 seconds
+- Tracks every downloaded document by URL, every processed employee, current page position
+- Failed documents tracked with retry counts
+- Resume from exact point of failure — if it dies at document 3,500, it resumes from 3,501
+
+### Post-Export Validation Pipeline
+
+- **PDF corruption scanning:** PyPDF2 with multiprocessing for parallel validation
+- **SHA-256 content deduplication:** Catches identical files with different names
+- **CSV audit reporting:** Full trail for compliance
+
+### Additional Tools (~10,400 lines)
+
+| Tool | Purpose |
+|------|---------|
+| Employee data exporter | Export employee profile data from the HRIS |
+| PDF integrity scanner | Multiprocessing PDF corruption detection |
+| Document deduplicator | SHA-256 based duplicate identification |
+| File renamer | Organize extracted files into per-employee directories |
+| Domain separator | Split employees by domain/company entity |
+| Audit reporter | Generate compliance-ready CSV reports |
+
+## Impact
+
+- All 4,000+ documents extracted on deadline
+- Checkpoint/resume survived multiple interruptions and session timeouts without losing a single document
+- Corruption scanning caught damaged files before they entered the new system
+- Full audit trail satisfied compliance requirements for the migration
+- Alternative was hiring temps to click through a web portal for weeks

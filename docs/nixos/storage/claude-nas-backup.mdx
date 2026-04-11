@@ -1,0 +1,82 @@
+---
+title: "Claude NAS Backup"
+description: "*Backup Claude Code configuration and project memory to NAS*"
+---
+
+## Overview
+
+Bash script that backs up Claude Code data (settings, credentials, skills, plugins, project memories) from both `nicholas` and `root` users to the NAS at `/mnt/syno/claude-backup/`.
+
+**Script:** `scripts/claude-nas-backup.sh`
+**Alias:** `claude-nas`
+**Destination:** `/mnt/syno/claude-backup/`
+**Host:** cmos (manual execution)
+
+## What Gets Backed Up
+
+**nicholas:**
+- `settings.json`, `settings.local.json`, `.credentials.json`, `history.jsonl`
+- `skills/` directory (rsync with `--delete`, excludes `.git`)
+- `plugins/config.json`
+- All project `memory/` directories
+
+**root:**
+- `settings.json`, `.credentials.json`
+- All project `memory/` directories
+- `/opt/claude/CLAUDE.md` (if present)
+
+## Backup Structure
+
+```
+/mnt/syno/claude-backup/
+├── nicholas/
+│   ├── settings.json
+│   ├── settings.local.json
+│   ├── .credentials.json
+│   ├── history.jsonl
+│   ├── skills/
+│   ├── plugins-config.json
+│   └── memories/{project}/
+├── root/
+│   ├── settings.json
+│   ├── .credentials.json
+│   └── memories/{project}/
+└── CLAUDE.md
+```
+
+## Usage
+
+```bash
+# Run backup
+claude-nas
+
+# Or directly
+bash /etc/nixos/scripts/claude-nas-backup.sh
+```
+
+## Troubleshooting
+
+```bash
+# Check NAS mount
+mount | grep syno
+
+# Verify backup
+ls -lh /mnt/syno/claude-backup/
+du -sh /mnt/syno/claude-backup/
+
+# Check specific backup files
+ls -lh /mnt/syno/claude-backup/nicholas/
+ls -lh /mnt/syno/claude-backup/nicholas/memories/
+```
+
+## Prerequisites
+
+- NAS must be mounted at `/mnt/syno/`
+- Run from cmos (has access to both nicholas and root Claude configs)
+
+---
+
+**Last Updated**: 2026-03-06
+
+---
+*[Home](../README.md) | [Storage Overview](overview.md)*

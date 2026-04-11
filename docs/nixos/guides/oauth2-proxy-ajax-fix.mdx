@@ -1,0 +1,117 @@
+---
+title: "OAuth2-Proxy AJAX/API Authentication Fix"
+description: "This guide documents the solution for fixing OAuth2-proxy authentication issues with Single Page Applications (SPAs) and services that make continuous AJAX/A..."
+---
+
+**Last Updated:** 2025-10-28
+
+This guide documents the solution for fixing OAuth2-proxy authentication issues with Single Page Applications (SPAs) and services that make continuous AJAX/API calls, such as Glances system monitoring.
+
+## Problem
+
+When OAuth2-proxy protects web applications that make frequent AJAX/API requests (like Glances polling `/api/4/all` every 2 seconds), you may experience:
+
+- **Constant "Disconnected" status** in the UI
+- **302 redirect loops** where API calls redirect to login instead of returning data
+- **No valid authentication in request** errors in OAuth2-proxy logs
+- **Cookies not being sent** with AJAX requests
+
+## Root Causes
+
+1. **AJAX requests receive 302 redirects** instead of proper 401 Unauthorized responses
+2. **SameSite cookie policy** prevents cookies from being sent with same-site requests
+3. **CORS preflight requests (OPTIONS)** fail authentication since they cannot carry cookies
+
+## Solution
+
+Add three flags to your OAuth2-proxy configuration:
+
+### 1. `--cookie-samesite="lax"`
+**Purpose:** Allows cookies to be sent with same-site GET requests (including AJAX)
+
+**Security:** Provides CSRF protection while allowing cookies on top-level navigation and same-site requests. More secure than `none`, more compatible than `strict`.
+
+### 2. `--skip-auth-preflight=true`
+**Purpose:** Allows CORS preflight OPTIONS requests to pass through without authentication
+
+**Security:** OPTIONS requests cannot carry authentication per browser security model, so this only affects pre-flight checks.
+
+### 3. `--api-route="^/api/"`
+**Purpose:** Marks paths matching `/api/` as API routes that return **401** instead of **302** redirects
+
+**Security:** Does NOT bypass authentication - just changes response code for proper client-side error handling.
+
+## Implementation Example
+
+```nix
+systemd.services.oauth2-proxy.serviceConfig.ExecStart = lib.mkForce (pkgs.writeShellScript "oauth2-proxy-start" ''
+  CLIENT_SECRET=$(cat ${config.age.secrets.oauth2-proxy-client-secret.path})
+  COOKIE_SECRET=$(cat ${config.age.secrets.oauth2-proxy-cookie-secret.path})
+
+  exec ${pkgs.oauth2-proxy}/bin/oauth2-proxy \
+    --provider=oidc \
+    --oidc-issuer-url="https://keycloak.bedrosn.com/realms/web" \
+    --client-id="oauth2-proxy-glances" \
+    --client-secret="$CLIENT_SECRET" \
+    --cookie-secret="$COOKIE_SECRET" \
+    --http-address="127.0.0.1:4180" \
+    --upstream="http://localhost:8087" \
+    --redirect-url="https://glances.bedrosn.com/oauth2/callback" \
+    --cookie-secure=true \
+    --cookie-domain=".bedrosn.com" \
+    --cookie-expire="4h" \
+    --cookie-refresh="15m" \
+    --cookie-samesite="lax" \
+    --pass-host-header=true \
+    --set-xauthrequest=true \
+    --email-domain="*" \
+    --oidc-email-claim="email" \
+    --scope="openid email profile" \
+    --reverse-proxy=true \
+    --skip-provider-button=true \
+    --skip-auth-preflight=true \
+    --api-route="^/api/" \
+    --oidc-groups-claim="groups" \
+    --allowed-group="glances-access"
+'');
+```
+
+## Testing
+
+After applying the fix:
+
+1. **Reload** the protected application (e.g., https://glances.bedrosn.com)
+2. **Authenticate** if prompted (you'll need to login first to establish a cookie session)
+3. **Verify** API calls are working - check OAuth2-proxy logs:
+
+```bash
+journalctl -u oauth2-proxy --since "1 minute ago" | grep "/api/"
+```
+
+You should see **200** responses for authenticated requests, or **401** (not 302) for unauthenticated requests.
+
+## Common Issues
+
+### Still seeing 401 errors after authentication
+- Clear browser cookies and re-authenticate
+- Check that `--cookie-domain` matches your domain (e.g., `.bedrosn.com`)
+- Verify the application is sending cookies with requests (check browser DevTools → Network → Headers)
+
+### 431 Request Header Fields Too Large
+- OAuth2-proxy creates CSRF cookies per request
+- Add `--cookie-csrf-per-request-limit=50` to limit cookie accumulation
+
+## Related Issues
+
+- [oauth2-proxy#1393](https://github.com/oauth2-proxy/oauth2-proxy/issues/1393) - 302 instead of 401 for AJAX requests
+- [oauth2-proxy#2292](https://github.com/oauth2-proxy/oauth2-proxy/issues/2292) - AJAX request redirects on cookie expiration
+- [oauth2-proxy#1760](https://github.com/oauth2-proxy/oauth2-proxy/pull/1760) - Add API route config feature
+
+## References
+
+- OAuth2-proxy v7.11.0+ required for `--api-route` flag
+- OAuth Cookie Best Practices: https://curity.io/resources/learn/oauth-cookie-best-practices/
+
+---
+
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md)*

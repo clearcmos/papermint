@@ -1,0 +1,168 @@
+---
+title: "Discord Monitor Services"
+description: "*Automated monitoring and notification system using Discord webhooks*"
+---
+
+## Overview
+
+The NixOS infrastructure includes several systemd-based monitor services that watch for upstream changes, security advisories, and system events, then notify via Discord webhooks. All monitors follow a consistent pattern defined in CLAUDE.md section 11.
+
+## Architecture
+
+All monitors share these characteristics:
+- **Systemd timers** for scheduling (with randomized delays to avoid burst)
+- **Discord webhooks** for notifications (full-width `content` messages, never embeds)
+- **State files** in `/var/lib/{monitor-name}/` to track seen items and avoid duplicates
+- **`User-Agent: NixOS-Monitor/1.0`** header on all webhook requests
+- **`-# Monitor Name`** footer line on every message
+- **2000-char Discord limit** with automatic truncation
+
+Several monitors use the **Claude SDK** (Python venv at `/var/lib/claude-sdk/venv`) to analyze data before notifying, using structured JSON output schemas.
+
+---
+
+## Monitor Services
+
+### 1. Rebuild Notifications (`rebuild-notify.nix`)
+
+**Module:** `modules/core/rebuild-notify.nix`
+**Trigger:** Runs after every `nixos-rebuild switch` via `system.activationScripts`
+**Secret:** `discord-webhook-rebuilds`
+
+Sends Discord notification with package version diffs after each rebuild. Uses `nix store diff-closures` to detect changes, filters out noise (internal store path churn, dependency-only changes), and formats package names with backticks.
+
+- Runs asynchronously via `systemd-run --no-block` to avoid blocking boot
+- Splits long diffs across multiple messages (1-second pause between)
+- Skips first boot and no-op rebuilds (no changes detected)
+
+**Troubleshooting:**
+```bash
+journalctl -u nixos-rebuild-notify -n 30
+```
+
+---
+
+### 2. Discord Failure Notify (`discord-failure-notify.nix`)
+
+**Module:** `modules/desktop/discord-failure-notify.nix`
+**Trigger:** On-demand via `unitConfig.OnFailure = "discord-failure-notify@%n.service"`
+**Secret:** `discord-webhook-url`
+
+Generic template service that sends a Discord notification when any dependent systemd service fails. Extracts the last 20 log lines from `journalctl` and includes hostname, UTC timestamp, and service name.
+
+Used by all other monitors as their failure handler — if a monitor crashes, this service reports it.
+
+**Usage in other modules:**
+```nix
+systemd.services.my-monitor = {
+  unitConfig.OnFailure = "discord-failure-notify@%n.service";
+};
+```
+
+---
+
+### 3. Keycloak Security Monitor (`keycloak-security-monitor.nix`)
+
+**Module:** `modules/desktop/keycloak-security-monitor.nix`
+**Schedule:** Daily at 10:00 AM (30-min random delay)
+**Secret:** `discord-webhook-url`
+**Dependencies:** Claude SDK (Sonnet model), `gh` CLI, SSH to misc.home.arpa
+
+Monitors Keycloak for:
+- Version drift between running instance (misc), nixpkgs, and upstream releases
+- GitHub security advisories affecting the running version
+
+Uses Claude Sonnet to generate NixOS-specific upgrade guidance with structured output (action_required, urgency, upgrade_recommendation, breaking_changes). Falls back to simple notification if Claude SDK fails.
+
+**Troubleshooting:**
+```bash
+systemctl status check-keycloak-security.timer
+journalctl -u check-keycloak-security -n 50
+cat /var/lib/keycloak-security-monitor/state.json
+```
+
+---
+
+### 4. Mesa DX11 Fix Monitor (`mesa-dx11-monitor.nix`)
+
+**Module:** `modules/desktop/mesa-dx11-monitor.nix`
+**Schedule:** Daily at 12:00 PM (45-min random delay)
+**Secret:** `discord-webhook-url`
+**Dependencies:** Claude SDK (Haiku model)
+
+Monitors Mesa GitLab releases for RADV/DXVK fixes that may resolve DX11 texture corruption on the RX 6800 XT (regression since Mesa 26.0.1). Scans release notes for keywords (radv, dxvk, texture, rdna2, navi2, gfx1030, BCn, DXT) and uses Claude Haiku to assess relevance.
+
+Only tracks versions > 26.0.1, filters release candidates, and checks closed GitLab issues.
+
+**Troubleshooting:**
+```bash
+systemctl status check-mesa-dx11-fix.timer
+journalctl -u check-mesa-dx11-fix -n 50
+cat /var/lib/mesa-dx11-monitor/state.json
+```
+
+---
+
+### 5. Upstream Issue Monitor (`upstream-issue-monitor.nix`)
+
+**Module:** `modules/desktop/upstream-issue-monitor.nix`
+**Schedule:** Twice daily at 9:00 AM and 9:00 PM (30-min random delay)
+**Secret:** `discord-webhook-url`
+**Dependencies:** Claude SDK (Haiku model), `gh` CLI
+
+Monitors GitHub issues across repos for fix signals. Currently tracks:
+- **claude-cpu**: Claude Code 100% CPU idle bug (anthropics/claude-code #21322, #22275, #22509)
+- **ollama-flash-attn**: Flash attention crash on gfx1030 (ggml-org/llama.cpp #19307, ollama/ollama #6953)
+
+Detects 4 types of fix signals: issue state changes, keyword matches in comments ("fixed", "resolved", "merged"), release notes containing fixes, and new related issues. Only notifies when a genuine fix is confirmed released.
+
+**Troubleshooting:**
+```bash
+systemctl status check-upstream-issues.timer
+journalctl -u check-upstream-issues -n 50
+ls /var/lib/upstream-issue-monitor/
+```
+
+---
+
+### 6. CurseForge Comment Notifier (`curseforge-comments.nix`)
+
+**Module:** `modules/desktop/curseforge-comments.nix`
+**Schedule:** Twice daily at 8:00 AM and 7:00 PM (30-min random delay)
+**Secret:** `curseforge-discord-webhook`
+**Dependencies:** Selenium, Firefox headless, geckodriver
+
+Scrapes CurseForge for new comments on all WoW addons authored by "ClearCMOS". Uses headless Firefox with Selenium to bypass Cloudflare protection. Creates Discord forum threads for top-level comments and posts replies inside existing threads.
+
+Tracks comment IDs in JSON state file to detect only new comments.
+
+**Troubleshooting:**
+```bash
+systemctl status check-curseforge-comments.timer
+journalctl -u check-curseforge-comments -n 50
+cat /var/lib/curseforge-comments/seen_comments.json | python3 -m json.tool | head -30
+```
+
+---
+
+## Adding New Monitors
+
+Follow the established pattern:
+
+1. Create module in `modules/desktop/` (or `modules/core/` for system-level)
+2. Use systemd service + timer with `RandomizedDelaySec`
+3. Add `unitConfig.OnFailure = "discord-failure-notify@%n.service"`
+4. Read webhook URL from agenix secret
+5. Use `User-Agent: NixOS-Monitor/1.0` header
+6. Add `-# Monitor Name` footer to messages
+7. Track state in `/var/lib/{monitor-name}/`
+8. If using Claude SDK, use the venv at `/var/lib/claude-sdk/venv`
+
+Reference implementation: `scripts/check-keycloak-security.py`
+
+---
+
+**Last Updated**: 2026-03-06
+
+---
+*[Home](../README.md) | [Services Overview](overview.md)*

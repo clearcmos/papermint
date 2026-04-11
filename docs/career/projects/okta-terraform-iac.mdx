@@ -1,0 +1,89 @@
+---
+title: "Okta Identity Infrastructure as Code — Terraform/Terragrunt"
+description: "Application access across 70+ SaaS integrations was managed manually in the Okta admin console — slow, inconsistent, no audit trail, no rollback. Identity ch..."
+---
+
+## The Problem
+
+Application access across 70+ SaaS integrations was managed manually in the Okta admin console — slow, inconsistent, no audit trail, no rollback. Identity changes are high-risk: a bad rule can lock people out or grant unintended access to clinical data.
+
+## What Was Built
+
+Contributed to the organization's Okta identity infrastructure, managed entirely through Terraform with Terragrunt orchestration and CircleCI CI/CD. My contributions focused on SAML app onboarding, push group configurations, birthright access rules, SCIM provisioning, and HR migration support.
+
+### Architecture: How HR Data Drives Access
+
+The HR system is the source of truth. Employee attributes flow into Okta as custom profile fields, and Terraform group rules automatically determine who gets access to what.
+
+**Layer 1 — HR System (Source of Truth):**
+- Employee attributes imported into Okta as custom user profile fields
+- Fields: division, department, subdepartment, employmentType, title, company, workHours, state/province
+
+**Layer 2 — Terraform Modules:**
+- `org_unit` / `org_unit_v2` — HR-attribute-driven group rules
+- `functional_group` — cross-cutting functional teams
+- `key_individual` — executive title matching (CEO, CTO, VP) for elevated access
+- `app_group` — application assignment groups
+- `push_group` — Google Workspace group sync
+
+**Layer 3 — Group Rules & Conditional Access:**
+- Birthright access rules evaluate HR attributes at runtime
+- PHI confidentiality gate (signed agreement required)
+- Working-abroad exclusion (PHI access drops automatically)
+- Role-based profiles
+
+**Layer 4 — Downstream Systems:**
+- SAML SSO to 70+ apps
+- SCIM provisioning for automated user lifecycle
+- Push groups syncing to Google Workspace
+- Multi-tenant platform connections (10+ environments across dev/staging/prod)
+
+### PR Workflow
+
+1. Open PR with Terraform changes
+2. CircleCI runs validation and generates a plan (read-only credentials)
+3. Review the plan output — identity changes are high-risk
+4. Peer approval and merge triggers apply (write credentials, separate CI context)
+5. Dependency depth capped at 1 to prevent cascading plans from touching unrelated modules
+
+### Key Patterns
+
+**Birthright Access via HR Attributes:**
+- Division-level: "Technology" gets dev tools, CI/CD, monitoring. "Service Operations" gets clinical platform and support tools.
+- Department-level: narrower access within divisions
+- Employment type: full-time gets full suite, contractors get scoped subset, agency workers get less
+- Key individuals: executive titles matched by job title string get billing admin and signing rights
+- Dual HR attribute support during migration: rules evaluate both old codes (DIALO, DIACC) and new structured fields ("Salaried, full-time") with OR logic
+
+**SAML Configuration-as-Code:**
+- Compliance platform: dual integration — OAuth service account for API read + SAML SSO for login. Nine role groups from Admin to Employee.
+- GRC platform: five role-specific groups with priority ordering, custom user schema property for role enum, SAML attribute statements
+- Multi-tenant product platform: single Okta org managing SAML connections to 10+ environments with per-tenant SCIM endpoints
+
+**Push Groups for Google Workspace:**
+- 15+ push groups covering divisions, employment types, functional teams
+- Clean separation: `push_group` module creates the bare group, `org_unit` module attaches the membership rule
+- HR attribute changes propagate automatically to Google group memberships
+
+**SCIM Provisioning:**
+- User lifecycle events (create, update, deactivate) push automatically from Okta to integrated apps
+- Profile attribute mappings control which fields sync
+- Configured manually in Okta UI (not Terraform) due to API limitation that would erase SCIM integration on apply
+- SCIM token refresh automated via CircleCI scheduled pipeline across all environments
+
+### org_unit_v2: Consolidating Rules at Scale
+
+The original `org_unit` module created one Okta group rule per app per organizational unit. With 70+ apps and dozens of org units, rule count was exploding (Okta has limits on total rules). The team redesigned the module (v2) to consolidate: one rule assigns all non-PHI apps, one rule assigns all PHI apps (with restrictions). Uses MD5 hashing of group IDs for stable resource naming during create-before-destroy lifecycle.
+
+### PHI Data Access as a Layered Gate
+
+Two-layer gate in the group rules: PHI apps require membership in the confidentiality agreement group AND exclusion from the working-abroad group. These conditions are evaluated at rule level, not app level, so they persist automatically. When someone's HR record shows they're working from a non-approved location, PHI access drops automatically — no ticket, no manual intervention.
+
+## Impact
+
+- App provisioning: hours of manual config to declarative code with full git history
+- New hires get correct app access on day one via HR-driven birthright rules
+- Zero access disruption during HR system migration via dual-attribute OR logic
+- PHI compliance enforced structurally, not procedurally
+- Safe CI/CD: read-only plan credentials, separate write-only apply credentials, peer review required
+- Every identity change tracked in git with full rollback capability

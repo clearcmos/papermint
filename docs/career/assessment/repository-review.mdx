@@ -1,0 +1,71 @@
+---
+title: "Repository Review"
+description: "Independent technical review of the two primary repositories."
+---
+
+## 1. claude-plugins
+
+### What It Is
+
+A plugin and skill distribution system for Claude Code, designed to let multiple teams (ISS, Security) share AI agent workflows across an organization. The system includes:
+
+- A three-tier architecture: Marketplace > Plugins > Skills
+- Version-driven auto-update mechanism (version bumps in `plugin.json` trigger cache refreshes)
+- 8 skills across 3 plugins (ISS, Security, Shared)
+- A self-learning mechanism (`update-skill` directive) that lets agents improve their own documentation from real usage
+- A meta-wizard (`skill-creator`) that scaffolds new skills from templates while enforcing all repo conventions
+- A self-auditing checklist (`AUDIT.md`) for validating the repo against its own rules
+- Production-grade credential handling (1Password + environment variable fallback)
+- Progressive disclosure architecture that manages LLM context size by keeping `SKILL.md` lean (~500 lines) and loading supporting files on demand
+
+### Architecture Quality
+
+The architecture is principal-level. Three properties stand out:
+
+1. **Self-governing.** `CLAUDE.md` is loaded by the agent on every session — it's not a wiki page that gets ignored, it's governance injected at the point of execution. The agent follows the rules because it has no choice.
+
+2. **Self-teaching.** The `update-skill` directive creates a feedback loop: real usage exposes mistakes, the agent fixes documentation, version bump ships the fix to all users. Every skill gets better over time without the original author's involvement.
+
+3. **Self-reproducing.** `skill-creator` reads `CONVENTIONS.md`, generates files from templates, validates against every rule, and bumps the version. New contributors can add skills without understanding the full architecture — the wizard enforces compliance.
+
+### Skills Maturity
+
+The skills vary in maturity. `okta-pr-workflow` and `it-support-ticket` are battle-tested — they document known bugs (the `for_each` analyzer issue, the `priority = 0` provider bug), include fallback sections, delegate investigation to subagents to manage context, and have custom directives beyond `update-skill` (`post-note`, `post-initial-analysis`). These read like systems that have been through real incident response.
+
+`hackerone-triage` and `meeting-summarizer` are structurally sound and follow all conventions but haven't accumulated the same operational depth. That's expected — different adoption stages.
+
+### Engineering Level
+
+The architecture — `CLAUDE.md` as injected governance, `update-skill` as self-improvement, `skill-creator` as self-replication, `AUDIT.md` as self-verification, progressive disclosure for token management, directory-as-source-of-truth — is principal-level thinking. These are design decisions that make the system outlive its author.
+
+---
+
+## 2. iss-utils
+
+### Scale
+
+| Metric | Count |
+|--------|-------|
+| Total scripts (Python, Bash, JS) | ~400 productive (572 total) |
+| Tool domains covered | 25+ |
+| Top-level categories | Okta, Kandji, SentinelOne, Google API, Google Cloud, Slack, Front, Greenhouse, UKG, CircleCI, Terraform, Jira, Notion, Sage, Beauceron, Microsoft, Apps Script, Cloud Functions |
+
+### Notable Projects
+
+**UKG Document Export (5,213 lines):** Reverse-engineered a system with no API to programmatically extract 4,000+ employee documents. Includes checkpoint/resume functionality, TOTP authentication, corruption scanning, deduplication, and folder organization. This is the kind of project that normally gets assigned to a software engineering team.
+
+**Greenhouse Data Migration (993+ lines):** Complete Harvest API export system covering 12+ recruitment data types (departments, jobs, candidates, applications, interviews, offers, scorecards) with rate limiting, pagination, and attachment downloading. Built for HR audit and system decommissioning.
+
+**Okta Investigation Toolkit (518 lines + 34 supporting tools):** Forensic investigation suite for IT support — user lookups, group membership analysis, system log queries, app access reports, factor exports, provisioning log analysis. Used daily for L3 support and integrated into the `it-support-ticket` skill.
+
+**Cloud Functions (3 deployed):** O365/Presto billing admin deprovisioning (1,734 lines), locked device reporting, WFA scanning — all deployed to Google Cloud Functions for production use.
+
+**Kandji MDM Suite (23 tools):** Blueprint auditing, device lifecycle management, batch operations, compliance reporting, admin audit logs. Covers the full MDM management surface.
+
+**SentinelOne Suite (17 tools):** Cross-checks against Okta and Google Admin, device tagging, EAP actions, in-person scanning. Demonstrates cross-system security correlation.
+
+**Google API Suite (28 tools):** Drive ACL auditing, Vault matter restoration, calendar management, Gmail label operations, shared drive reporting, domain file ownership transfers. Deep API integration work.
+
+### What This Represents
+
+This is not a collection of one-off scripts. It's an internal IT engineering platform — a shared tooling library that automates operations across the entire identity, MDM, security, and data lifecycle. The breadth (25+ systems), the depth (5,000+ line data migrations), and the production deployment (cloud functions, CI/CD integration) go well beyond what "IT support" or "IT administration" describes.

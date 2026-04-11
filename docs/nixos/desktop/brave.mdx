@@ -1,0 +1,282 @@
+---
+title: "Brave Browser Configuration"
+description: "*Complete guide for Brave browser configuration, web apps, and troubleshooting*"
+---
+
+## 🎯 Overview
+
+Brave is configured as the default browser on cmos with:
+- **Declarative configuration**: Policy-based settings via NixOS
+- **Web app support**: Create system-level Progressive Web Apps (PWAs)
+- **Privacy settings**: Hardened defaults with telemetry disabled
+- **Extension management**: Pre-installed extensions via policy
+- **Wayland support**: Optional native Wayland rendering
+- **Custom arguments**: Pass additional CLI flags per web app
+
+---
+
+## 📱 Brave Web Apps
+
+### Creating Web Apps
+
+Brave web apps are configured declaratively in NixOS, creating standalone application launchers for websites.
+
+**Configuration Location**: `hosts/cmos/default.nix` (or other hosts)
+
+**Example Configuration**:
+```nix
+programs.brave-apps = {
+  enable = true;
+  apps = {
+    twitch = {
+      url = "https://twitch.tv";
+      desktopName = "Twitch";
+      comment = "Twitch streaming platform";
+      icon = "twitch";  # Uses fetched icon
+      categories = [ "Network" "AudioVideo" "Chat" ];
+    };
+
+    youtube = {
+      url = "https://youtube.com";
+      desktopName = "YouTube";
+      comment = "YouTube video platform";
+      categories = [ "Network" "AudioVideo" ];
+    };
+  };
+};
+```
+
+**Module Location**: `/etc/nixos/modules/desktop/brave.nix`
+
+### Web App Features
+
+**Isolated Profiles**:
+- Each web app runs in its own profile directory
+- Stored in `~/.config/brave-apps/&lt;app-name>/`
+- Independent cookies, cache, and settings
+
+**Desktop Integration**:
+- Appears as standalone application in KDE app launcher
+- Custom icons (fetched or specified)
+- Window manager integration (proper WM_CLASS)
+- System-level .desktop file
+
+**Application Launcher**:
+- Command: `&lt;app-name>` (e.g., `twitch`)
+- Brave flags: `--class=&lt;wmClass> --app=&lt;url>`
+- Chromium app mode (minimal browser UI)
+
+### Adding New Web Apps
+
+1. **Edit host configuration**:
+   ```bash
+   vim /etc/nixos/hosts/cmos/default.nix
+   ```
+
+2. **Add app definition**:
+   ```nix
+   programs.brave-apps.apps.github = {
+     url = "https://github.com";
+     desktopName = "GitHub";
+     comment = "GitHub code hosting";
+     categories = [ "Development" ];
+   };
+   ```
+
+3. **Rebuild system**:
+   ```bash
+   nixos-rebuild switch --flake .#cmos
+   ```
+
+4. **Launch app**:
+   - Via launcher: Search for "GitHub"
+   - Via CLI: `github`
+
+### Custom Icons
+
+**Built-in Icon Fetching** (Twitch example):
+```nix
+# In brave.nix module
+twitchIcon = pkgs.fetchurl {
+  url = "https://static.twitchcdn.net/assets/favicon-32-e29246c157142c94346346.png";
+  sha256 = "sha256-TYe45jmC5vIrcQSNMQki4MI4WNPfD38/CzYufbeyWrs=";
+};
+```
+
+**Using Custom Icons**:
+```nix
+apps.myapp = {
+  url = "https://example.com";
+  icon = "myicon";  # Maps to special fetched icon
+  # OR
+  icon = "/path/to/icon.png";  # Direct path
+  # OR
+  icon = "brave";  # Default to Brave icon
+};
+```
+
+**Adding New Icon Fetches**:
+1. Fetch icon with nix
+2. Add to `brave.nix` module
+3. Map in `iconPath` logic
+
+### Window Manager Integration
+
+**WM_CLASS Matching**:
+- Brave creates WM_CLASS: `brave-&lt;class>__-Default`
+- Desktop file `StartupWMClass` must match exactly
+- Module handles automatic class name generation
+
+**Custom WM_CLASS**:
+```nix
+apps.custom = {
+  url = "https://example.com";
+  wmClass = "my-custom-class";  # Override auto-detection
+};
+```
+
+### Extra Arguments
+
+Pass additional Brave CLI flags per web app using `extraArgs`:
+
+```nix
+apps.twitch = {
+  url = "https://twitch.tv";
+  desktopName = "Twitch";
+  extraArgs = [
+    "--disable-features=VaapiVideoDecoder,VaapiVideoEncoder"  # Fix video issues
+    "--disable-gpu-compositing"                                # Alternative rendering
+  ];
+};
+```
+
+**Common Use Cases**:
+| Flag | Purpose |
+|------|---------|
+| `--disable-features=VaapiVideoDecoder` | Fix VAAPI video decode issues |
+| `--disable-gpu-compositing` | Use software compositing |
+| `--enable-features=UseOzonePlatform` | Force Ozone/Wayland |
+| `--disable-software-rasterizer` | Disable software rendering |
+
+**Auto-Detection**:
+- Strips `https://` and `http://` from URL
+- Uses domain as base class
+- Example: `https://twitch.tv` → class: `twitch.tv`
+
+---
+
+## 🔧 Browser Configuration
+
+### Policy Settings
+
+Brave is configured via `/etc/brave/policies/managed/policies.json`:
+
+**Privacy & Security**:
+- Sign-in: Disabled
+- Sync: Disabled
+- Password manager: Disabled
+- Autofill: Disabled
+- Metrics/telemetry: Disabled
+
+**Brave-Specific**:
+- Brave Rewards: Disabled
+- Brave Today: Disabled
+- Ad blocking: Enabled
+
+**Search**:
+- Default: Google
+- Suggestions: Disabled
+
+**Startup**:
+- Restore on startup: Enabled (continue where left off)
+
+### Pre-installed Extensions
+
+Configured via `ExtensionSettings` policy:
+
+| Extension ID | Purpose |
+|--------------|---------|
+| aeblfdkhhhdcdjpifhhbdiojplfjncoa | 1Password |
+| cjpalhdlnbpafiamejdnhcphjbkeiagm | uBlock Origin |
+| jcokdfogijmigonkhckmhldgofjmfdak | Browser extension |
+| mmpokgfcmbkfdeibafoafkiijdbfblfg | Extension |
+| mmioliijnhnoblpgimnlajmefafdfilb | Extension |
+
+Extensions are automatically installed from Chrome Web Store.
+
+### Modifying Policies
+
+1. **Edit configuration**:
+   ```bash
+   vim /etc/nixos/modules/desktop/brave.nix
+   ```
+
+2. **Update policy JSON**:
+   ```nix
+   environment.etc."brave/policies/managed/policies.json" = {
+     text = builtins.toJSON {
+       # Add or modify settings
+       NewSetting = true;
+     };
+   };
+   ```
+
+3. **Rebuild**:
+   ```bash
+   nixos-rebuild switch --flake .#cmos
+   ```
+
+---
+
+## 🐛 Wayland Stability Issues
+
+If Brave crashes frequently with complex web content (like Twitch streams), the native Wayland support may be the culprit. The crash typically shows:
+
+- Signal 5 (SIGTRAP) 
+- GLib assertion failures: `g_main_context_pop_thread_default: assertion 'stack != NULL' failed`
+- Crashpad errors with "tag not found" and "read out of range"
+
+### Fix: Disable Native Wayland
+
+Edit `/etc/nixos/brave.nix` and comment out the Wayland environment variables:
+
+```nix
+  # Environment variables for Brave
+  # environment.variables = {
+  #   BRAVE_ENABLE_WAYLAND = "1"; # For Wayland support
+  #   NIXOS_OZONE_WL = "1";       # Needed for Ozone/Wayland
+  # };
+```
+
+Then rebuild:
+```bash
+sudo nixos-rebuild switch
+```
+
+### What this does:
+- Disables native Wayland rendering in Brave
+- Forces Brave to use X11/XWayland compatibility layer
+- Generally more stable but slightly less efficient
+- Should resolve crashes with complex web content
+
+### Trade-offs:
+- **X11 mode**: More stable, slightly higher input latency, uses more CPU for compositing
+- **Wayland mode**: Better performance, lower latency, but can be unstable with some content
+
+Since KDE has excellent XWayland support, running Brave in X11 mode works seamlessly with minimal performance impact.
+---
+
+## 📖 Related Documentation
+
+- [Desktop Overview](../desktop/overview.md) - Desktop environment overview
+- [KDE Configuration](../desktop/kde-fonts-optimization.md) - KDE integration
+- [Infrastructure: cmos](../infrastructure/hosts-cmos.md) - Desktop host details
+
+---
+
+**Last Updated**: 2025-12-03
+**Module**: `/etc/nixos/modules/desktop/brave.nix`
+**Hosts**: cmos
+
+---
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🖥️ [Desktop](../desktop/overview.md)*

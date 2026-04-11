@@ -1,0 +1,52 @@
+---
+title: "Fail2ban SSH Protection"
+description: "*SSH brute-force protection for WAN-exposed hosts*"
+---
+
+## Overview
+
+Fail2ban jails protecting SSH against brute-force attacks and connection flooding. Replaces the previous SSH OAuth2 device flow approach — WAN SSH is now disabled, but fail2ban provides defense-in-depth against scanning.
+
+## Architecture
+
+Two jails protect SSH:
+
+| Jail | Trigger | Threshold | Ban Duration |
+|------|---------|-----------|--------------|
+| `sshd` | Authentication failures | 5 in 10min | 1 hour |
+| `sshd-flood` | Rapid connections (scanning) | 10 in 1min | 3 hours |
+
+**Whitelisted networks** (never banned):
+- `127.0.0.0/8` (localhost)
+- `::1` (IPv6 localhost)
+- `192.168.1.0/24` (LAN)
+
+## Configuration
+
+- **Module**: `modules/services/fail2ban-ssh.nix`
+- **Host**: cmos (imported in `hosts/cmos/default.nix`)
+- **Custom filter**: `/etc/fail2ban/filter.d/sshd-flood.conf`
+
+## Commands
+
+```bash
+# View jail status
+fail2ban-ssh-status
+
+# Unban an IP
+fail2ban-ssh-unban 1.2.3.4
+
+# Check recent bans
+journalctl -u fail2ban -n 20 | grep Ban
+```
+
+## Relationship to Other Fail2ban
+
+The misc host has its own fail2ban configuration in `modules/services/fail2ban.nix` with 8 jails protecting Traefik and web services. This module is separate and specific to SSH on cmos.
+
+---
+
+**Last Updated**: 2026-03-10
+
+---
+*[Home](../README.md) | [Services](overview.md)*

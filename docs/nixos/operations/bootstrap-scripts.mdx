@@ -1,0 +1,386 @@
+---
+title: "️ Bootstrap Scripts Reference"
+description: "*Detailed documentation for bootstrap automation scripts*"
+---
+
+## 🎯 Overview
+
+This document provides comprehensive reference information for all scripts in the bootstrap infrastructure. Scripts are organized by bootstrap method and purpose.
+
+---
+
+## 📂 Script Locations
+
+```
+/etc/nixos/bootstrap/scripts/
+├── secure-setup.sh              # YubiKey secure bootstrap setup
+└── create-secure-bootstrap.sh   # YubiKey bootstrap creation
+
+/etc/nixos/bootstrap/public/
+└── secure-loader.sh             # YubiKey remote bootstrap loader
+```
+
+---
+
+## 🔐 YubiKey Secure Bootstrap Scripts
+
+### secure-setup.sh
+
+**Purpose**: One-time setup for YubiKey-based secure bootstrap infrastructure
+
+**Location**: `/etc/nixos/bootstrap/scripts/secure-setup.sh`
+
+**Usage**:
+```bash
+cd /etc/nixos/bootstrap
+bash scripts/secure-setup.sh
+```
+
+**What It Does**:
+1. Checks for required dependencies (age, age-plugin-yubikey, minisign)
+2. Detects connected YubiKey
+3. Generates new age identity on YubiKey PIV slot
+4. Saves identity to `private/yubikey-identity.txt`
+5. Generates minisign Ed25519 keypair
+6. Saves private key to `private/minisign.key`
+7. Saves public key to `public/minisign.pub`
+
+**Prerequisites**:
+- NixOS with `services.pcscd.enable = true`
+- YubiKey 5 series connected
+- Available PIV slot on YubiKey
+
+**Creates**:
+```
+private/
+├── yubikey-identity.txt   # YubiKey age identity (NEVER commit)
+└── minisign.key          # Private signing key (NEVER commit)
+
+public/
+└── minisign.pub          # Public verification key (safe to share)
+```
+
+**Error Handling**:
+- Exits if YubiKey not detected
+- Checks for existing files before overwriting
+- Validates YubiKey PIV slot availability
+
+**Example Output**:
+```
+Checking for YubiKey...
+YubiKey detected
+Generating age identity on YubiKey...
+Touch your YubiKey when it blinks...
+Identity saved to private/yubikey-identity.txt
+Generating signing keypair...
+Keys saved to private/minisign.key and public/minisign.pub
+Setup complete!
+```
+
+---
+
+### create-secure-bootstrap.sh
+
+**Purpose**: Encrypt and sign bootstrap content for secure deployment
+
+**Location**: `/etc/nixos/bootstrap/scripts/create-secure-bootstrap.sh`
+
+**Usage**:
+```bash
+cd /etc/nixos/bootstrap
+bash scripts/create-secure-bootstrap.sh
+```
+
+**What It Does**:
+1. Validates required files exist (YubiKey identity, signing keys)
+2. Reads bootstrap script content
+3. Encrypts bootstrap with YubiKey age identity
+4. Signs encrypted bootstrap with minisign
+5. Encrypts 1Password token
+6. Signs encrypted token with minisign
+7. Saves all artifacts to `public/`
+
+**Prerequisites**:
+- `secure-setup.sh` must be run first
+- YubiKey connected
+- Bootstrap content prepared
+- 1Password service account token available
+
+**Creates**:
+```
+public/
+├── bootstrap.age          # Encrypted bootstrap script
+├── bootstrap.age.minisig  # Bootstrap signature
+├── token.age             # Encrypted 1Password token
+├── token.age.minisig     # Token signature
+├── secure-loader.sh      # Remote loader (if not exists)
+└── minisign.pub          # Public key (copied from private/)
+```
+
+**Encryption Details**:
+```bash
+# Bootstrap encryption
+age --encrypt \
+    --recipient "$(cat private/yubikey-identity.txt | grep 'public key' | cut -d: -f2)" \
+    --armor \
+    bootstrap-content.sh > public/bootstrap.age
+
+# Signature generation
+minisign -S -s private/minisign.key -m public/bootstrap.age
+```
+
+**YubiKey Interaction**:
+- Requires physical touch for encryption operations
+- Touch policy: Always (every operation)
+- PIN policy: Once per session
+
+**Example Output**:
+```
+Validating prerequisites...
+✓ YubiKey identity found
+✓ Signing keys found
+Encrypting bootstrap content...
+Touch your YubiKey to encrypt...
+Signing bootstrap...
+Encrypting 1Password token...
+Touch your YubiKey to encrypt...
+Signing token...
+All files created successfully in public/
+```
+
+---
+
+### secure-loader.sh
+
+**Purpose**: Remote bootstrap loader for downloading, verifying, and executing encrypted bootstrap
+
+**Location**: `/etc/nixos/bootstrap/public/secure-loader.sh`
+
+**Usage**:
+```bash
+# From remote system
+curl -fsSLO https://your-server.com/secure-loader.sh
+chmod +x secure-loader.sh
+
+# Dry run
+./secure-loader.sh --dry-run
+
+# Execute
+./secure-loader.sh
+```
+
+**What It Does**:
+1. Sets secure bash options (`set -euo pipefail`)
+2. Sets secure umask (077)
+3. Downloads encrypted files from `$BASE_URL`
+4. Verifies signatures with embedded public key
+5. Decrypts with YubiKey (requires touch)
+6. Executes bootstrap script
+7. Cleans up temporary files with `shred`
+
+**Configuration**:
+```bash
+# Set at top of script
+BASE_URL="https://your-domain.com/bootstrap"
+```
+
+**Command Line Options**:
+- `--dry-run` - Show what would be done without executing
+
+**Security Features**:
+- No pipe-to-bash execution
+- Mandatory signature verification
+- Environment variable token passing
+- Secure cleanup with `shred`
+- Proper error handling
+
+**Flow**:
+```
+1. Download bootstrap.age + signature
+2. Verify signature with minisign
+3. Download token.age + signature
+4. Verify signature with minisign
+5. Decrypt bootstrap with YubiKey
+6. Decrypt token with YubiKey
+7. Set OP_SERVICE_ACCOUNT_TOKEN env var
+8. Execute bootstrap script
+9. Shred all temporary files
+```
+
+**Error Handling**:
+- Exits on signature verification failure
+- Exits on decryption failure
+- Exits on download failure
+- Cleanup runs even on error (trap)
+
+**Example Output**:
+```
+=== Secure Bootstrap Loader ===
+Downloading bootstrap files from https://your-server.com/bootstrap
+✓ Downloaded bootstrap.age
+✓ Downloaded bootstrap.age.minisig
+Verifying signature...
+✓ Signature valid
+Touch your YubiKey to decrypt...
+✓ Decrypted successfully
+Executing bootstrap...
+[bootstrap script output]
+Cleaning up...
+✓ Complete
+```
+
+---
+
+## 🔧 Development Scripts
+
+### ISO Builder (Manual)
+
+Not a standalone script, but documented process:
+
+**Location**: `/etc/nixos/bootstrap/automated-misc-iso.nix`
+
+**Build Command**:
+```bash
+cd /etc/nixos/bootstrap
+nix-build '<nixpkgs/nixos>' -A config.system.build.isoImage \
+  -I nixos-config=./automated-misc-iso.nix \
+  -o result
+```
+
+**Customization**:
+Edit `automated-misc-iso.nix` to change:
+- Static IP address
+- Hostname
+- Authorized SSH keys
+- Installed packages
+- Partition layout
+
+---
+
+## 🧪 Testing Scripts
+
+### Script Testing Best Practices
+
+**Before Using in Production**:
+
+```bash
+# 1. Test signature verification
+minisign -Vm public/bootstrap.age -P "$(cat public/minisign.pub)"
+
+# 2. Test decryption
+age --decrypt -i private/yubikey-identity.txt public/bootstrap.age | head -20
+
+# 3. Dry run loader
+./public/secure-loader.sh --dry-run
+
+# 4. Check script syntax
+bash -n scripts/secure-setup.sh
+bash -n scripts/create-secure-bootstrap.sh
+bash -n public/secure-loader.sh
+```
+
+---
+
+## 🔒 Security Considerations
+
+### Script Security Standards
+
+All scripts follow these security practices:
+
+```bash
+#!/bin/bash
+set -euo pipefail  # Fail fast, unset vars are errors, pipeline failures propagate
+umask 077          # Secure file creation (owner-only permissions)
+
+# Proper cleanup
+trap cleanup EXIT
+
+cleanup() {
+    # Shred sensitive temporary files
+    [ -f "$temp_file" ] && shred -u "$temp_file"
+}
+```
+
+### Sensitive File Handling
+
+**NEVER commit these files**:
+- `private/minisign.key`
+- `private/yubikey-identity.txt`
+- Any `.age` files (encrypted content)
+- Any temporary decrypted content
+
+**Safe to commit/host**:
+- `public/*.minisig` (signatures)
+- `public/minisign.pub` (public key)
+- `public/secure-loader.sh` (loader script)
+- `public/*.age` (encrypted files - IF properly encrypted)
+
+---
+
+## 🐛 Debugging Scripts
+
+### Enable Verbose Output
+
+```bash
+# Add debug output
+set -x  # Print commands before executing
+
+# Run with bash debug
+bash -x scripts/secure-setup.sh
+```
+
+### Common Issues
+
+**YubiKey not detected**:
+```bash
+# Check pcscd
+systemctl status pcscd
+
+# List smart cards
+pcsc_scan
+
+# Check YubiKey
+ykman piv info
+```
+
+**Signature verification fails**:
+```bash
+# Verify public key is correct
+cat public/minisign.pub
+
+# Check signature file
+file public/bootstrap.age.minisig
+
+# Verify manually
+minisign -Vm public/bootstrap.age -P "$(cat public/minisign.pub)"
+```
+
+**Decryption fails**:
+```bash
+# List YubiKey identities
+age-plugin-yubikey --list
+
+# Check identity file
+cat private/yubikey-identity.txt
+
+# Test decryption with verbose
+age --decrypt -i private/yubikey-identity.txt -v public/bootstrap.age
+```
+
+---
+
+## 📖 Related Documentation
+
+- [YubiKey Secure Bootstrap](yubikey-secure.md) - Complete YubiKey bootstrap guide
+- [Automated ISO Installation](automated-iso.md) - ISO-based bootstrap
+- [Bootstrap Overview](../README.md) - Bootstrap system overview
+
+---
+
+**Last Updated**: 2025-10-03
+**Source Directory**: `/etc/nixos/bootstrap/scripts/`
+**Maintained By**: Infrastructure Team
+
+---
+
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🚀 [Bootstrap](../README.md)*

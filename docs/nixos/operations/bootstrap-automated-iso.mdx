@@ -1,0 +1,379 @@
+---
+title: "Automated NixOS Installation ISO"
+description: "*Fully automated USB boot installation for server hosts with zero manual intervention*"
+---
+
+## 🎯 Overview
+
+The automated ISO installation provides a streamlined deployment process for server hosts (misc, jimmich) with:
+- **Auto-detection and wiping** of target disk (excluding USB devices)
+- **Unattended installation** with networking and SSH pre-configured
+- **Immediate SSH access** from cmos using existing authorized keys
+- **No manual intervention** required during installation
+
+---
+
+## 🏗️ What This ISO Does
+
+1. Boots into a minimal NixOS installer environment
+2. Automatically detects the largest non-USB disk
+3. Wipes and partitions the disk (GPT with ESP + root + swap)
+4. Installs a bootstrap NixOS configuration with:
+   - Static IP: 192.168.1.5 (misc) or host-specific
+   - Hostname: misc (or target host)
+   - SSH enabled with cmos authorized keys
+   - Flakes enabled
+   - User 'nicholas' with sudo access
+5. Reboots into the new system
+6. Ready for flake deployment from cmos
+
+**Total installation time: 5-10 minutes**
+
+---
+
+## 🔨 Building the ISO
+
+### From cmos:
+
+```bash
+cd /etc/nixos/bootstrap
+
+# Build the ISO (takes 5-15 minutes depending on hardware)
+nix-build '<nixpkgs/nixos>' -A config.system.build.isoImage \
+  -I nixos-config=./automated-misc-iso.nix \
+  -o result
+
+# The ISO will be at: result/iso/nixos-*.iso
+ls -lh result/iso/
+```
+
+Expected output:
+```
+nixos-24.05.xxxx-x86_64-linux.iso  (~800MB - 1.2GB)
+```
+
+---
+
+## 💾 Flashing to USB
+
+### On Linux:
+
+```bash
+# Find USB device (CAREFUL - verify this is correct!)
+lsblk
+
+# Flash ISO to USB (replace /dev/sdX with your USB device)
+sudo dd if=result/iso/nixos-*.iso of=/dev/sdX bs=4M status=progress conv=fsync
+
+# Safely eject
+sudo sync
+sudo eject /dev/sdX
+```
+
+### On macOS:
+
+```bash
+# Find USB device
+diskutil list
+
+# Unmount (replace diskN with your USB device)
+diskutil unmountDisk /dev/diskN
+
+# Flash ISO
+sudo dd if=result/iso/nixos-*.iso of=/dev/rdiskN bs=4m status=progress
+
+# Eject
+diskutil eject /dev/diskN
+```
+
+---
+
+## 🚀 Installation Process
+
+### Step 1: Boot USB on Target Host
+
+1. Insert USB drive into target machine (misc, jimmich, etc.)
+2. Power on and enter boot menu:
+   - **Mac Mini**: Hold **Option/Alt** key
+   - **Dell/HP/Generic PC**: Press **F12** or **F11**
+3. Select "EFI Boot" or "USB Device"
+4. Wait for the installer to boot (~30 seconds)
+
+### Step 2: Automated Installation
+
+The installation runs automatically with status output:
+
+```
+=== Starting automated NixOS installation for misc host ===
+=== Target disk detected: /dev/nvme0n1 ===
+=== Disk size: 256GB ===
+=== Wiping disk and creating partitions ===
+=== Mounting filesystems ===
+=== Generating NixOS configuration ===
+=== Installing NixOS ===
+=== Installation complete! ===
+
+Installation successful!
+Target disk: /dev/nvme0n1
+Static IP will be: 192.168.1.5
+
+Next steps from cmos:
+1. Copy agenix key
+2. Deploy flake configuration
+
+System will reboot in 10 seconds...
+```
+
+After reboot, **remove the USB drive**.
+
+### Step 3: First Connection from cmos
+
+Wait for target host to finish booting (~1 minute), then connect:
+
+```bash
+# Test SSH connection (should work immediately)
+ssh root@192.168.1.5
+
+# Or use hostname if DNS is working
+ssh root@misc.home.arpa
+```
+
+If SSH asks about host key fingerprint, verify and accept it.
+
+### Step 4: Deploy Secrets and Flake Configuration
+
+```bash
+# From cmos, create keys directory on target
+ssh root@192.168.1.5 'mkdir -p /etc/nixos/keys'
+
+# Copy the agenix decryption key
+scp /etc/nixos/keys/misc-agenix.key root@192.168.1.5:/etc/nixos/keys/
+
+# Deploy full flake configuration (includes SSH keys from agenix)
+nixos-rebuild switch --flake .#misc --target-host misc.home.arpa
+```
+
+This final deployment:
+- Installs all services (Traefik, Keycloak, OAuth2-proxy, etc.)
+- Decrypts and installs SSH private keys via agenix
+- Configures firewall, networking, and all modules
+- Replaces bootstrap config with full production config
+
+### Step 5: Verify Deployment
+
+```bash
+# Check for failed services
+ssh root@misc.home.arpa 'systemctl --failed'
+
+# Verify network configuration
+ssh root@misc.home.arpa 'ip addr show'
+
+# Check that secrets are decrypted
+ssh root@misc.home.arpa 'ls -la /run/agenix/'
+
+# Test SSH with host-specific key (after agenix deployment)
+ssh root@misc.home.arpa 'cat /etc/ssh/ssh_host_ed25519_key.pub'
+```
+
+---
+
+## 🛡️ Safety Features
+
+### Disk Detection Safety:
+- **Refuses to wipe USB devices** - checks `removable` flag
+- **Skips boot device** - won't wipe the USB you're booting from
+- **Minimum size check** - refuses disks &lt; 16GB to prevent mistakes
+- **Shows disk info** - displays detected disk and size before wiping
+
+### Installation Safety:
+- **Runs only once** - systemd unit creates marker file after completion
+- **Network required** - waits for network before starting
+- **Detailed logging** - all steps logged to systemd journal
+- **Manual override** - can be cancelled before disk wipe starts
+
+### If Something Goes Wrong:
+- Press **Ctrl+C** during boot to interrupt auto-login
+- Check logs: `journalctl -u automated-install -f`
+- Manually inspect: `lsblk` and verify target disk
+- Reboot to abort and try again
+
+---
+
+## 💿 Disk Layout
+
+The installer creates this partition scheme (matching existing misc setup):
+
+```
+/dev/sda (or /dev/nvme0n1)
+├── /dev/sda1  1GB      FAT32      /boot (ESP)
+├── /dev/sda2  Rest-9GB ext4       /     (root)
+└── /dev/sda3  9GB      linux-swap [SWAP]
+```
+
+This matches the current misc partition layout exactly.
+
+---
+
+## 🌐 Network Configuration
+
+The installed system has:
+- **Static IP**: 192.168.1.5/24 (misc)
+- **Gateway**: 192.168.1.1
+- **DNS**: 192.168.1.1
+- **Interface match**: `en*` (matches enp3s0f0, enp0s31f6, etc.)
+
+If your network interface doesn't match `en*`, SSH in and check:
+```bash
+ssh root@192.168.1.5 'ip link show'
+```
+
+Then update `/etc/nixos/hosts/misc/default.nix` before flake deployment.
+
+---
+
+## 🔧 Troubleshooting
+
+### Issue: ISO won't boot
+**Solution**: Re-flash USB, ensure it's fully written with `sync`
+
+### Issue: Installation doesn't start
+**Check logs**: Boot ISO, press Ctrl+C to interrupt, then:
+```bash
+journalctl -u automated-install -f
+```
+
+### Issue: Wrong disk detected
+**Solution**: Boot ISO, interrupt (Ctrl+C), check disks:
+```bash
+lsblk -o NAME,SIZE,TYPE,TRAN,HOTPLUG
+```
+Modify `/root/.installation-complete` check to re-run.
+
+### Issue: Can't SSH after reboot
+**Possible causes**:
+1. Wrong IP (check router DHCP)
+2. SSH host key changed (run `ssh-keygen -R 192.168.1.5`)
+3. Network interface mismatch (check with `ip link`)
+
+### Issue: Static IP not working
+**Solution**: The interface name might not match `en*`. During installation, the config uses a wildcard match. After first boot, check actual interface:
+```bash
+ssh root@192.168.1.5 'networkctl status'
+```
+Update `hosts/misc/default.nix` if needed before flake deployment.
+
+---
+
+## 🔄 Rebuilding the ISO
+
+To update the ISO with changes:
+
+```bash
+cd /etc/nixos/bootstrap
+
+# Edit the configuration
+vim automated-misc-iso.nix
+
+# Rebuild
+rm result  # Remove old symlink
+nix-build '<nixpkgs/nixos>' -A config.system.build.isoImage \
+  -I nixos-config=./automated-misc-iso.nix \
+  -o result
+
+# Flash updated ISO to USB
+```
+
+---
+
+## 📦 What Gets Installed
+
+### Bootstrap System (from ISO):
+- Minimal NixOS with kernel and systemd
+- SSH server with your authorized keys
+- Git and essential tools
+- Static IP networking
+- User 'nicholas' with sudo access
+- Flakes enabled
+
+### After Flake Deployment:
+- All services from `hosts/misc/default.nix`
+- Host-specific SSH keys from agenix
+- Traefik, Keycloak, OAuth2-proxy, services
+- Full firewall rules and networking
+- All secrets decrypted and configured
+
+---
+
+## 🔒 Security Notes
+
+### Bootstrap Phase:
+- Root login enabled with **key-only** authentication
+- Password authentication enabled temporarily for user 'nicholas'
+- Firewall allows SSH only
+- No sensitive secrets embedded in ISO
+
+### After Flake Deployment:
+- Password authentication disabled (keys only)
+- Host-specific SSH keys installed
+- All secrets managed via agenix
+- Full firewall rules applied
+- Services restricted per configuration
+
+### SSH Keys in ISO:
+The ISO contains **only public keys** from cmos for authorization. Private keys are **never embedded** and are deployed via agenix after installation.
+
+---
+
+## ✅ Post-Installation Checklist
+
+- [ ] USB boots successfully
+- [ ] Installation completes without errors
+- [ ] System reboots into new installation
+- [ ] SSH works from cmos with keys
+- [ ] Static IP is correct (192.168.1.5)
+- [ ] Agenix key copied successfully
+- [ ] Flake deployment succeeds
+- [ ] All services start without failures
+- [ ] SSH keys decrypted from agenix
+- [ ] Can SSH with host-specific keys
+
+---
+
+## 🔄 Future Deployments
+
+After initial setup, all future deployments are simple:
+
+```bash
+# From cmos
+nixos-rebuild switch --flake .#misc --target-host misc.home.arpa
+```
+
+No passwords, no manual configuration - fully declarative!
+
+---
+
+## 📝 Notes
+
+- This ISO is **specific to the misc host** but can be adapted for other servers
+- The installation is **destructive** - it wipes the target disk completely
+- Network configuration assumes your LAN is 192.168.1.0/24
+- The system uses **systemd-boot** (not GRUB) for UEFI boot
+- State version is set to **24.05** to match your flake configuration
+
+---
+
+## 📖 Related Documentation
+
+- [YubiKey Secure Bootstrap](yubikey-secure.md) - Hardware-authenticated deployment
+- [Bootstrap Scripts](scripts.md) - Helper scripts reference
+- [Fresh Host Deployment](../fresh.md) - General deployment overview
+
+---
+
+**Last Updated**: 2025-10-03
+**Source File**: `/etc/nixos/bootstrap/automated-misc-iso.nix`
+**Maintained By**: Infrastructure Team
+
+---
+
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🚀 [Bootstrap](../README.md)*

@@ -1,0 +1,86 @@
+---
+title: "Addressing Pushback"
+description: "The most likely objections when advocating for a title and compensation change, with evidence-based responses."
+---
+
+## "You don't write code — you use AI to write it for you."
+
+**Response:** The output is real. 400+ production scripts across 25+ systems, cloud functions running on schedule, data migrations that completed on deadline. The UKG export reverse-engineered a system with no API and extracted 4,000+ sensitive documents. The Greenhouse migration preserved the organization's entire recruitment history for compliance.
+
+AI is a tool, like Terraform is a tool, like an IDE is a tool. Nobody asks a DevOps engineer "but do you write the YAML by hand?" The value is in knowing what to build, how to architect it, and how to make it reliable. The code runs, the systems work, the problems get solved.
+
+That said — and this is worth acknowledging proactively — code literacy is a skill worth developing. Being able to read and understand code (even without writing it from scratch) strengthens your ability to debug, review, and explain your own systems. This is an active area of growth, not a disqualifying gap.
+
+---
+
+## "Engineer is a protected title in Quebec."
+
+**Response:** This is correct. The OIQ actively enforces the Engineers Act in Quebec — they've won court cases and contacted employers directly, including yours. Any title containing "engineer" is legally off the table without OIQ membership. See [Title & Compensation](title-and-comp.md#the-quebec-engineer-constraint) for full legal details.
+
+**The pivot, not the problem:** "Architect" is not a protected term. Infrastructure Architect is more accurate, more marketable, in a higher comp band ($103-177k CAD Montreal, $141-221k USD remote), and completely Quebec-safe. See [Title & Compensation](title-and-comp.md#recommended-titles-ranked) for recommended alternatives.
+
+---
+
+## "Your title is IT — why should you be paid like an Infrastructure Architect?"
+
+**Response:** Because the work is infrastructure architecture — designing and building automation systems across 25+ platforms at scale. Compare:
+
+| What Engineers Do | What This Role Does |
+|---|---|
+| Design systems with multiple components | 25+ system integrations across Okta, Kandji, S1, Google, Slack, Jira, Terraform |
+| Build CI/CD pipelines | CircleCI Terraform plan review pipeline, automated PR workflows |
+| Deploy to production | 3 Google Cloud Functions running in production |
+| Build data pipelines | UKG extraction (5,200 lines), Greenhouse migration (3,500 lines) |
+| Write infrastructure as code | Okta Terraform with PR lifecycle automation |
+| Build internal platforms | iss-utils (400+ tools), claude-plugins (8 skills, 3 plugins) |
+
+The title "IT Specialist" places this work in an IT support compensation band. But the work output — production deployments, data pipelines, IaC, AI-augmented platform tooling — is architecture-level output. The compensation should reflect the work, not the legacy title. Infrastructure Architect roles in Montreal range $103-177k CAD (Glassdoor 2026). In the US, $141-221k USD. The current comp of ~105k CAD sits at the bottom of the Montreal range despite 15 years of experience and production-grade output.
+
+---
+
+## "But can you maintain these systems without AI?"
+
+**Response:** This is a fair question, and the honest answer is: partially. You can explain the architecture, describe what each system does, identify which tool to use for which problem, and troubleshoot at the workflow level. The gap is at the syntax level — reading raw Python to trace a bug without AI assistance.
+
+Two points:
+
+1. **This gap is closing.** Two years of daily immersion in Python through AI-assisted development builds conceptual understanding even without formal training. You understand rate limiting, pagination, credential retrieval, checkpoint/resume, API authentication patterns — the hard parts. Reading `for` loops and `if` statements is the easy part.
+
+2. **The question applies to everyone now.** In 2026, the relevant question isn't "can you do it without AI?" — it's "can you do it at all?" Most IT professionals with 15 years of experience haven't built a single data migration pipeline, let alone 400+ automation tools. The ability to leverage AI to produce engineer-level output is itself a skill — and one that most people don't have.
+
+---
+
+## "400+ scripts — how many of those are actually used?"
+
+**Response:** Not all 400+ are in daily use — many are purpose-built for specific projects (UKG migration, Greenhouse decommissioning) that have completed. But the core operational tools are used regularly:
+
+- **Daily**: Okta investigation toolkit (integrated into Claude Code skill for ticket triage), group management tools
+- **Weekly**: Kandji device operations, compliance reporting, cross-system audits
+- **On-demand**: Data migration tools (activated for decommissioning projects), security correlation tools (activated during incidents)
+- **Automated**: Cloud functions (running on schedule — deprovisioning, device reporting, WFA scanning)
+
+The total count reflects the breadth of problems solved over time. Each tool was built to solve a real operational need, not as a portfolio exercise.
+
+---
+
+## "This is what's expected of a Senior IT Specialist today."
+
+**Response:** If that's the case, then the compensation band needs to reflect those expectations. You can't define the role as "build production cloud functions, manage Terraform IaC, architect AI plugin systems, and maintain 400+ automation tools across 25+ platforms" and then pay 103k. That's an engineering job description at a support-tier salary. If the expectations have genuinely risen to this level, the title and comp band need to rise with them.
+
+But more importantly — who else is meeting this expectation? If this output is standard for the role, there should be peers producing comparable work at comparable scale. Internally or externally, find another Senior IT Specialist who has built a 400+ script tooling platform, deployed production cloud functions, managed infrastructure as code with CI/CD pipelines, and architected a self-improving AI skill distribution system. If no one comes to mind, then this isn't "what's expected" — it's exceptional work being normalized to avoid reclassification.
+
+The bar for IT professionals has risen, and AI-augmented development is part of that. But there's a difference between "the bar is higher" and "the bar is exactly where this person happens to be standing." One is a market trend. The other is a convenient way to acknowledge the work without adjusting the title or compensation.
+
+---
+
+## "This all happened at one company — how do we know it transfers?"
+
+**Response:** The skills are platform-agnostic patterns applied to specific tools:
+
+- API integration patterns (rate limiting, pagination, auth) transfer to any REST API
+- Data migration architecture (checkpoint/resume, corruption scanning, dedup) transfers to any ETL project
+- IaC and CI/CD workflows (Terraform, CircleCI) transfer directly
+- Cross-system correlation patterns transfer to any multi-vendor environment
+- The Claude Code plugin system is a generalizable distribution model
+
+The specific platforms (Okta, Kandji, Google Workspace) are implementations. The skills — systems thinking, API integration, automation architecture, AI-augmented development — are portable.

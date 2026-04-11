@@ -1,0 +1,519 @@
+---
+title: "misc - Primary Server"
+description: "*Central server hosting web services, authentication, and reverse proxy*"
+---
+
+## 🎯 Overview
+
+**misc** is the primary server in the infrastructure, hosting all public-facing web services, centralized authentication, reverse proxy, and monitoring systems. This host is the gateway for external access and provides essential services for the entire network.
+
+**Role**: Primary Server, Web Services Host, Authentication Provider, Reverse Proxy
+
+---
+
+## 💻 Hardware Specifications
+
+### System Information
+- **Hostname**: `misc.home.arpa`
+- **Platform**: Mac Mini (Intel)
+- **Architecture**: x86_64
+- **Boot Loader**: systemd-boot with EFI
+- **Form Factor**: Compact server (Mac Mini)
+
+### Storage
+- **Root**: NVMe SSD
+- **Partition Layout**:
+  - `/boot` - 1GB FAT32 (ESP)
+  - `/` - Primary partition (ext4)
+  - Swap - 9GB (linux-swap)
+
+### Network Hardware
+- **Interface**: `enp3s0f0` (dual-port server-grade NIC)
+- **Connection**: Gigabit Ethernet
+
+---
+
+## 🌐 Network Configuration
+
+### Network Interface
+- **Interface**: `enp3s0f0`
+- **IP Address**: `192.168.1.5/24` (static)
+- **Gateway**: `192.168.1.1`
+- **DNS**: `192.168.1.1`
+- **Domain**: `home.arpa`
+- **Public Domain**: `bedrosn.com` (via Cloudflare)
+
+### Firewall Configuration
+
+**Allowed TCP Ports**:
+- `22` - SSH
+- `80` - Traefik HTTP
+- `443` - Traefik HTTPS (Let's Encrypt)
+- `445` - Samba/CIFS file sharing
+- `3080` - NixDocs (internal backend)
+- `4182` - OAuth2-proxy for Security Dashboard
+- `5230` - Memos note-taking service (localhost only)
+- `5231` - OAuth2-proxy for Memos
+- `8081` - PrivateBin backend
+- `8086` - Filebrowser
+- `8087` - Glances monitoring
+- `8088` - OAuth2-proxy for Glances
+- `8089` - Keycloak (localhost only)
+- `8091` - Security Dashboard backend (localhost only)
+- `8094` - Nextcloud (on jimmich, routed via Traefik)
+- `8095` - OAuth2-proxy for Clear NDR
+- `8096` - Clear NDR Community web UI (HTTPS) / Jellyfin (on jimmich)
+- `8097` - Clear NDR Community web UI (HTTP)
+- `8098` - SABnzbd Usenet downloader (localhost only)
+- `8099` - OAuth2-proxy for SABnzbd
+- `8100` - Radarr movie manager (localhost only)
+- `8101` - OAuth2-proxy for Radarr
+- `8102` - Sonarr TV show manager (localhost only)
+- `8103` - OAuth2-proxy for Sonarr
+- `9090` - Cockpit web management
+
+**Allowed UDP Ports**:
+- `137, 138` - NetBIOS
+
+---
+
+## 🌐 Web Services
+
+### Traefik Reverse Proxy
+**Module**: `modules/services/traefik.nix`
+**Ports**: 80 (HTTP), 443 (HTTPS)
+**Features**:
+- Automatic HTTPS via Let's Encrypt
+- Dynamic service discovery
+- Middleware support (compression, headers, auth)
+- Dashboard with metrics
+
+**Public Services**:
+- `https://bedrosn.com/*` - Various web services
+- Automatic HTTP → HTTPS redirect
+- Rate limiting and security headers
+
+### Keycloak Identity Provider
+**Module**: `modules/services/keycloak.nix`
+**Port**: 8089 (localhost only)
+**Database**: PostgreSQL
+**Purpose**:
+- SSH OAuth device flow authentication
+- Central identity management
+- SSO integration capabilities
+
+**Realms**:
+- SSH realm - SSH device flow authentication
+- Web realm - Web service authentication (if configured)
+
+**Access**: Via Traefik reverse proxy only
+
+### PostgreSQL Database
+**Module**: `modules/services/postgresql.nix`
+**Purpose**: Shared database for services
+**Databases**:
+- Keycloak (identity provider)
+
+**Access**: Localhost only via Unix sockets
+
+---
+
+## 🛡️ Security Services
+
+### OAuth2-Proxy Services
+**Modules**: `modules/services/oauth2-proxy-*.nix`
+**Purpose**: Authentication proxies for web services
+**Ports**: 4180-4189 (various services)
+**Features**:
+- Integration with Keycloak OIDC
+- Group-based authorization
+- Session management (4h with 15min refresh)
+- Cookie-based authentication
+
+**Protected Services**:
+- Glances (port 4180)
+- Traefik Dashboard (port 4181)
+- Security Dashboard (port 4182)
+- Filebrowser (port 4184)
+- Cockpit instances (ports 4185-4188)
+- NixDocs (port 4189)
+
+### Fail2ban
+**Module**: `modules/services/fail2ban.nix`
+**Purpose**: Intrusion prevention and brute-force protection
+**Features**:
+- 8 jails protecting Traefik services
+- Dynamic WAN IP whitelisting (every 30 min)
+- Ban duration: 1 hour
+- Max retry: 5 attempts
+
+### Security Dashboard
+**Module**: `modules/services/security-dashboard.nix`
+**Port**: 8091 (backend), 4182 (OAuth2-proxy)
+**Purpose**: Centralized security posture monitoring
+**Features**:
+- Real-time service status
+- Security header analysis with scoring
+- User access control visibility
+- Background caching (5min refresh)
+
+**Access**: Via OAuth2-proxy (port 4182)
+
+---
+
+## 📊 Monitoring & Management
+
+### Cockpit Dashboard
+**Module**: `modules/services/cockpit-dashboard.nix`
+**Port**: 9090 (standard), 8088 (dashboard view)
+**Features**:
+- System metrics (CPU, RAM, disk, network)
+- Service management
+- Terminal access
+- Log viewer
+- Update management
+
+### Glances
+**Module**: `modules/services/glances.nix`
+**Port**: 8087
+**Features**:
+- Real-time system monitoring
+- Web-based interface
+- Historical metrics
+- Process monitoring
+
+---
+
+## 🎬 Media Management Services
+
+### SABnzbd
+**Module**: `modules/services/sabnzbd.nix`
+**Ports**: 8098 (backend, localhost), 8099 (OAuth2-proxy)
+**Purpose**: Usenet downloader with SSL support
+**Features**:
+- High-performance NZB downloads
+- SSL connection to Newshosting (news.newshosting.com:563)
+- Automated categories (movies, tv, general)
+- API integration with Radarr/Sonarr
+- OAuth2 authentication via Keycloak
+
+**Documentation**: [Media Management Stack](../services/media.md)
+
+### Radarr
+**Module**: `modules/services/radarr.nix`
+**Ports**: 8100 (backend, localhost), 8101 (OAuth2-proxy)
+**Purpose**: Automated movie management
+**Features**:
+- Automated movie search and download
+- Quality profile management
+- NZBGeek indexer integration
+- SABnzbd download client integration
+- OAuth2 authentication via Keycloak
+
+**Documentation**: [Media Management Stack](../services/media.md)
+
+### Sonarr
+**Module**: `modules/services/sonarr.nix`
+**Ports**: 8102 (backend, localhost), 8103 (OAuth2-proxy)
+**Purpose**: Automated TV show management
+**Features**:
+- Automated TV episode tracking
+- Season and series management
+- NZBGeek indexer integration
+- SABnzbd download client integration
+- OAuth2 authentication via Keycloak
+
+**Documentation**: [Media Management Stack](../services/media.md)
+
+**Storage Paths**:
+- Downloads: `/mnt/downloads/` (incomplete, complete, nzb-backup)
+- Movies: `/mnt/media/movies/`
+- TV Shows: `/mnt/media/tv/`
+
+**Access**: All services require Keycloak `media-access` group membership
+
+---
+
+## 🗂️ File & Document Services
+
+### Filebrowser
+**Module**: `modules/services/filebrowser.nix`
+**Port**: 8086
+**Purpose**: Web-based file management
+**Features**:
+- File upload/download
+- Directory browsing
+- File sharing
+- User authentication
+
+### PrivateBin
+**Module**: `modules/services/privatebin.nix`
+**Ports**: 8081 (backend), 8090 (proxy)
+**Purpose**: Encrypted pastebin service
+**Features**:
+- Client-side encryption
+- Burn after reading
+- Password protection
+- Custom Docker proxy for Traefik integration
+
+**Configuration**:
+```nix
+services.privatebin-custom = {
+  enable = true;
+  port = 8081;      # Backend
+  proxyPort = 8090; # Docker nginx proxy
+};
+```
+
+### NixDocs
+**Module**: `modules/services/nixdocs.nix`
+**Port**: 3080 (internal)
+**Purpose**: MkDocs Material documentation site
+**Content**: `/etc/nixos/docs/`
+**Features**:
+- MkDocs Material theme with dark/light mode
+- Full-text search with highlighting
+- Tabbed navigation with expandable sidebar
+- Code syntax highlighting with copy button
+
+---
+
+## 🌍 DNS Management
+
+### Cloudflare Integration
+**Module**: `modules/services/domains.nix`
+**Service**: `cloudflare-dns-upsert.service`
+**Purpose**: Declarative DNS management
+
+**Features**:
+- Automatic DNS record creation
+- Subdomain management
+- API-driven updates
+- Runs before Traefik for certificate automation
+
+**Managed Domains**: Configured in `domains.nix`
+
+---
+
+---
+
+## 📁 File Services
+
+### Samba Share
+**Share Name**: `//misc-home/`
+**Path**: `/home/nicholas/`
+**Access**: Password-protected (nicholas user)
+**Purpose**: Cross-host file sharing and backup target
+
+---
+
+## 🔐 Security Configuration
+
+### SSH
+**Port**: 22
+**Authentication**:
+- SSH keys (primary)
+- OAuth device flow via Keycloak (`ssh-oauth.nix`)
+
+**Authorized Keys**: Managed via agenix
+
+### Agenix Integration
+**Identity Path**: `/etc/nixos/keys/misc-agenix.key`
+**Secrets**: Encrypted configuration
+**Runtime**: `/run/agenix/`
+
+**Managed Secrets**:
+- Keycloak credentials
+- Database passwords
+- API tokens
+- SSH keys
+
+### TLS/HTTPS
+**Provider**: Let's Encrypt (via Traefik)
+**Renewal**: Automatic
+**Certificates**: Wildcard and specific subdomains
+**Storage**: Traefik acme.json
+
+---
+
+## 🚀 Deployment
+
+### Bootstrap Deployment
+**Method**: Automated ISO Installation
+**Documentation**: `docs/operations-bootstrap-automated-iso.md`
+
+**Quick Deploy**:
+```bash
+# After bootstrap ISO installation
+ssh root@192.168.1.5 'mkdir -p /etc/nixos/keys'
+scp /etc/nixos/keys/misc-agenix.key root@192.168.1.5:/etc/nixos/keys/
+nixos-rebuild switch --flake .#misc --target-host misc.home.arpa
+```
+
+### Remote Deployment
+```bash
+# From cmos or any host
+nixos-rebuild switch --flake .#misc --target-host misc.home.arpa
+```
+
+### Service Management
+```bash
+# Restart specific service
+ssh root@misc.home.arpa 'systemctl restart traefik'
+
+# Check service status
+ssh root@misc.home.arpa 'systemctl status keycloak'
+
+# View logs
+ssh root@misc.home.arpa 'journalctl -u security-dashboard -n 50'
+```
+
+---
+
+## 🧪 Troubleshooting
+
+### Traefik Issues
+
+**Check Traefik status**:
+```bash
+systemctl status traefik
+journalctl -u traefik -f
+```
+
+**View Traefik dashboard**:
+```bash
+# Access via configured Traefik dashboard route
+curl http://localhost:8080/dashboard/
+```
+
+**Certificate problems**:
+```bash
+# Check Let's Encrypt certificates
+cat /var/lib/traefik/acme.json | jq '.[] | keys'
+```
+
+### Keycloak Issues
+
+**Check Keycloak status**:
+```bash
+systemctl status keycloak
+journalctl -u keycloak -f
+```
+
+**Database connection**:
+```bash
+# Verify PostgreSQL is running
+systemctl status postgresql
+
+# Check Keycloak database
+sudo -u postgres psql -c "\l" | grep keycloak
+```
+
+### OAuth2-Proxy Issues
+
+**Check OAuth2-proxy services**:
+```bash
+systemctl status 'oauth2-proxy-*'
+journalctl -u oauth2-proxy-glances -f
+journalctl -u oauth2-proxy-security-dashboard -f
+```
+
+**Test authentication**:
+```bash
+curl -I https://security.bedrosn.com
+# Should redirect to Keycloak if not authenticated
+```
+
+### DNS Issues
+
+**Check Cloudflare DNS service**:
+```bash
+systemctl status cloudflare-dns-upsert
+journalctl -u cloudflare-dns-upsert -n 50
+```
+
+**Manual DNS update**:
+```bash
+# Trigger DNS update
+systemctl start cloudflare-dns-upsert
+```
+
+### PrivateBin Issues
+
+**Check Docker containers**:
+```bash
+docker ps | grep privatebin
+docker logs privatebin-nginx
+```
+
+**Restart PrivateBin**:
+```bash
+systemctl restart privatebin-custom
+```
+
+---
+
+## 📊 Monitoring
+
+### System Monitoring
+- **Cockpit**: http://misc.home.arpa:9090
+- **Glances**: http://misc.home.arpa:8087
+- **Security Dashboard**: https://security.bedrosn.com
+
+### Service Health
+```bash
+# Check all services
+systemctl --failed
+
+# Check critical services
+systemctl status traefik keycloak postgresql fail2ban security-dashboard
+```
+
+### Log Monitoring
+```bash
+# All service logs
+journalctl -f
+
+# Specific service
+journalctl -u traefik -f
+```
+
+---
+
+## 🔗 Related Documentation
+
+- **[Services Index](../services/overview.md)** - All service documentation
+- **[Traefik Configuration](../services/web-services/traefik.md)** - Reverse proxy setup
+- **[Keycloak Setup](../services/keycloak.md)** - Identity provider
+- **[Security Dashboard](../services/security-dashboard.md)** - Security posture monitoring
+- **[Bootstrap Guide](../operations/bootstrap-automated-iso.md)** - Fresh installation
+- **[Host Overview](../README.md)** - All hosts overview
+
+---
+
+## 📝 Configuration Files
+
+**Primary Config**: `/etc/nixos/hosts/misc/default.nix`
+**SSH OAuth**: `/etc/nixos/hosts/misc/ssh-oauth.nix`
+**Hardware Config**: `/etc/nixos/hosts/misc/hardware-configuration.nix`
+
+**Service Modules**: `/etc/nixos/modules/services/`
+- `traefik.nix`
+- `keycloak.nix`
+- `oauth2-proxy-*.nix` (multiple OAuth2 proxies for services)
+- `security-dashboard.nix`
+- `fail2ban.nix`, `fail2ban-dynamic-whitelist.nix`
+- `postgresql.nix`
+- `domains.nix`
+- `nixdocs.nix`
+- `privatebin.nix`
+
+---
+
+**Last Updated**: 2026-01-10
+**System State Version**: 24.05
+**Maintained By**: Infrastructure Team
+
+---
+
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🖥️ [Hosts](../README.md)*

@@ -1,0 +1,216 @@
+---
+title: "Discord Crash Fix - Troubleshooting Documentation"
+description: "Created: 2025-08-31"
+---
+
+**Last Updated**: 2026-02-26
+**Status**: RESOLVED (XWayland workaround)
+
+---
+
+## Issue Timeline
+
+This document covers two related but distinct Discord crash issues on NixOS with Wayland.
+
+### Issue 1: GPU Process Crash (August 2025)
+
+**Error**: `GPU process exited unexpectedly: exit_code=8704`
+**Impact**: Servers disappearing from sidebar, voice chat disconnections, repeated rejoins
+**Root Cause**: Electron 35.3.0 GPU sandbox conflicts with Wayland + KDE + EGL/OpenGL on Intel iGPU (13th Gen i7-13700K)
+
+**GPU Error Stack**:
+```
+[ERROR:angle_platform_impl.cc(49)] ImageEGL.cpp:112 (operator()): eglCreateImage failed with 0x00003009
+[ERROR:scoped_egl_image.cc(23)] Failed to create EGLImage: EGL_SUCCESS
+[ERROR:native_pixmap_egl_binding.cc(114)] Unable to initialize binding from pixmap
+[ERROR:ozone_image_backing.cc(319)] OzoneImageBacking::ProduceSkiaGanesh failed to create GL representation
+[ERROR:gpu_service_impl.cc(1182)] Exiting GPU process because some drivers can't recover from errors
+```
+
+**Initial Fix (Aug 2025)**: Brute-force GPU disabling via wrapper flags:
+```bash
+discord --disable-gpu --disable-gpu-compositing --disable-accelerated-2d-canvas \
+  --disable-accelerated-video-decode --no-sandbox --disable-dev-shm-usage \
+  --in-process-gpu --disable-audio-input-processor --disable-webrtc-apm-in-audio-service \
+  --autoplay-policy=no-user-gesture-required
+```
+
+This worked for ~6 months by bypassing the buggy Wayland GPU code paths entirely.
+
+### Issue 2: Renderer SIGABRT Crash Loop (February 2026)
+
+**Error**: `render-process-gone { reason: 'crashed', exitCode: 134 }` (SIGABRT)
+**Impact**: Discord app constantly "refreshing" every 15-70 seconds, voice/RTC disconnections, unusable
+**Trigger**: Discord's February 4, 2026 client-side update with "dramatic CSS rendering performance improvements"
+
+**What happened**:
+1. Discord pushed a web client update (Feb 4, 2026) that changed CSS rendering paths
+2. The new rendering code exercised Wayland compositor paths that the old `--disable-gpu` flags couldn't suppress
+3. `--disable-gpu` + `--in-process-gpu` (contradictory flags) caused the in-process GPU thread to SIGABRT when the new rendering code tried to use it
+4. Discord auto-reloads crashed renderers: `"[WebContents] crashed (reason: crashed, exitCode: 134)... reloading"` — creating an infinite refresh loop
+5. Voice/RTC disconnections were a side effect of the renderer crashing, not a network issue
+
+**Crash log signature**:
+```
+❌ render-process-gone { reason: 'crashed', exitCode: 134 }
+Wrote 620032 byte minidump to ~/.config/discord/0.0.111/modules/crashlogs/...
+```
+
+**Sentry report key fields**:
+```json
+{
+  "chrome": {"version": "134.0.6998.205"},
+  "runtime": {"name": "Electron", "version": "35.3.0"},
+  "electron": {"crashed_url": "https://discord.com/channels/@me", "details": {"reason": "crashed", "exitCode": 134}},
+  "extra": {"display_server": "wayland", "wm": "KDE,unknown", "distro": "NixOS 25.05 (Warbler)"}
+}
+```
+
+---
+
+## Investigation Process (Feb 2026)
+
+### What was tried and failed:
+
+1. **`net.bridge.bridge-nf-call-iptables` sysctl fix** — Initially suspected bridge networking + Docker was causing conntrack issues with Discord's UDP voice traffic. Applied `bridge-nf-call-iptables=0` and increased UDP conntrack timeouts. Did not fix the issue (kept this change as it's still good practice).
+
+2. **Reduced wrapper flags** (`--disable-gpu-sandbox --no-sandbox` only) — Removed the contradictory `--disable-gpu` + `--in-process-gpu` pair. Still crashed with exit code 134 after ~17 seconds.
+
+3. **Cleared all caches** — Deleted `Cache/`, `Code Cache/`, `GPUCache/`, `DawnGraphiteCache/`, `Crashpad/completed/`. Still crashed.
+
+4. **Disabled hardware acceleration in settings.json** — Set `"enableHardwareAcceleration": false`. Crash took longer (~10 minutes instead of 17 seconds) but still occurred.
+
+5. **Force XWayland** (`--ozone-platform=x11`) — **THIS WORKED**. Running Discord under XWayland instead of native Wayland bypasses the Electron 35 Wayland renderer bug entirely.
+
+### Key diagnostic commands used:
+```bash
+# Check crash logs (Discord writes detailed Sentry reports)
+tail -20 ~/.config/discord/0.0.111/modules/crashlogs/*-events.log
+
+# Check for renderer crashes in user journal
+journalctl --user --since "5 minutes ago" | grep -i "discord\|crash\|render\|gone\|exit"
+
+# Check kernel logs for related issues
+dmesg | grep -i "oom\|killed\|segfault\|discord\|electron"
+
+# Verify platform (X11 vs Wayland)
+xdotool search --name "Discord"  # If returns window IDs, running under X11
+
+# Check Discord process flags
+ps aux | grep discord | grep -v grep
+```
+
+---
+
+## Current Solution (February 2026)
+
+**Force XWayland via `--ozone-platform=x11`** in the `discord-fixed` wrapper.
+
+### Configuration File: `/etc/nixos/modules/desktop/discord.nix`
+
+```nix
+(pkgs.writeShellScriptBin "discord-fixed" ''
+  # Force XWayland - Electron 35 renderer crashes under native Wayland
+  export NIXOS_OZONE_WL=0
+  exec ${pkgs.discord}/bin/discord \
+    --ozone-platform=x11 \
+    --force-device-scale-factor=1.5 \
+    --no-sandbox \
+    "$@"
+'')
+```
+
+### Why this works:
+- `NIXOS_OZONE_WL=0` — Prevents the NixOS wrapper from adding `--ozone-platform=wayland`
+- `--ozone-platform=x11` — Forces Electron to use the X11 rendering backend via XWayland
+- X11/XWayland rendering in Chromium is battle-tested (15+ years); native Wayland backend is newer and buggier
+- `--force-device-scale-factor=1.5` — User preference for HiDPI scaling
+- `--no-sandbox` — Still needed for NixOS compatibility
+
+### Settings file: `~/.config/discord/settings.json`
+```json
+{
+  "SKIP_HOST_UPDATE": true,
+  "enableHardwareAcceleration": false
+}
+```
+Note: `enableHardwareAcceleration` was set to `false` during debugging. Can be set back to `true` if desired since the crash was Wayland-specific, not GPU-specific.
+
+### Desktop entry: `~/.local/share/applications/discord-fixed.desktop`
+- Uses `discord-fixed` (PATH lookup, survives garbage collection)
+- Original `discord.desktop` hidden with `NoDisplay=true`
+- Created by `system.activationScripts.discordDesktopEntry`
+
+---
+
+## System Context
+
+| Component | Value |
+|-----------|-------|
+| **Host** | cmos (desktop) |
+| **CPU** | 13th Gen Intel i7-13700K |
+| **GPU** | AMD (ROCm) + Intel iGPU |
+| **Kernel** | 6.12.63 |
+| **NixOS** | 25.05 (Warbler) |
+| **Desktop** | KDE Plasma 6, Wayland |
+| **Discord** | 0.0.111 (Electron 35.3.0, Chromium 134.0.6998.205) |
+| **Display** | 2560x1440, scale 1.5 |
+
+### Additional sysctl applied (bridge networking fix):
+```nix
+# In hosts/cmos/default.nix
+boot.kernel.sysctl = {
+  "net.bridge.bridge-nf-call-iptables" = 0;
+  "net.bridge.bridge-nf-call-ip6tables" = 0;
+  "net.netfilter.nf_conntrack_udp_timeout" = 60;
+  "net.netfilter.nf_conntrack_udp_timeout_stream" = 180;
+};
+```
+Applied during initial investigation (thought it was a network issue). Kept because it's still beneficial — prevents Docker's `bridge-nf-call-iptables` from interfering with host traffic through `br0`.
+
+---
+
+## Related GitHub Issues
+
+### NixOS/nixpkgs
+- [#304214](https://github.com/NixOS/nixpkgs/issues/304214) — Discord crashes after some time with exit_code=134 (same issue)
+- [#382612](https://github.com/NixOS/nixpkgs/issues/382612) — Kernel 6.x: Hardware Acceleration fails on Wayland on Electron apps (kernel 6.12+)
+- [#159267](https://github.com/NixOS/nixpkgs/issues/159267) — Discord renders black window on Wayland
+
+### Electron
+- [#45512](https://github.com/electron/electron/issues/45512) — Renderer process gone and exited with code 134
+- [#37531](https://github.com/electron/electron/issues/37531) — Crash when opened under Wayland (long-standing)
+
+### Other
+- [flathub/com.discordapp.Discord#413](https://github.com/flathub/com.discordapp.Discord/issues/413) — Crash on startup with Wayland (confirms not NixOS-specific)
+- [hyprwm/Hyprland#5731](https://github.com/hyprwm/Hyprland/issues/5731) — Discord with `--ozone-platform=wayland` crashes on start
+
+---
+
+## Future Considerations
+
+1. **Monitor Electron updates** — Future Electron versions (36+) may fix the Wayland renderer crash, allowing removal of the XWayland workaround
+2. **Vesktop alternative** — [Vesktop](https://github.com/Vencord/Vesktop) is a community Discord client built on newer Electron with better Wayland support
+3. **Test native Wayland periodically** — Remove `--ozone-platform=x11` and test after Discord/Electron updates to see if the upstream fix lands
+4. **Visual quality** — XWayland may look slightly less crisp than native Wayland at non-integer scaling; monitor for user complaints
+
+---
+
+## Crash Log Locations
+
+| File | Purpose |
+|------|---------|
+| `~/.config/discord/0.0.111/modules/crashlogs/*-events.log` | Detailed crash timeline with Sentry reports |
+| `~/.config/discord/0.0.111/modules/crashlogs/*-minidump.dmp` | Binary crash dumps (need `minidump_stackwalk` to decode) |
+| `~/.config/discord/logs/renderer_js.log` | Renderer JavaScript logs |
+| `~/.config/discord/Crashpad/completed/` | Chromium crash handler metadata |
+| `journalctl --user -u 'app-discord*'` | systemd user journal for Discord |
+
+---
+
+**Last Updated**: 2026-02-26
+**Maintained By**: nicholas
+**Next Review**: After Discord or Electron major update
+
+---
+*[Home](../README.md) | [Desktop Overview](overview.md) | [Bluetooth](bluetooth.md)*

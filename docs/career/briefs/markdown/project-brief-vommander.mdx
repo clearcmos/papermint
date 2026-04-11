@@ -1,0 +1,244 @@
+---
+title: "Vommander"
+description: "::: subtitle"
+---
+
+Technical Brief - Voice Command System for Linux/Wayland
+:::
+
+::: {.note style="margin-top: 0; margin-bottom: 1.5rem;"}
+Personal project, not employer work. Built for daily use on NixOS with KDE Plasma on Wayland.
+:::
+
+::: pitch
+Built a **voice command system for Linux desktops** that runs entirely offline using Whisper STT, with Wayland-native input simulation, 5 operational modes, 100+ commands, configurable YAML macros, and a system tray UI. Solves the \"no voice control on Wayland\" problem that mainstream tools ignore.
+:::
+
+:::::::::::: section
+## Architecture
+
+::::::::::: layers
+:::: {.layer .layer-audio}
+[Audio Capture + VAD]{.layer-title} [- PipeWire audio input, WebRTC voice activity detection, ring buffer for speech padding, USB mic auto-selection.]{.layer-desc}
+
+::: layer-items
+audio.py sounddevice webrtcvad PipeWire (wpctl)
+:::
+::::
+
+:::: {.layer .layer-speech}
+[Speech Recognition]{.layer-title} [- Offline Whisper inference with domain-specific prompt hints. No cloud dependency.]{.layer-desc}
+
+::: layer-items
+recognizer.py faster-whisper tiny.en / base.en models
+:::
+::::
+
+:::: {.layer .layer-command}
+[Command Matching + State]{.layer-title} [- Mode-aware command registry (YAML-driven), \~30 hallucination aliases, app launcher with fuzzy matching.]{.layer-desc}
+
+::: layer-items
+commands.py state.py main.py
+:::
+::::
+
+:::: {.layer .layer-exec}
+[Desktop Execution]{.layer-title} [- Wayland-native input via ydotool, pixel monitoring via OpenCV, system tray via PyQt6.]{.layer-desc}
+
+::: layer-items
+executor.py pixel.py tray.py ydotool
+:::
+::::
+:::::::::::
+::::::::::::
+
+::::::::::::::::::: section
+## Spotlight
+
+:::::::::::::::: card
+### Hallucination-First Design
+
+Whisper consistently mishears short command words. Instead of fighting the model, the system compensates.
+
+::::::::::::::: workflow
+::::: wf-step
+::: wf-num
+1
+:::
+
+::: wf-content
+#### The Problem
+
+Say \"one\" and Whisper might return \"won\", \"wan\", or \"1\". Say \"loot\" and get \"loop\", \"lute\", or \"loot!\". Short words with similar phonemes are inherently ambiguous for speech models.
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+2
+:::
+
+::: wf-content
+#### Alias Table
+
+\~30 mappings of known Whisper hallucinations to intended commands. \"won\"/\"wan\"/\"1\" all resolve to \"one\". \"loop\"/\"lute\" resolve to \"loot\". Built empirically from real usage.
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+3
+:::
+
+::: wf-content
+#### First-Word Extraction
+
+Whisper sometimes adds filler text around the actual command - \"So, open terminal\" or \"The word is copy\". The matcher extracts and tries the first meaningful word before falling back to the full transcript.
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+4
+:::
+
+::: wf-content
+#### Prompt Hints
+
+Custom PROMPT_HINT biases Whisper toward expected vocabulary - voice commands, gaming terms, alphabet letters - depending on the active mode. Reduces hallucinations at the model level.
+:::
+:::::
+:::::::::::::::
+::::::::::::::::
+
+::: card
+### Pixel-Based Auto-Detection
+
+For gaming mode - detects visual state changes on screen using computer vision:
+
+- **Template matching fusion** - combines 3 OpenCV algorithms (edge-based 50%, normalized 30%, histogram 20%) for robust detection under varying conditions
+- **Cursor region capture** - screenshots only the area around the cursor, not the full screen
+- **Cooldown management** - prevents action spam with configurable cooldown timers
+- **20 Hz polling** - runs in a background thread without blocking voice recognition
+:::
+
+::: card
+### Five-Mode State Machine
+
+Each mode loads different commands and changes recognition behavior:
+
+- **Normal** - standard desktop commands (copy, paste, open, close, switch)
+- **Numbers** - digit entry, calculator-style input
+- **Letters** - NATO-style alphabet spelling with Whisper prompt hint for single letters
+- **Dictation** - continuous text entry with automatic punctuation conversion (\"period\" to \".\", \"one\" to \"1\")
+- **Gaming** - key macros, auto-repeat with jitter, mouse clicks, pixel monitoring
+:::
+:::::::::::::::::::
+
+::::::::::::::::::: section
+## Key Technical Decisions
+
+:::::: card
+### WebRTC VAD Over Streaming Recognition
+
+::: decision
+[Problem]{.decision-label .problem} [Need to detect when the user is speaking without running Whisper continuously (which would use 100% GPU and produce garbage on silence).]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [WebRTC VAD (lightweight, CPU-only) acts as a gate. Audio frames are buffered in a ring buffer. When VAD detects speech, the buffer (including 180ms of pre-speech context) is sent to Whisper.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [Near-zero idle CPU. Sub-200ms speech detection latency. No clipped beginnings thanks to the ring buffer\'s pre-speech padding.]{.decision-text}
+:::
+::::::
+
+:::::: card
+### Wayland-Native via ydotool
+
+::: decision
+[Problem]{.decision-label .problem} [Wayland\'s security model blocks the input injection that xdotool uses on X11. Most voice control tools simply don\'t work on Wayland.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [ydotool injects input via /dev/uinput (kernel-level virtual input device). Works on any Wayland compositor. The daemon (ydotoold) auto-starts if missing.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [Full keyboard and mouse simulation on Wayland. No compositor-specific hacks. Works on KDE, GNOME, Sway, and others.]{.decision-text}
+:::
+::::::
+
+:::::: card
+### Physical Keyboard Monitoring for Auto-Repeat
+
+::: decision
+[Problem]{.decision-label .problem} [Gaming auto-repeat (e.g., press \"1\" every 2.5 seconds) needs to stop immediately when the user physically touches the keyboard. Polling is wasteful and laggy.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [Read raw keyboard events from /dev/input via evdev. Use select() on the file descriptor - blocks efficiently until a key event arrives, then cancels the auto-repeat loop.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [Instant cancellation on any physical keypress. Zero polling overhead. The user always has manual override priority.]{.decision-text}
+:::
+::::::
+
+:::::: card
+### YAML-Driven Command Configuration
+
+::: decision
+[Problem]{.decision-label .problem} [Hardcoding 100+ commands in Python makes customization require code changes. Different modes need different command sets.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [YAML config defines commands with typed actions (key, text, command, mouse, macro). Mode-specific sections inherit from universal commands. Macros support sequenced actions with millisecond delays.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [Users add commands without touching code. A \"drink\" macro becomes: press R, wait 1000ms, press T. New modes can be added by creating a YAML section.]{.decision-text}
+:::
+::::::
+:::::::::::::::::::
+
+:::::::::::: section
+## Talking Points
+
+::::::::::: {.card .stories}
+### \"Tell me about Vommander\"
+
+:::: talk-point
+::: answer
+Voice control on Linux barely exists, and on Wayland it\'s essentially nonexistent. I built a system that runs Whisper STT locally (no cloud), detects speech with WebRTC VAD, matches commands through a mode-aware registry, and executes them via Wayland-native input injection. It handles **100+ commands across 5 modes** - from desktop productivity to gaming macros - all configurable through YAML.
+:::
+::::
+
+### \"What was the hardest part?\"
+
+:::: talk-point
+::: answer
+Making Whisper reliable for short command words. Speech models are trained on conversation, not one-word commands. \"One\" becomes \"won\", \"loot\" becomes \"loop\", and Whisper loves adding phantom words. I couldn\'t fix the model, so I **designed around its failures** - \~30 hallucination aliases built from real usage, first-word extraction for garbled output, and mode-specific prompt hints that bias recognition toward expected vocabulary. It\'s pragmatic error handling, not perfect recognition.
+:::
+::::
+
+### \"Why not use an existing voice assistant?\"
+
+:::: talk-point
+::: answer
+Three reasons. First, **Wayland breaks everything** - xdotool doesn\'t work, so tools built on it don\'t work. Second, I needed fully offline operation (no cloud latency, no privacy concerns). Third, I needed programmable macros with millisecond timing for gaming. No existing tool does all three. The closest was Nerd Dictation, but it\'s X11-only and doesn\'t have mode support or macro execution.
+:::
+::::
+
+### \"What would you change?\"
+
+:::: talk-point
+::: answer
+The hallucination table is hand-curated. A smarter approach would be a lightweight classifier trained on my actual voice - a few hundred samples per command word would outperform the alias table. I\'d also add wake-word detection (always-on listening without VAD drain) and look at Wayland protocols for getting the active window context, so commands could be app-aware without XWayland fallbacks.
+:::
+::::
+:::::::::::
+::::::::::::
+
+Project brief - not for distribution. All details sanitized.

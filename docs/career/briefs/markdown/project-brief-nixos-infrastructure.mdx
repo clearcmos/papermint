@@ -1,0 +1,214 @@
+---
+title: "NixOS Personal Infrastructure"
+description: "Technical Brief - personal project, demonstrates infrastructure skills"
+---
+
+::: sanitize-note
+This document is sanitized. No IP addresses, hostnames, domain names, or credentials. All details describe architecture, patterns, and decisions - not specific configurations.
+:::
+
+::::: section
+::: pitch
+Built and maintain a **4-host NixOS infrastructure managed entirely as code** - 100+ declarative modules, 40+ services, multi-layer OAuth2 authentication with SSO, intrusion detection, GPU-accelerated AI stack, Docker workloads, VM provisioning, and automated security scanning. Every service, firewall rule, user account, and secret is defined in Nix and reproducible from scratch.
+:::
+
+::: note
+Personal infrastructure, not employer work. Demonstrates infrastructure-as-code skills, Linux systems depth, networking, security hardening, and containerized workloads at a level beyond what\'s visible from the professional portfolio alone.
+:::
+:::::
+
+:::::::::::::: section
+## Architecture
+
+:::::::::::: card
+### Infrastructure Layers
+
+::::::::::: layers
+:::: {.layer .layer-edge}
+[Edge - Reverse Proxy & DNS]{.layer-title} [- Traefik with Let\'s Encrypt HTTPS via Cloudflare DNS challenge. Automated DNS record management.]{.layer-desc}
+
+::: layer-items
+Traefik Let\'s Encrypt Cloudflare API Fail2ban (8 jails) Dynamic WAN IP whitelist
+:::
+::::
+
+:::: {.layer .layer-auth}
+[Authentication - OAuth2 & SSO]{.layer-title} [- Keycloak as identity provider with Google IDP backend. 9 OAuth2-proxy instances protecting services. SSH via OAuth2 device flow with QR codes.]{.layer-desc}
+
+::: layer-items
+Keycloak OAuth2-proxy (x9) SSH device flow PAM integration Security headers
+:::
+::::
+
+:::: {.layer .layer-services}
+[Services - 40+ Deployed]{.layer-title} [- Media, AI/ML, monitoring, personal apps, file sync, network detection. Mix of native NixOS services and Docker stacks.]{.layer-desc}
+
+::: layer-items
+Ollama (ROCm GPU) LibreChat + RAG Nextcloud Jellyfin Immich Suricata IDS/IPS PostgreSQL Cockpit (x3) Security dashboard
+:::
+::::
+
+:::: {.layer .layer-infra}
+[Foundation - NixOS Flake]{.layer-title} [- 4 hosts defined in a single flake. Per-host hardware configs, shared modules with conditional imports, agenix secret management.]{.layer-desc}
+
+::: layer-items
+Flake (4 hosts) 100+ Nix modules agenix + YubiKey KVM/libvirt Bridge networking CIFS cross-mounts
+:::
+::::
+:::::::::::
+::::::::::::
+
+::: card
+### The Hosts
+
+- **Desktop workstation** - Primary machine. KDE Plasma, gaming, GPU-accelerated AI stack (Ollama with ROCm), LibreChat with RAG, Docker workloads, VM host (KVM/libvirt with bridge networking).
+- **Server A** - Reverse proxy (Traefik), Keycloak SSO, OAuth2-proxy instances, Fail2ban, Suricata IDS/IPS, media management (Radarr/Sonarr/SABnzbd), personal apps, security dashboard.
+- **Server B** - Media and storage. Jellyfin, Immich (photo library with ML search), Nextcloud (file sync + Obsidian vault), NAS-backed storage via CIFS.
+- **Development VM** - Lightweight NixOS VM with Wayland desktop. Defined in the same flake, provisioned automatically, bridge-networked for full LAN access with 3D acceleration.
+:::
+::::::::::::::
+
+:::::: section
+## Spotlight: Key Systems
+
+::: card
+### Multi-Layer Authentication
+
+Every web service is behind OAuth2 authentication. SSH access from WAN uses a separate OAuth2 device flow.
+
+- **Keycloak** as the central identity provider with Google as the upstream IDP. Automated realm and client bootstrap on first startup via service account.
+- **9 OAuth2-proxy instances** - each service gets its own proxy with standardized security headers (HSTS, CSP, X-Frame-Options, X-Content-Type-Options). Cross-site SSO via wildcard cookie domain.
+- **SSH OAuth2 device flow** - WAN SSH access requires scanning a QR code and authenticating through Keycloak. Email whitelist enforced. PAM module integration for keyboard-interactive auth.
+- **Some services bypass OAuth2-proxy** with native OAuth integration (e.g., the chat UI authenticates directly with Google, skipping the proxy layer entirely).
+:::
+
+::: card
+### GPU-Accelerated AI Stack
+
+Local LLM inference with retrieval-augmented generation, running on consumer GPU hardware.
+
+- **Ollama** with ROCm acceleration on AMD GPU. Custom environment variables for gfx1030 target, low VRAM mode, and disabled flash attention (stability workaround for ROCm driver bug).
+- **VRAM protection** - 12GB limit enforced via systemd to prevent the LLM from consuming all GPU memory and freezing the desktop session.
+- **LibreChat** Docker stack - PostgreSQL + MongoDB + PGVector for embeddings + custom RAG API. Indexes an Obsidian vault as a knowledge base. Ollama provides the embedding model.
+- **Systemd resource limits** - CPU quota, memory high/max watermarks, and parallel request limits to keep the AI stack from starving other workloads.
+:::
+
+::: card
+### Network Detection & Security Scanning
+
+Not just firewalls - active intrusion detection and automated vulnerability scanning.
+
+- **Suricata IDS/IPS** via Clear NDR Community - Docker stack with OpenSearch, EveBox alert viewer, and custom alert suppression rules.
+- **Fail2ban** with 8 jails protecting the reverse proxy. Dynamic WAN IP whitelisting via systemd timer (checks 3 IP detection services, reloads only on change).
+- **Automated scanning** - Lynis hardening audits (monthly timer), Nuclei vulnerability scanning, OWASP ZAP web app scanning, Nmap NSE scripts.
+- **Monitoring scripts** with Discord webhooks - track Keycloak CVEs, Traefik security advisories, upstream software bugs. Proactive, not reactive.
+:::
+::::::
+
+::::::::::::::::::: section
+## Key Technical Decisions
+
+:::::: card
+### NixOS Over Traditional Linux
+
+::: decision
+[Problem]{.decision-label .problem} [Managing 4 machines with different roles (desktop, servers, VM) means configuration drift is inevitable. Traditional distros accumulate state that\'s hard to reproduce.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [NixOS with a single flake defining all 4 hosts. Shared modules for common config (users, SSH, networking), per-host modules for role-specific services. Every change is a git commit. Any host can be rebuilt from scratch.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [Zero configuration drift. Rollback to any previous state in seconds. New services are a module import, not hours of manual setup.]{.decision-text}
+:::
+::::::
+
+:::::: card
+### OAuth2 Device Flow for SSH
+
+::: decision
+[Problem]{.decision-label .problem} [SSH key auth from WAN is standard but risky - a compromised key grants access. Password auth is worse. Need something stronger without making remote access painful.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [PAM module that triggers an OAuth2 device flow. SSH presents a QR code, you scan it on your phone, authenticate through Keycloak (which authenticates through Google), and the SSH session is authorized. Email whitelist restricts who can even attempt it.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [WAN SSH requires identity provider authentication - not just a key file. Phishing-resistant, auditable, and revocable through Keycloak without touching SSH configs.]{.decision-text}
+:::
+::::::
+
+:::::: card
+### VRAM Protection for Shared GPU
+
+::: decision
+[Problem]{.decision-label .problem} [The GPU runs both the desktop environment and Ollama LLM inference. Without limits, a large model load consumes all VRAM and freezes the entire desktop session.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [Systemd resource controls on the Ollama service - 12GB VRAM cap (out of 16GB), CPU quota limits, memory high/max watermarks, and parallel request limits. Flash attention disabled due to a specific ROCm driver crash on this GPU architecture.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [LLM inference and desktop/gaming coexist on the same GPU. The AI stack is always available but can never starve the desktop.]{.decision-text}
+:::
+::::::
+
+:::::: card
+### Proactive Security Monitoring
+
+::: decision
+[Problem]{.decision-label .problem} [Running 40+ services means a large attack surface. Can\'t manually check every dependency for CVEs or wait for someone else to notice.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [Custom monitoring scripts that poll GitHub for security advisories on Keycloak, Traefik, and other critical services. Discord webhook alerts on new CVEs. Monthly Lynis audits. IDS/IPS with tuned alert suppression to reduce noise.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [Know about vulnerabilities before they\'re exploited. Security posture is continuously monitored, not periodically checked.]{.decision-text}
+:::
+::::::
+:::::::::::::::::::
+
+:::::::::::: section
+## Talking Points
+
+::::::::::: {.card .stories}
+### \"Tell me about this project\"
+
+:::: talk-point
+::: answer
+I run my personal infrastructure on NixOS - **4 machines, 40+ services, all defined declaratively in a single flake**. Every service, firewall rule, user account, and encrypted secret is in version control. I can rebuild any machine from scratch with one command. It runs a reverse proxy with automated HTTPS, an identity provider (Keycloak) with 9 OAuth2-protected services, an IDS/IPS system, a GPU-accelerated AI stack with retrieval-augmented generation, media servers, file sync, and automated security scanning. It\'s personal infrastructure, but the patterns are production-grade.
+:::
+::::
+
+### \"Why NixOS?\"
+
+:::: talk-point
+::: answer
+Because **I wanted infrastructure I could reason about**. With 4 machines running 40+ services, traditional Linux means configuration drift is inevitable. NixOS eliminates that - every change is a git commit, every state is reproducible, and I can roll back in seconds. The module system lets me share common config (users, SSH, networking) across all hosts while keeping role-specific services separate. It\'s the same principle as Terraform but for the entire operating system.
+:::
+::::
+
+### \"What\'s the most interesting part?\"
+
+:::: talk-point
+::: answer
+The authentication layer. **SSH access from outside the network requires OAuth2 device flow authentication** - you scan a QR code, authenticate through the identity provider, and only then does the SSH session authorize. Every web service is behind its own OAuth2-proxy instance with standardized security headers. The identity provider bootstraps itself automatically on first boot. It\'s the same kind of layered authentication I work with professionally (Okta, SAML, SCIM) but applied to personal infrastructure.
+:::
+::::
+
+### \"What did you learn?\"
+
+:::: talk-point
+::: answer
+That **declarative infrastructure changes how you think about systems**. When every service is a module you can import or remove, you stop thinking in terms of \"install and configure\" and start thinking in terms of composition. It also taught me that security isn\'t a layer you add on top - it has to be structural. The OAuth2 flow, the firewall rules, the secret encryption, the IDS - all of it is defined alongside the services, not bolted on after.
+:::
+::::
+:::::::::::
+::::::::::::
+
+Project brief - not for distribution. All details sanitized.

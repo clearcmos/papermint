@@ -1,0 +1,223 @@
+---
+title: "Send2Lan"
+description: "::: subtitle"
+---
+
+Technical Brief - Android SMB File Transfer App
+:::
+
+::: {.note style="margin-top: 0; margin-bottom: 1.5rem;"}
+Personal project, not employer work. Built to solve a daily friction point - sending files from Android to network shares.
+:::
+
+::: pitch
+Built an **Android app** in Kotlin with Jetpack Compose that sends files to SMB/CIFS network shares. Supports share intent integration (send from any app), remote folder browsing, network share discovery, file conflict resolution, and background uploads with real-time progress tracking.
+:::
+
+:::::::::::: section
+## Architecture
+
+::::::::::: layers
+:::: {.layer .layer-ui}
+[Jetpack Compose UI]{.layer-title} [- Material Design 3 with dynamic theming. 5 screens: share list, file browser, add share, upload progress, share receiver.]{.layer-desc}
+
+::: layer-items
+MainActivity FileBrowserActivity AddShareActivity UploadProgressActivity ShareReceiverActivity
+:::
+::::
+
+:::: {.layer .layer-vm}
+[ViewModel + State]{.layer-title} [- MVVM pattern with StateFlow for reactive state. DataStore for preferences (last-used share memory).]{.layer-desc}
+
+::: layer-items
+MainViewModel PreferencesManager UploadManager
+:::
+::::
+
+:::: {.layer .layer-service}
+[Transfer Services]{.layer-title} [- Foreground services for background uploads. File conflict resolution. Network share scanning.]{.layer-desc}
+
+::: layer-items
+EnhancedSmbTransferService SmbBrowserService SmbDiscoveryService
+:::
+::::
+
+:::: {.layer .layer-protocol}
+[SMB Protocol + Persistence]{.layer-title} [- jCIFS-NG for SMB 2.0-3.1.1 support. Room database for share configurations.]{.layer-desc}
+
+::: layer-items
+jCIFS-NG 2.1 Room DB SmbShareDao SmbShareRepository
+:::
+::::
+:::::::::::
+::::::::::::
+
+:::::::::::::::::: section
+## Spotlight
+
+:::::::::::::::: card
+### Share Intent Integration
+
+The core UX - send files to a network share from any Android app without opening Send2Lan first.
+
+::::::::::::::: workflow
+::::: wf-step
+::: wf-num
+1
+:::
+
+::: wf-content
+#### Share from Any App
+
+User taps \"Share\" in Gallery, Files, or any app. Send2Lan appears in the share sheet. Handles both SEND (single file) and SEND_MULTIPLE intents.
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+2
+:::
+
+::: wf-content
+#### Smart Destination
+
+If a last-used share exists (persisted in DataStore), the file browser opens directly to it. No extra taps for repeat workflows. Otherwise, the share list appears.
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+3
+:::
+
+::: wf-content
+#### Browse and Upload
+
+Full folder navigation on the remote share - create new folders, navigate up/down. Select destination, upload begins in a foreground service with real-time progress (speed in MB/s, ETA).
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+4
+:::
+
+::: wf-content
+#### Conflict Resolution
+
+If a file already exists: overwrite, keep both (auto-generates \"file (1).txt\" up to 1000 attempts, then falls back to timestamp), or skip. Handles batches without blocking.
+:::
+:::::
+:::::::::::::::
+::::::::::::::::
+
+::: card
+### Network Share Discovery
+
+Instead of making users type SMB paths manually:
+
+- **Subnet scanning** - detects local IP, scans .1-.254 range on port 445 for SMB hosts
+- **Automatic discovery** - found shares appear as tappable options in the \"Add Share\" screen
+- **Manual fallback** - hostname, path, port, domain, and credentials for shares that aren\'t auto-discovered
+:::
+::::::::::::::::::
+
+::::::::::::::::::: section
+## Key Technical Decisions
+
+:::::: card
+### Foreground Service for Transfers
+
+::: decision
+[Problem]{.decision-label .problem} [Android aggressively kills background processes. A large file upload would get terminated when the user switches apps or locks the screen.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [Foreground service with notification. startForegroundService() on Android 12+, SupervisorJob for coroutine lifecycle, PendingIntent callback for notification tap.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [Uploads survive screen lock, app switching, and Android\'s battery optimization. The notification shows progress without requiring the app to be open.]{.decision-text}
+:::
+::::::
+
+:::::: card
+### Dual Transfer Service Pattern
+
+::: decision
+[Problem]{.decision-label .problem} [Simple transfers and complex transfers (with conflict resolution, progress tracking, unique filename generation) have different complexity requirements.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [Two services: SmbTransferService (basic, fire-and-forget) and EnhancedSmbTransferService (conflict resolution, progress callbacks, incremental filename generation). The enhanced service handles the share intent path.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [Simple operations stay simple. Complex operations get proper handling. No single service trying to be everything.]{.decision-text}
+:::
+::::::
+
+:::::: card
+### In-Memory Upload Queue
+
+::: decision
+[Problem]{.decision-label .problem} [Upload progress needs to update the UI in real time (speed, ETA, percentage). Persisting this to a database would be overhead for ephemeral state.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [Singleton UploadManager with MutableStateFlow. Transfer service writes progress, UI observes the flow reactively. No database round-trip for transient data.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [Real-time progress updates without I/O overhead. Clean separation - Room handles persistent share configs, StateFlow handles ephemeral transfer state.]{.decision-text}
+:::
+::::::
+
+:::::: card
+### Jetpack Compose Over XML Layouts
+
+::: decision
+[Problem]{.decision-label .problem} [Traditional Android XML layouts are verbose, hard to maintain, and don\'t compose well for dynamic UIs like a file browser with variable-length lists.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [Full Jetpack Compose with Material Design 3 and dynamic theming (Material You on Android 12+, custom fallback on older). All UI is declarative Kotlin.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [5 screens in \~1,500 lines of Compose. Dynamic theming adapts to the user\'s wallpaper. Dark mode works automatically. No XML files to maintain.]{.decision-text}
+:::
+::::::
+:::::::::::::::::::
+
+:::::::::: section
+## Talking Points
+
+::::::::: {.card .stories}
+### \"Tell me about Send2Lan\"
+
+:::: talk-point
+::: answer
+I have a NAS at home and constantly need to send files from my phone to network shares. Every Android SMB app I tried was either outdated, ad-riddled, or didn\'t support modern SMB versions. So I built one - **Kotlin, Jetpack Compose, Material Design 3**, with jCIFS-NG for SMB 2.0 through 3.1.1. The key feature is share intent integration - you tap \"Share\" in any app and Send2Lan handles the rest, including remembering your last-used share.
+:::
+::::
+
+### \"Why build it instead of using an existing app?\"
+
+:::: talk-point
+::: answer
+The existing options were bad. Outdated UI, ads, no SMB3 support, no share intent integration. I also wanted to **learn modern Android development** - Jetpack Compose, Room, DataStore, coroutines, Material You theming. Building a real app I\'d use daily was more effective than tutorials. It also gave me experience with the Nix-based Android build environment, which is non-trivial to set up.
+:::
+::::
+
+### \"What\'s the most interesting technical challenge?\"
+
+:::: talk-point
+::: answer
+Making uploads survive Android\'s process lifecycle. Android actively kills background work to save battery. The solution is a **foreground service** - it shows a persistent notification and gets protected status. But you also need proper coroutine lifecycle management (SupervisorJob so one failed upload doesn\'t cancel the queue), notification channel setup for Android 13+, and clean PendingIntent callbacks so tapping the notification returns to the progress screen.
+:::
+::::
+:::::::::
+::::::::::
+
+Project brief - not for distribution. All details sanitized.

@@ -1,0 +1,349 @@
+---
+title: "Security Dashboard Hardening"
+description: "This document explains the comprehensive security hardening applied to the Security Dashboard service (security.bedrosn.com)."
+---
+
+**Last Updated:** 2025-11-01
+
+This document explains the comprehensive security hardening applied to the Security Dashboard service (`security.bedrosn.com`).
+
+---
+
+## 🎯 Overview
+
+The Security Dashboard was initially implemented with minimal security hardening, running as root with broad system access. This posed significant security risks if the application or its dependencies had vulnerabilities.
+
+**Security Risk Level:**
+- **Before:** High (root access, minimal sandboxing)
+- **After:** Low-Medium (dedicated user, comprehensive systemd sandboxing)
+
+---
+
+## 🚨 Original Security Concerns
+
+### Critical Issues Addressed
+
+1. **Service Running as Root**
+   - Previous: Service ran as `root` user
+   - Risk: Any vulnerability = full system compromise
+   - Impact: HIGH
+
+2. **Broad System Access**
+   - Previous: Access to Keycloak admin API, SSH as root to jimmich
+   - Risk: Lateral movement to other services
+   - Impact: HIGH
+
+3. **Minimal Sandboxing**
+   - Previous: Only `PrivateTmp=true`
+   - Risk: Full filesystem and kernel access
+   - Impact: MEDIUM
+
+4. **No Resource Limits**
+   - Previous: Unlimited memory and task spawning
+   - Risk: Resource exhaustion attacks
+   - Impact: MEDIUM
+
+5. **Information Disclosure**
+   - Dashboard exposes service topology and user emails
+   - Risk: Helps attackers plan targeted attacks
+   - Impact: LOW (mitigated by OAuth2-proxy authentication)
+
+---
+
+## ✅ Implemented Security Improvements
+
+### 1. Dedicated Non-Root User
+
+```nix
+users.users.security-dashboard = {
+  isSystemUser = true;
+  group = "security-dashboard";
+  extraGroups = [ "keycloak" ];
+  home = "/var/lib/security-dashboard";
+  createHome = true;
+};
+```
+
+**Benefits:**
+- Service no longer runs as root
+- Limited blast radius if compromised
+- Follows principle of least privilege
+
+### 2. SSH Key-Based Access (Non-Root)
+
+```nix
+systemd.services.security-dashboard-ssh-keygen = {
+  # Generates dedicated SSH key for security-dashboard user
+  # Key must be manually added to jimmich:/root/.ssh/authorized_keys
+};
+```
+
+**Benefits:**
+- No root SSH access required from misc
+- SSH key scoped to specific user
+- Can be revoked independently
+
+### 3. Comprehensive Systemd Sandboxing
+
+#### Filesystem Protection
+```nix
+ProtectSystem = "strict";        # /usr, /boot read-only
+ProtectHome = true;              # /home inaccessible
+PrivateTmp = true;               # Private /tmp
+PrivateDevices = true;           # Only pseudo devices
+ProtectKernelTunables = true;    # /proc/sys read-only
+ProtectKernelModules = true;     # Cannot load kernel modules
+ProtectKernelLogs = true;        # Cannot read kernel logs
+ProtectControlGroups = true;     # /sys/fs/cgroup read-only
+```
+
+#### System Call Filtering
+```nix
+SystemCallFilter = [ "@system-service" "~@privileged" "~@resources" ];
+SystemCallErrorNumber = "EPERM";
+SystemCallArchitectures = "native";
+```
+
+Allows only safe system calls required for network services. Blocks:
+- Privileged operations (e.g., `mount`, `reboot`)
+- Resource manipulation (e.g., `setrlimit`)
+- Kernel modifications
+
+#### Capability Restrictions
+```nix
+CapabilityBoundingSet = "";      # Drop all capabilities
+AmbientCapabilities = "";         # No ambient capabilities
+NoNewPrivileges = true;          # Cannot gain privileges
+```
+
+Service runs with **zero Linux capabilities** - same as unprivileged user.
+
+#### Network Restrictions
+```nix
+RestrictAddressFamilies = [ "AF_INET" "AF_INET6" "AF_UNIX" ];
+```
+
+Only allows IPv4, IPv6, and Unix sockets. Blocks:
+- Bluetooth (AF_BLUETOOTH)
+- Packet sockets (AF_PACKET)
+- Other exotic address families
+
+#### Additional Hardening
+```nix
+LockPersonality = true;          # Prevent personality changes
+RestrictRealtime = true;         # Block realtime scheduling
+RestrictSUIDSGID = true;         # Ignore SUID/SGID bits
+RemoveIPC = true;                # Remove IPC objects on stop
+PrivateMounts = true;            # Private mount namespace
+UMask = "0077";                  # Restrictive file permissions
+```
+
+#### Resource Limits
+```nix
+MemoryMax = "512M";              # Max 512MB RAM
+TasksMax = "64";                 # Max 64 processes/threads
+```
+
+Prevents resource exhaustion attacks.
+
+### 4. OAuth2-Proxy Hardening
+
+OAuth2-proxy service also received comprehensive hardening:
+
+```nix
+NoNewPrivileges = true;
+ProtectSystem = "strict";
+ProtectHome = true;
+PrivateDevices = true;
+MemoryDenyWriteExecute = true;   # No W^X memory pages
+SystemCallFilter = [ "@system-service" "~@privileged" ];
+MemoryMax = "256M";
+TasksMax = "32";
+```
+
+**MemoryDenyWriteExecute** prevents JIT compilation exploits by blocking writable+executable memory.
+
+---
+
+## 📊 Security Analysis
+
+### Systemd Security Score
+
+Use `systemd-analyze security` to verify hardening:
+
+```bash
+# On misc host
+systemd-analyze security security-dashboard.service
+systemd-analyze security oauth2-proxy-security.service
+```
+
+**Expected Scores:**
+- **Before:** 9.6 (UNSAFE - root with minimal hardening)
+- **After:** 2.0-3.0 (SAFE - comprehensive sandboxing)
+
+Lower scores = better security. Aim for &lt; 4.0.
+
+### Attack Surface Reduction
+
+| Attack Vector | Before | After |
+|---------------|--------|-------|
+| Privilege Escalation | ✗ Running as root | ✓ Dedicated user, NoNewPrivileges |
+| Filesystem Access | ✗ Full read/write | ✓ Strict read-only, limited write |
+| Kernel Exploitation | ✗ Full access | ✓ Protected tunables/modules |
+| System Call Abuse | ✗ All syscalls allowed | ✓ Filtered to @system-service |
+| Resource Exhaustion | ✗ Unlimited | ✓ 512MB RAM, 64 tasks max |
+| Network Protocol Abuse | ✗ All address families | ✓ Limited to IP/Unix |
+| SUID/SGID Exploitation | ✗ Respected | ✓ Ignored (RestrictSUIDSGID) |
+
+---
+
+## 🔧 Deployment Process
+
+### Initial Deployment
+
+1. **Deploy to misc** to generate SSH key:
+   ```bash
+   nixos-rebuild switch --flake .#misc --target-host misc.home.arpa
+   ```
+
+2. **Retrieve generated SSH public key:**
+   ```bash
+   ssh misc.home.arpa 'cat /var/lib/security-dashboard/.ssh/id_ed25519.pub'
+   ```
+
+3. **Add key to `/etc/nixos/modules/core/users.nix`:**
+   ```nix
+   users.users.root.openssh.authorizedKeys.keys = [
+     # ... existing keys ...
+     "ssh-ed25519 AAAA... security-dashboard@misc.home.arpa"
+   ];
+   ```
+
+4. **Deploy to jimmich** to add authorized key:
+   ```bash
+   nixos-rebuild switch --flake .#jimmich --target-host jimmich.home.arpa
+   ```
+
+5. **Verify SSH access:**
+   ```bash
+   ssh misc.home.arpa 'sudo -u security-dashboard ssh jimmich.home.arpa echo test'
+   ```
+
+### Verification
+
+Check service status and logs:
+```bash
+# Verify service is running with correct user
+systemctl status security-dashboard.service
+
+# Check for security violations
+journalctl -u security-dashboard.service | grep -i "permission denied\|operation not permitted"
+
+# Verify no privilege escalation attempts
+journalctl -u security-dashboard.service | grep -i "suid\|capabilities"
+```
+
+---
+
+## 🛡️ Remaining Security Considerations
+
+### Information Disclosure
+
+The dashboard still exposes:
+- Service domain names
+- Authentication methods
+- User email addresses
+
+**Mitigation:** Already protected by OAuth2-proxy + Keycloak group membership (`security-dashboard-access`).
+
+### Keycloak Admin API Access
+
+Service has read access to Keycloak admin API for group membership queries.
+
+**Mitigation:**
+- Read-only queries only (SELECT)
+- No credential modification possible
+- Sandboxed network access
+
+### SSH Access to jimmich
+
+Service can SSH to jimmich to query Immich database.
+
+**Mitigation:**
+- Dedicated SSH key (not root)
+- `sudo -u postgres` command hardcoded (no injection)
+- Limited to specific database queries
+
+### Rate Limiting
+
+No rate limiting on API endpoints or Keycloak queries.
+
+**Future Improvement:** Consider adding request rate limiting to prevent abuse.
+
+---
+
+## 🐛 Troubleshooting
+
+### Issue: AJAX Requests Getting 401 Unauthorized
+
+**Symptom:**
+- Dashboard loads initially but shows "Error: Failed to fetch" after 30 seconds
+- OAuth2-proxy logs show: `[oauthproxy.go:1021] No valid authentication in request. Access Denied.`
+- Browser console shows 401 errors on `/api/services` requests
+
+**Root Cause:**
+OAuth2-proxy uses wildcard cookie domain (`--cookie-domain=".bedrosn.com"`), but JavaScript `fetch()` with `credentials: 'same-origin'` only sends cookies for exact domain matches.
+
+**Solution:**
+Use `credentials: 'include'` in fetch requests to send cookies with subdomain requests:
+
+```javascript
+// ❌ Wrong - only sends cookies for exact domain match
+fetch('/api/services', { credentials: 'same-origin' })
+
+// ✅ Correct - sends cookies for same domain and subdomains
+fetch('/api/services', { credentials: 'include' })
+```
+
+**Technical Details:**
+- `credentials: 'same-origin'`: Cookies only sent for `security.bedrosn.com` → `security.bedrosn.com`
+- `credentials: 'include'`: Cookies sent for `security.bedrosn.com` → `*.bedrosn.com` (required for wildcard cookies)
+
+**Fixed:** November 1, 2025 (commit c5c7f72)
+
+### Warning: Multiple Cookies Required
+
+**Symptom:**
+OAuth2-proxy logs show: `WARNING: Multiple cookies are required for this session as it exceeds the 4kb cookie limit`
+
+**Cause:**
+User has 15+ Keycloak groups, causing session cookie to exceed browser's 4KB limit. OAuth2-proxy automatically splits into multiple cookies.
+
+**Impact:**
+This is a **warning**, not an error. Cookie splitting works correctly, but indicates large session size.
+
+**Solutions (if needed):**
+1. **Server-side sessions with Redis** (recommended for high-scale)
+2. **Reduce group memberships** (if user has unnecessary groups)
+3. **Use `--session-cookie-minimal`** flag (minimal session data in cookie)
+
+**Current status:** Warning is benign and can be ignored for homelab use.
+
+---
+
+## 📖 References
+
+- [Systemd Service Sandboxing (ArchWiki)](https://wiki.archlinux.org/title/Systemd/Sandboxing)
+- [Optimizing systemd Service Security](https://www.opensourcerers.org/2022/04/25/optimizing-a-systemd-service-for-security/)
+- [FastAPI Production Security Best Practices](https://craftyourstartup.com/cys-docs/fastapi-production-deployment/)
+- [systemd.exec(5) - Manual Page](https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html)
+
+---
+
+**Last Updated:** November 1, 2025
+**Maintained By:** Infrastructure Security Team
+**Next Review:** December 1, 2025
+
+---
+
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🔐 [Security](overview.md)*

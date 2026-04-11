@@ -1,0 +1,230 @@
+---
+title: "KudosAI"
+description: "Technical Brief - Hackathon Project (1st Place out of 12 teams)"
+---
+
+::: sanitize-note
+This document is sanitized. No company names, API keys, internal system names, or proprietary code. All details describe architecture, patterns, and decisions - not source code.
+:::
+
+::::: section
+::: pitch
+Built a **full-stack AI-powered employee recognition Slackbot** during an internal hackathon. Users type `/kudos @person` in Slack, the message gets moderated by AI (multilingual profanity detection, tone improvement, confidence scoring), credits are awarded through a gamification engine, and everything surfaces in a real-time analytics dashboard. Won first place out of 12 teams. The HR department wanted it in production.
+:::
+
+::: note
+Hackathon project - never shipped to production. Built in a compressed sprint as a working prototype with real Slack integration and a live database.
+:::
+:::::
+
+::::::::::::::::::::::::::: section
+## Architecture
+
+:::::::::::: card
+### Stack
+
+::::::::::: layers
+:::: {.layer .layer-ui}
+[Frontend - Admin Dashboard]{.layer-title} [- Real-time analytics, leaderboards, engagement trends, company values breakdown.]{.layer-desc}
+
+::: layer-items
+Next.js 15 React 19 Tailwind CSS Recharts
+:::
+::::
+
+:::: {.layer .layer-api}
+[API Layer - Slack + Webhooks]{.layer-title} [- Slash command handler with async background processing and callback delivery.]{.layer-desc}
+
+::: layer-items
+Next.js API routes Slack Bolt SDK Signature verification response_url callbacks
+:::
+::::
+
+:::: {.layer .layer-ai}
+[AI Layer - VibeCheck]{.layer-title} [- Content moderation with multilingual profanity detection, tone suggestions, and confidence scoring.]{.layer-desc}
+
+::: layer-items
+Google Gemini Structured JSON output Graceful fallback
+:::
+::::
+
+:::: {.layer .layer-data}
+[Data Layer]{.layer-title} [- Normalized schema with user sync, recognition tracking, credit transactions, and manager hierarchy.]{.layer-desc}
+
+::: layer-items
+PostgreSQL Prisma ORM Vercel deployment
+:::
+::::
+:::::::::::
+::::::::::::
+
+:::::::::::::::: card
+### How a Kudos Flows Through the System
+
+::::::::::::::: workflow
+::::: wf-step
+::: wf-num
+1
+:::
+
+::: wf-content
+#### User sends /kudos \@teammate for great work
+
+Slack sends a signed webhook. The function validates the signature, parses the mention and message, and immediately returns a 200 (Slack\'s 3-second timeout).
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+2
+:::
+
+::: wf-content
+#### Background: AI moderates the message
+
+VibeCheck runs the message through Gemini with a prompt that detects profanity in English, French, Quebecois, and Spanish. Returns a confidence score, approval status, and optional improved version.
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+3
+:::
+
+::: wf-content
+#### Credits calculated and stored
+
+Different credit values for kudos vs. feedback, with a bonus for public recognition. Both giver and receiver earn credits. Leaderboard updated.
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+4
+:::
+
+::: wf-content
+#### Posted to recognition channel
+
+Formatted Slack message with the kudos, company value tag, and credit summary. Delivered via response_url callback to avoid the timeout.
+:::
+:::::
+:::::::::::::::
+::::::::::::::::
+:::::::::::::::::::::::::::
+
+:::: section
+## How I Drive AI
+
+::: card
+### VibeCheck - Content Moderation That Actually Works
+
+The AI layer isn\'t \"we slapped an LLM on it.\" It solves a real moderation problem with structured constraints.
+
+- **Multilingual detection:** The prompt explicitly covers English, French, Quebecois slang, and Spanish profanity. This matters in a bilingual organization where \"tabarnac\" is profanity but wouldn\'t trigger a standard English filter.
+- **Intent classification:** Distinguishes between actual praise (\"great job on the release\") and proposals/requests (\"can you help me with this?\"). Only real recognition gets through.
+- **Confidence scoring:** Returns a numeric confidence level. Low-confidence moderation results don\'t block the message - they flag for review.
+- **Structured JSON output:** The model returns a defined schema (approved/rejected, confidence, suggested rewrite, reason). No free-text parsing.
+- **Graceful fallback:** If the AI call fails entirely, the kudos goes through unmoderated rather than blocking the user. Recognition is more important than perfect moderation.
+:::
+::::
+
+::::::::::::::: section
+## Key Technical Decisions
+
+:::::: card
+### Async Processing with Callback Delivery
+
+::: decision
+[Problem]{.decision-label .problem} [Slack requires a response within 3 seconds. AI moderation, database writes, and credit calculation take longer than that.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [Return an immediate acknowledgment to Slack, then process everything in the background. When done, deliver the result via Slack\'s response_url callback endpoint. Internal API calls use a Vercel protection bypass secret.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [Users see instant feedback (\"Processing your kudos\...\") while the AI and database work happens asynchronously. No timeouts.]{.decision-text}
+:::
+::::::
+
+:::::: card
+### Fallback-First AI Integration
+
+::: decision
+[Problem]{.decision-label .problem} [AI moderation adds latency and a failure point. If Gemini is down or slow, users can\'t send kudos - which defeats the purpose of a recognition tool.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [AI failure means the kudos goes through unmoderated. The system logs the failure but doesn\'t block the user. Moderation is a nice-to-have, not a gate.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [The recognition flow is resilient to AI outages. Users never know or care if moderation is temporarily unavailable.]{.decision-text}
+:::
+::::::
+
+:::::: card
+### Strict TypeScript, No Shortcuts
+
+::: decision
+[Problem]{.decision-label .problem} [Hackathon code usually means cutting corners on types to move fast. But this project has complex data flowing between Slack, AI, database, and the dashboard.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [Strict TypeScript mode from day one. No `any` types. Prisma generates typed models. Every function signature is explicit.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [Caught integration bugs at compile time instead of during the demo. Type safety across the full stack paid for itself immediately.]{.decision-text}
+:::
+::::::
+:::::::::::::::
+
+:::::::::::::: section
+## Talking Points
+
+::::::::::::: {.card .stories}
+### \"Tell me about this project\"
+
+:::: talk-point
+::: answer
+This was an internal hackathon project - we had a compressed sprint to build something useful. I built a **Slack-native employee recognition bot with AI content moderation**. You type `/kudos @someone`, the message runs through a multilingual AI filter, credits get awarded through a gamification system, and everything shows up on a real-time analytics dashboard. It won first place out of 12 teams, and the HR department asked to put it into production.
+:::
+::::
+
+### \"Why AI moderation for kudos?\"
+
+:::: talk-point
+::: answer
+It sounds simple until you think about a bilingual organization. Standard profanity filters miss French and Quebecois slang entirely. The AI also does **intent classification** - it catches things like \"can you help me with X?\" which isn\'t actually recognition, just a request wearing a kudos costume. And it suggests tone improvements without changing the meaning. The key design choice was making it fallback-first: if the AI is down, the kudos still goes through. Recognition is more important than perfect moderation.
+:::
+::::
+
+### \"What was the hardest part?\"
+
+:::: talk-point
+::: answer
+The async flow. Slack gives you 3 seconds to respond, but AI moderation plus database writes take longer. So the function **immediately returns an acknowledgment, processes everything in the background, and delivers the result via a callback URL**. Getting that pipeline reliable - with proper error handling at each step, Vercel\'s protection bypass for internal calls, and graceful degradation if any step fails - was the real engineering challenge. It\'s not hard conceptually, but getting every edge case right under time pressure was intense.
+:::
+::::
+
+### \"Why didn\'t it ship to production?\"
+
+:::: talk-point
+::: answer
+Priorities. The hackathon proved the concept worked and HR was excited, but **shipping a recognition tool wasn\'t higher priority than the operational work the team was already committed to**. It would have needed proper test coverage, the private feedback flow finished, and a rollout plan. The prototype did its job - it showed what was possible and won the hackathon. Sometimes the right answer is \"this proved the idea, now we know what production would take.\"
+:::
+::::
+
+### \"What did you learn?\"
+
+:::: talk-point
+::: answer
+Two things. First, that **strict typing pays for itself even in a hackathon**. I used strict TypeScript and Prisma from the start, and it caught integration bugs at compile time instead of during the live demo. Second, that AI integration is less about the AI and more about what happens when the AI fails. The fallback behavior, the confidence thresholds, the structured output parsing - that\'s where the real engineering is.
+:::
+::::
+:::::::::::::
+::::::::::::::
+
+Project brief - not for distribution. All details sanitized.

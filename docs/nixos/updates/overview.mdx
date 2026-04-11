@@ -1,0 +1,146 @@
+---
+title: "System Updates Overview"
+description: "*Chronological record of major system updates and changes*"
+---
+
+## 🎯 Overview
+
+This document tracks significant system updates, package upgrades, and infrastructure changes made to the NixOS deployment.
+
+---
+
+## 📊 Recent Updates
+
+### 2025-10-03: System-Wide Package Updates & Service Fixes
+
+**Type**: System Updates & Bug Fixes
+**Hosts Affected**: misc (deployed), cmos (pending reboot)
+**Impact**: 🟡 Medium (package updates, service fixes, configuration improvements)
+
+#### Changes Made
+
+**Documentation Restructure**:
+- ✅ Migrated from nested folder structure to flat directory with prefix-grouped naming
+- ✅ Renamed 69 markdown files with category prefixes (ai-, desktop-, security-, etc.)
+- ✅ Updated all internal documentation links
+- ✅ Updated CLAUDE.md and NAVIGATION.md for new structure
+- ✅ Created README.md as main entry point
+- ✅ Category overview files: {category}-overview.md format
+
+**NixDocs Website Update**:
+- ✅ Rewrote sidebar generation in `modules/services/nixdocs.nix` for flat structure
+- ✅ Categories auto-detected from file prefixes
+- ✅ Display names cleaned (prefix removed from menu items)
+- ✅ Successfully deployed to https://nixdocs.bedrosn.com
+
+**Package Updates (all hosts via flake.lock)**:
+- Updated nixpkgs from `7c815e5` → `5b5be50`
+- systemd: 257.8 → 257.9
+- systemd-boot: 257.8 → 257.9
+- nix: 2.28.5
+- nginx: 1.28.0 (misc)
+- obsidian: 1.8.10 (cmos)
+- Various library updates (curl 8.14.1, lvm2 2.03.31, util-linux 2.41.1, etc.)
+
+**Service Fixes (misc host)**:
+- ✅ Fixed oauth2-proxy startup failure (couldn't reach Keycloak)
+- ✅ Added service dependencies: oauth2-proxy now waits for keycloak.service and traefik.service
+- ✅ Glances (https://glances.bedrosn.com) authentication restored
+
+**Build System Improvements (all hosts)**:
+- ✅ Added IPv4-only curl option to fix unfree package fetches (Obsidian build issue)
+- ✅ Prevents IPv6/SNI issues with GitHub releases
+- ✅ Configuration in `modules/core/system-core.nix`: `nix.settings.curlOptions = [ "--ipv4" ];`
+
+#### Files Modified
+- `docs/*` - All documentation files restructured and new updates-overview.md created
+- `modules/services/nixdocs.nix` - Sidebar generation rewritten for flat structure
+- `modules/services/keycloak.nix` - Added oauth2-proxy service dependencies
+- `modules/core/system-core.nix` - Added IPv4 curl option
+- `/etc/nixos/CLAUDE.md` - Updated for flat structure references
+- `flake.nix` - Added rollback comment for nixpkgs commit
+- `flake.lock` - nixpkgs updated to 5b5be50
+
+#### Git Commits
+- `71c388d` - docs: flatten documentation structure with prefix-grouped naming
+- (Pending) - Service fixes and build improvements
+
+#### Deployment Status
+- **misc**: ✅ Deployed and running (oauth2-proxy fixed)
+- **cmos**: 🟡 Built, pending reboot (use `nixos-rebuild boot`)
+- **jimmich**: ⚠️ Not deployed (same nixpkgs available)
+
+#### Known Issues & Resolutions
+1. **Obsidian build failure** (cmos):
+   - Issue: IPv6 connectivity to GitHub releases during fetch
+   - Resolution: Prefetched tarball + added `--ipv4` curl option
+   - Workaround used: `nix-prefetch-url` before rebuild
+
+2. **oauth2-proxy startup race condition** (misc):
+   - Issue: Service started before Keycloak/Traefik were ready
+   - Resolution: Added systemd service dependencies
+   - Impact: Glances authentication now works
+
+#### Rollback Instructions
+**To rollback cmos to old packages:**
+1. Edit `flake.nix` line 6, uncomment the rollback line
+2. Rebuild: `nixos-rebuild boot --flake .#cmos`
+3. Reboot
+
+**To rollback misc:**
+```bash
+git checkout HEAD~2 -- flake.lock  # Revert to 7c815e5
+nixos-rebuild switch --flake .#misc --target-host misc.home.arpa
+```
+
+**To rollback documentation:**
+```bash
+git revert 71c388d
+nixos-rebuild switch --flake .#misc --target-host misc.home.arpa
+```
+
+---
+
+## 📋 Update Categories
+
+### Infrastructure Changes
+- Documentation restructure (2025-10-03)
+- Build system improvements - IPv4 curl fix (2025-10-03)
+
+### Package Updates
+- nixpkgs bump: 7c815e5 → 5b5be50 (2025-10-03)
+  - misc: deployed
+  - cmos: pending reboot
+  - jimmich: available but not deployed
+
+### Service Deployments
+- NixDocs flat structure deployment (2025-10-03)
+
+### Bug Fixes
+- oauth2-proxy race condition fix (2025-10-03)
+- Obsidian IPv6 fetch issue workaround (2025-10-03)
+
+---
+
+## 🔍 How to Use This Document
+
+**When making updates**:
+1. Add new entry under "Recent Updates" with date
+2. Include type, affected hosts, and impact level
+3. List all changes, modified files, and commits
+4. Provide rollback instructions if applicable
+5. Update timestamp at bottom
+
+**Impact Levels**:
+- 🟢 **Low**: Minor config changes, single service updates
+- 🟡 **Medium**: Multiple service changes, package updates
+- 🔴 **High**: System-wide changes, breaking changes, major upgrades
+
+---
+
+**Last Updated**: 2025-10-03
+**Maintained By**: System Administrator
+**Next Review**: 2025-11-03
+
+---
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🛠️ [Operations](../operations/overview.md)*

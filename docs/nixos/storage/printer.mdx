@@ -1,0 +1,151 @@
+---
+title: "Printer Configuration"
+description: "This system uses CUPS for printer management with declarative NixOS configuration for Brother printers."
+---
+
+## Overview
+
+This system uses CUPS for printer management with declarative NixOS configuration for Brother printers.
+
+## Current Setup
+
+### Brother DCP-7060D
+- **Connection**: USB
+- **Driver**: brlaser (Brother laser printer driver)
+- **Location**: Home Office
+- **Status**: Default system printer
+
+## Configuration
+
+The printer configuration is declaratively defined in `/etc/nixos/modules/desktop/system-desktop.nix`:
+
+```nix
+# Enable CUPS printing service
+services.printing.enable = true;
+
+# Brother printer drivers
+services.printing.drivers = with pkgs; [
+  gutenprint
+  gutenprintBin
+  brlaser              # Main driver for Brother DCP-7060D
+  brgenml1cupswrapper  # Brother printer wrapper
+  brgenml1lpr          # Brother LPR driver
+];
+
+# Declarative printer configuration
+hardware.printers = {
+  ensurePrinters = [
+    {
+      name = "Brother-DCP-7060D";
+      location = "Home Office";
+      description = "Brother DCP-7060D USB Printer";
+      deviceUri = "usb://Brother/DCP-7060D?serial=U62711C4N722643";
+      model = "drv:///brlaser.drv/br7060d.ppd";
+    }
+  ];
+  ensureDefaultPrinter = "Brother-DCP-7060D";
+};
+```
+
+## Management Tools
+
+### CUPS Web Interface
+- **URL**: http://localhost:631
+- **Features**:
+  - View printer status: http://localhost:631/printers/
+  - Manage print jobs: http://localhost:631/jobs/
+  - Printer administration: http://localhost:631/admin
+  - Print test pages from browser
+
+### Command Line Tools
+
+**Check printer status:**
+```bash
+lpstat -p -d
+```
+
+**List print queue:**
+```bash
+lpstat -o
+```
+
+**Print a test page:**
+```bash
+echo "Test Page" | lp -d Brother-DCP-7060D -t "Test Page"
+```
+
+**Cancel a print job:**
+```bash
+cancel <job-id>
+```
+
+**View available printers:**
+```bash
+lpstat -a
+```
+
+## Troubleshooting
+
+### Printer Not Detected
+
+1. Check USB connection:
+```bash
+nix-shell -p usbutils --run "lsusb | grep -i brother"
+```
+
+2. Verify CUPS is running:
+```bash
+systemctl status cups
+```
+
+3. Check for available printer connections:
+```bash
+lpinfo -v | grep -i brother
+```
+
+### Finding Correct Driver
+
+To find the appropriate driver model string for a Brother printer:
+```bash
+lpinfo -m | grep -i "Brother" | grep -i "<model-number>"
+```
+
+### Rebuild After Configuration Changes
+
+After modifying printer configuration:
+```bash
+sudo nixos-rebuild switch --flake .#cmos
+```
+
+## Adding New Printers
+
+1. Connect the printer via USB
+2. Find the device URI:
+   ```bash
+   lpinfo -v | grep usb
+   ```
+3. Find the correct driver:
+   ```bash
+   lpinfo -m | grep -i "<manufacturer>"
+   ```
+4. Add to `hardware.printers.ensurePrinters` in `/etc/nixos/modules/desktop/system-desktop.nix`
+5. Rebuild the system
+
+## Driver Packages
+
+Common printer driver packages in NixOS:
+- `brlaser` - Brother laser printers
+- `brgenml1cupswrapper` - Brother printer CUPS wrapper
+- `brgenml1lpr` - Brother LPR driver support
+- `gutenprint` - Large collection of printer drivers
+- `hplip` - HP printer drivers
+- `epson-escpr` - Epson printer drivers
+- `canon-cups-ufr2` - Canon printer drivers
+
+## Architecture Notes
+
+- All printer configuration is declarative via NixOS
+- CUPS service manages the print queue and spooling
+- Drivers are included in the system closure
+- Configuration persists across reboots
+- No imperative `lpadmin` commands needed

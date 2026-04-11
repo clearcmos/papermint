@@ -1,0 +1,63 @@
+---
+title: "Kandji MDM Automation Toolkit — 23 Tools for macOS Fleet Management"
+description: "Managing 1,000+ macOS devices through Kandji MDM involves blueprint management, device lifecycle operations, compliance enforcement, and cross-system correla..."
+---
+
+## The Problem
+
+Managing 1,000+ macOS devices through Kandji MDM involves blueprint management, device lifecycle operations, compliance enforcement, and cross-system correlation (Kandji vs. Okta vs. SentinelOne). The Kandji admin console handles individual operations well but lacks bulk tooling, cross-system reporting, and automation hooks for lifecycle events.
+
+## What Was Built
+
+A suite of 23 automation tools (~164,000 lines of Python) for Kandji MDM operations.
+
+### Blueprint Management
+
+| Tool | Purpose |
+|------|---------|
+| `blueprint-auditor` | Audit all blueprints for configuration compliance — checks app assignments, parameters, and policy settings |
+| `blueprint-app-auditor` | Cross-reference apps assigned to blueprints against expected configurations |
+| `blueprint-device-reporter-with-okta` | Report devices per blueprint with Okta user enrichment (department, team, status) |
+| `blueprint-diff-to-core` | Diff a blueprint's configuration against the core/baseline blueprint to identify deviations |
+| `copy-app-restrictions-parameter` | Copy app restriction parameters from one blueprint to another |
+
+### Device Operations
+
+| Tool | Purpose |
+|------|---------|
+| `batch-move-devices-to-blueprint` | Bulk device migration between blueprints |
+| `batch-serial-checker` | Validate serial numbers against Kandji inventory |
+| `batch-tag-devices` | Bulk device tagging for categorization |
+| `batch-asset-tag-lister` | Export asset tags across the fleet |
+| `device-details-lookup` | Comprehensive device information retrieval |
+| `device-info-by-serial` | Device lookup by serial number |
+| `move-passed-devices-to-blueprint` | Automatically move devices that pass compliance checks to target blueprints |
+| `list-device-tags` | Export all device tags |
+
+### Compliance & Security
+
+| Tool | Purpose |
+|------|---------|
+| `locked-device-report` | Detect and report locked/lost devices |
+| `locked-device-cleanup` | Automated cleanup of stale locked device records |
+| `set-admin-denied-tag` | Tag devices where admin access has been denied (security policy) |
+| `tag-local-device-if-long-uptime` | Flag devices with excessive uptime (indicates missed updates/reboots) |
+| `custom-script-deployment-auditor` | Audit which custom scripts are deployed to which blueprints |
+| `netskope-set-env` | Configure Netskope environment settings across devices |
+
+### User & Reporting
+
+| Tool | Purpose |
+|------|---------|
+| `user-lister-searcher` | Search and list Kandji users with filtering |
+| `user-details-by-email` | User device lookup by email address |
+| `inactive-user-device-reporter` | Cross-reference Kandji devices against Okta inactive users to identify orphaned hardware |
+| `admin-audit-reporter` | Export Kandji admin audit logs for compliance |
+
+## Impact
+
+- Blueprint auditing catches configuration drift across 1,000+ devices before it becomes a security issue
+- Bulk device migrations that previously required hours of console clicking execute in minutes
+- Cross-system reporting (Kandji + Okta) identifies orphaned devices from departed employees
+- Compliance enforcement is automated — devices with long uptimes, denied admin access, or locked status are flagged without manual monitoring
+- The toolkit enables the IT team to manage the macOS fleet at scale without proportionally scaling headcount

@@ -1,0 +1,79 @@
+---
+title: "Traefik Redirect Middleware Ordering Issue"
+description: "Date: 2025-09-22"
+---
+
+**Status:** Resolved  
+**Affected Service:** Traefik reverse proxy, Guacamole redirect  
+
+## Problem Description
+
+When accessing `https://remote.bedrosn.com`, users were receiving HTTP 418 responses instead of being redirected to `/guacamole/`. The goal was to allow users to access the root path and be automatically redirected to the Guacamole interface without having to manually type `/guacamole/`.
+
+## Initial Configuration
+
+The original redirect middleware configuration was:
+
+```yaml
+guac-redirect-root:
+  redirectRegex:
+    regex: "^/$"
+    replacement: "/guacamole/"
+    permanent: true
+```
+
+With router configuration:
+```yaml
+guac-root-redirect:
+  rule: "Host(`remote.bedrosn.com`) && Path(`/`)"
+  middlewares: ["guac-redirect-root"]
+  service: "guac-dummy"
+  priority: 100
+```
+
+## Root Cause
+
+The issue was identified as middleware ordering and regex pattern matching. The redirectRegex middleware was not properly matching the request because:
+
+1. The regex pattern `^/$` was too simple and not matching the full URL context
+2. GeoBlock middleware was potentially interfering with the redirect process
+3. The service backend was being hit before the redirect middleware could execute
+
+## Failed Attempts
+
+1. **Removed GeoBlock middleware** - Still returned HTTP 418
+2. **Used `noop@internal` service** - Traefik rejected the internal service for redirect-only router
+3. **Created custom dummy service** pointing to `httpbin.org/status/204` - Still getting 200 responses instead of redirects
+
+## Resolution
+
+Updated the redirectRegex pattern to include the full URL:
+
+```yaml
+guac-redirect-root:
+  redirectRegex:
+    regex: "^https://remote\\.bedrosn\\.com/$"
+    replacement: "https://remote.bedrosn.com/guacamole/"
+    permanent: true
+```
+
+## Verification
+
+After the fix:
+- `curl -s -D - https://remote.bedrosn.com` returns HTTP 301 with proper `Location: https://remote.bedrosn.com/guacamole/` header
+- Following the redirect (`curl -L`) successfully reaches the Guacamole interface with HTTP 200
+- GeoBlock middleware remains intact on the main Guacamole router for security
+
+## Key Learnings
+
+1. **Traefik redirectRegex patterns**: When using redirectRegex middleware, the pattern should match the full URL, not just the path component
+2. **Middleware execution order**: Redirect middleware must be configured properly to execute before hitting the service backend
+3. **Testing approach**: Use `curl -s -D -` to inspect response headers and verify redirect behavior
+
+## Files Modified
+
+- `/etc/nixos/modules/services/traefik.nix` - Updated redirectRegex pattern in guac-redirect-root middleware
+
+## Related Context
+
+This issue occurred during migration from Docker-based Guacamole to native NixOS modules, and from KRDP to xrdp for remote desktop access. The redirect functionality was added to improve user experience by eliminating the need to manually type `/guacamole/` in the URL.

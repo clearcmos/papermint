@@ -1,0 +1,417 @@
+---
+title: "️ Clear NDR Community Deployment Guide"
+description: "*Complete guide for deploying and managing Clear NDR Community - Suricata-based network detection and response platform*"
+---
+
+## 🎯 Overview
+
+This guide covers the deployment, configuration, and management of **Clear NDR Community** on the misc host with:
+- **Clear NDR Community**: Complete Suricata-based network detection and response platform
+- **Suricata**: Network security monitoring and threat detection engine (IDS/IPS)
+- **Scirius**: Web-based Suricata hunting and ruleset management interface
+- **EveBox**: Modern event viewer for Suricata logs
+- **OpenSearch**: Search and analytics engine for log analysis
+- **Arkime**: Full packet capture and PCAP browsing
+- **OAuth2-proxy**: Keycloak-based authentication for secure web access
+- **Traefik**: Automatic HTTPS with Let's Encrypt certificates
+- **Declarative configuration**: Fully managed in NixOS
+
+**Access**: https://suricata.bedrosn.com
+
+**Default Credentials** (after OAuth2):
+- Username: `clearndr`
+- Password: `clearndr` (change after first login)
+
+---
+
+## 📋 Architecture
+
+### Component Stack
+
+```
+User Browser
+    ↓ (HTTPS)
+[Traefik: 443] - traefik.bedrosn.com
+    ↓ (Reverse Proxy)
+[OAuth2-Proxy: 8095] - suricata.bedrosn.com/oauth2/callback
+    ↓ (Check Auth via Keycloak)
+[Keycloak: 8089] - keycloak.bedrosn.com
+    ↓ (Verify Groups: suricata-access)
+[OAuth2-Proxy: Allow/Deny]
+    ↓ (Proxy to Clear NDR nginx)
+[Clear NDR nginx: 8096] - HTTPS (localhost)
+    ↓ (Serve Scirius web UI)
+[Scirius: 8000] - Django application (container)
+    ↓ (Query events & manage rules)
+[OpenSearch: 9200] - Event storage & analytics (container)
+    ↓ (Store Suricata logs)
+[Suricata] - Network monitoring (container)
+    ↓ (Monitor Network Traffic)
+[Network Interface: enp3s0f0]
+```
+
+### Docker Container Architecture
+
+Clear NDR runs as a Docker Compose stack with 13+ containers:
+
+| Container | Purpose | Internal Port |
+|-----------|---------|---------------|
+| **nginx** | Web server & TLS termination | 443 (→8096), 80 (→8097) |
+| **scirius** | Main web UI & rule management | 8000 |
+| **suricata** | IDS/IPS engine | - |
+| **opensearch** | Log storage & search | 9200, 9300 |
+| **opensearch-dashboards** | OpenSearch UI | 5601 |
+| **evebox** | Event viewer | - |
+| **arkime** | Full packet capture | 8005 |
+| **db** | PostgreSQL database | 5432 |
+| **rabbitmq** | Message broker | 5672, 15672 |
+| **celery-worker** | Background task processing | - |
+| **celery-beat** | Task scheduler | - |
+| **fluentd** | Log aggregation | 24224 |
+| **suri-reloader** | Rule reload automation | - |
+
+### Port Allocation
+
+- **8095/tcp**: OAuth2-proxy for Suricata authentication (external)
+- **8096/tcp**: Clear NDR nginx HTTPS (external → internal 443)
+- **8097/tcp**: Clear NDR nginx HTTP (external → internal 80)
+- **443/tcp**: Traefik HTTPS (external access)
+
+**Note**: Ports 80 and 443 are used by Traefik, so Clear NDR's nginx was remapped to 8096/8097.
+
+---
+
+## 🚀 Deployment
+
+### Quick Start
+
+Clear NDR is deployed declaratively via NixOS configuration. The deployment is already complete on the misc host.
+
+**Access the web interface**:
+1. Navigate to https://suricata.bedrosn.com
+2. Authenticate via Google (through Keycloak)
+3. Log in to Clear NDR with: `clearndr` / `clearndr`
+
+### Files and Configuration
+
+**NixOS Configuration**:
+- `/etc/nixos/modules/services/clear-ndr.nix` - Clear NDR service definition
+- `/etc/nixos/modules/services/oauth2-proxy-suricata.nix` - OAuth2-proxy service
+- `/etc/nixos/hosts/misc/default.nix` - Host imports and firewall rules
+
+**Runtime Data**:
+- `/var/lib/clear-ndr/` - Clear NDR data directory
+- `/var/lib/clear-ndr/bin/stamusctl` - Clear NDR management binary
+- `/var/lib/clear-ndr/config/` - Docker Compose configuration
+- `/var/lib/clear-ndr/config/compose.yml` - Main compose file
+- `/var/lib/clear-ndr/config/nginx/nginx.compose.yaml` - Port mappings
+
+**Secrets** (agenix):
+- `oauth2-proxy-suricata-client-secret.age` - OAuth2 client secret
+- `oauth2-proxy-suricata-cookie-secret.age` - Session cookie encryption
+
+---
+
+## 🔧 Management Commands
+
+### Container Management
+
+```bash
+# Check container status
+clear-ndr-status
+
+# View logs
+clear-ndr-logs                    # All containers
+clear-ndr-logs scirius           # Specific container
+clear-ndr-logs suricata -f       # Follow logs
+
+# Restart Clear NDR
+clear-ndr-restart
+
+# Manual control
+systemctl status clear-ndr.service
+systemctl restart clear-ndr.service
+systemctl stop clear-ndr.service
+```
+
+### Direct Docker Commands
+
+```bash
+# Using stamusctl
+cd /var/lib/clear-ndr
+/var/lib/clear-ndr/bin/stamusctl compose ps
+/var/lib/clear-ndr/bin/stamusctl compose logs -f
+
+# Direct Docker Compose
+docker ps | grep config-
+docker logs config-scirius-XT0x2lUi8hGBVX1p
+docker exec -it config-scirius-XT0x2lUi8hGBVX1p bash
+```
+
+### Suricata Rule Management
+
+**From Scirius Web UI**:
+1. Navigate to https://suricata.bedrosn.com
+2. Login → Suricata → Rulesets
+3. Enable/disable rulesets
+4. Update rules (automatic daily updates via cron)
+
+**Manual rule update**:
+```bash
+docker exec config-scirius-XT0x2lUi8hGBVX1p \
+  python /code/manage.py updatesuricata
+```
+
+---
+
+## 🔒 Authentication & Access Control
+
+### Authentication Flow
+
+1. **Traefik** receives HTTPS request for suricata.bedrosn.com
+2. **OAuth2-proxy** checks for valid authentication cookie
+3. If not authenticated, redirects to **Keycloak** (Google IDP)
+4. User authenticates with Google account
+5. Keycloak verifies user is in `suricata-access` group
+6. OAuth2-proxy sets authentication cookie
+7. Request proxied to **Clear NDR nginx** on port 8096
+8. **Scirius** login page appears (double authentication)
+9. User logs in with: `clearndr` / `clearndr`
+
+### Access Control
+
+**Keycloak Group**: `suricata-access`
+- Required for OAuth2-proxy access
+- Managed in Keycloak admin console
+
+**Scirius Users**:
+- Default admin: `clearndr` / `clearndr`
+- Managed via Scirius UI or Django admin
+
+### Changing Scirius Password
+
+```bash
+# Reset clearndr user password
+docker exec config-scirius-XT0x2lUi8hGBVX1p \
+  python /code/manage.py shell -c \
+  "from django.contrib.auth.models import User; \
+   u = User.objects.get(username='clearndr'); \
+   u.set_password('new_password'); \
+   u.save(); \
+   print('Password updated')"
+
+# Create new admin user
+docker exec config-scirius-XT0x2lUi8hGBVX1p \
+  python /code/manage.py createsuperuser
+```
+
+---
+
+## 🐛 Troubleshooting
+
+### Check Service Status
+
+```bash
+# Clear NDR containers
+clear-ndr-status
+
+# OAuth2-proxy
+systemctl status oauth2-proxy-suricata.service
+
+# Traefik routing
+journalctl -u traefik.service -n 50
+
+# Keycloak
+systemctl status keycloak.service
+```
+
+### Common Issues
+
+**Clear NDR containers not starting**:
+```bash
+# Check Docker service
+systemctl status docker.service
+
+# Check logs
+clear-ndr-logs
+
+# Restart Clear NDR
+systemctl restart clear-ndr.service
+```
+
+**502 Bad Gateway**:
+- Check OAuth2-proxy is running: `systemctl status oauth2-proxy-suricata.service`
+- Check Clear NDR nginx container: `clear-ndr-status | grep nginx`
+- Verify port 8096 is accessible: `curl -k https://localhost:8096`
+
+**Can't access web UI**:
+- Verify Traefik routing: `journalctl -u traefik.service | grep suricata`
+- Check Keycloak group membership: User must be in `suricata-access` group
+- Check OAuth2-proxy logs: `journalctl -u oauth2-proxy-suricata.service`
+
+**Login fails with clearndr/clearndr**:
+- Reset password: See "Changing Scirius Password" above
+- Check Scirius container: `clear-ndr-logs scirius | tail -50`
+
+**High resource usage**:
+- OpenSearch uses 2GB RAM by default (configured in values.yaml)
+- Check container resource usage: `docker stats`
+- Review misc host specs: i5-4260U, 15GB RAM (borderline for Clear NDR)
+
+### Logs
+
+**NixOS service logs**:
+```bash
+journalctl -u clear-ndr.service -n 100
+journalctl -u clear-ndr-setup.service -n 100
+journalctl -u oauth2-proxy-suricata.service -n 100
+```
+
+**Container logs**:
+```bash
+clear-ndr-logs scirius              # Web UI
+clear-ndr-logs suricata            # IDS engine
+clear-ndr-logs opensearch          # Search engine
+clear-ndr-logs nginx               # Web server
+clear-ndr-logs evebox              # Event viewer
+```
+
+---
+
+## 📊 Monitoring & Alerts
+
+### Web Interfaces
+
+**Main Dashboard** (Scirius):
+- URL: https://suricata.bedrosn.com
+- Features: Rule management, hunting, event analysis
+
+**EveBox** (Event Viewer):
+- Access: Via Scirius top menu → EveBox
+- Features: Real-time event viewing, filtering
+
+**OpenSearch Dashboards**:
+- Access: Via Scirius top menu → Dashboards
+- Features: Log visualization, custom dashboards
+
+**Arkime** (Packet Capture):
+- Access: Via Scirius top menu → Arkime
+- Features: Full packet capture browsing, PCAP analysis
+
+### Suricata Statistics
+
+**From Scirius UI**:
+1. Login → Suricata menu
+2. View: Stats, Performance, Drop rates
+3. Monitor: Packet processing, Alerts, Flows
+
+**From command line**:
+```bash
+# Check Suricata stats
+docker exec config-suricata-XT0x2lUi8hGBVX1p \
+  suricatasc -c stats
+```
+
+---
+
+## 🔄 Maintenance
+
+### Regular Tasks
+
+**Daily** (automated):
+- Suricata rule updates (celery-beat cron)
+- Log rotation (logrotate cron)
+
+**Weekly**:
+- Review alerts and events via Scirius
+- Check container health: `clear-ndr-status`
+- Monitor disk usage: `/var/lib/clear-ndr/`
+
+**Monthly**:
+- Review OpenSearch index management
+- Update Clear NDR version if available
+- Audit user access and permissions
+
+### Updates
+
+**Update Clear NDR**:
+```bash
+# Check current version
+cat /var/lib/clear-ndr/config/version
+
+# Update via stamusctl (check docs first)
+cd /var/lib/clear-ndr
+/var/lib/clear-ndr/bin/stamusctl compose pull
+systemctl restart clear-ndr.service
+```
+
+**Update NixOS configuration**:
+```bash
+cd /etc/nixos
+# Edit clear-ndr.nix or oauth2-proxy-suricata.nix
+nixos-rebuild switch --flake .#misc --target-host misc.home.arpa
+```
+
+### Backup
+
+**Important data locations**:
+- `/var/lib/clear-ndr/config/` - Configuration
+- PostgreSQL database (in Docker volume)
+- OpenSearch indices (in Docker volume)
+
+**Backup strategy**:
+```bash
+# Export PostgreSQL database
+docker exec config-db-XT0x2lUi8hGBVX1p \
+  pg_dump -U selks selks > selks-backup.sql
+
+# Backup config directory
+tar czf clear-ndr-config-$(date +%Y%m%d).tar.gz \
+  /var/lib/clear-ndr/config/
+```
+
+---
+
+## 🎓 Learning Resources
+
+### Official Documentation
+
+- **Clear NDR Docs**: https://docs.clearndr.io/
+- **Suricata Docs**: https://docs.suricata.io/
+- **Scirius GitHub**: https://github.com/StamusNetworks/scirius
+- **OpenSearch Docs**: https://opensearch.org/docs/
+
+### Key Concepts
+
+**IDS vs IPS**:
+- **IDS** (Intrusion Detection System): Monitors and alerts
+- **IPS** (Intrusion Prevention System): Monitors and blocks
+
+**Suricata Modes**:
+- **NIDS**: Network-based detection (our setup)
+- **HIDS**: Host-based detection
+
+**Rule Management**:
+- **ET Open**: Free community ruleset
+- **ETPRO**: Commercial ruleset (requires subscription)
+- **Custom rules**: Create your own detection rules
+
+---
+
+## 📖 Related Documentation
+
+- [Security Overview](../security/overview.md) - Overall security architecture
+- [Services Overview](../services/overview.md) - All deployed services
+- [OAuth2-Proxy Technical Configuration](../security/oauth2-proxy-technical-configuration.md) - OAuth2-proxy details
+- [Keycloak Guide](../services/keycloak.md) - Keycloak SSO configuration
+- [Traefik Configuration](../services/traefik.md) - Reverse proxy setup
+
+---
+
+**Last Updated**: 2025-10-15
+**NixOS Module**: `/etc/nixos/modules/services/clear-ndr.nix`
+**Host**: misc (192.168.1.5)
+**Interface**: enp3s0f0
+
+---
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🔒 [Security](../security/overview.md)*

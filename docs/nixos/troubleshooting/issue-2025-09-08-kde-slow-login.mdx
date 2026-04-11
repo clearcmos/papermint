@@ -1,0 +1,130 @@
+---
+title: "KDE Slow Login Investigation"
+description: "Date: 2025-09-09"
+---
+
+**Issue:** KDE took a long time to load after entering password at SDDM login screen
+
+## Timeline of Events
+- **23:33:28** - SDDM authenticated user successfully
+- **23:33:28** - Plasma Wayland session started
+- **23:33:29-23:34:32** - Various services starting, errors occurring
+- **~1 minute delay** - KDE desktop finally became responsive
+
+## Root Causes Identified
+
+### 1. Network-Dependent Services Blocking Boot (Primary Cause)
+The critical boot chain shows services waiting on network:
+- `systemd-networkd-wait-online.service`: **5.913s** delay
+- `mount-cifs-shares.service`: **4.531s** delay (depends on network-online)
+- These services blocked `graphical.target`, delaying the desktop
+
+### 2. CIFS Mount Failures
+Several CIFS mount issues during login:
+```
+CIFS: VFS: cifs_mount failed w/return code = -2 (early boot)
+CIFS: VFS: cifs_mount failed w/return code = -111 (early boot)
+CIFS: VFS: BAD_NETWORK_NAME: \\misc.home.arpa\misc-home
+```
+The misc-home share failed to mount with "No such file or directory", adding unnecessary retry delays.
+
+### 3. DrKonqi Crash Handler Processing
+Multiple old crash dumps were being processed during startup:
+- Discord crashes (multiple PIDs: 132174, 132447, 211771)
+- Steam/steamwebhelper crashes (PIDs: 125603, 177610)
+- Brave browser crashes (PID: 36618)
+- Cursor app crashes (PIDs: 81812, 121013)
+- KDE components crashes (xembedsniproxy, kaccess, powerdevil, xdg-desktop-portal-kde)
+
+This consumed significant CPU/IO during the critical login period.
+
+### 4. Graphics/GPU Initialization Errors
+Multiple graphics-related errors occurred:
+- **kwin_wayland**: "atomic commit failed: Permission denied"
+- **Brave Browser**: Failed to initialize OpenGL/EGL:
+  ```
+  Could not dlopen libGL.so.1: cannot open shared object file
+  eglInitialize OpenGL failed with error EGL_NOT_INITIALIZED
+  ```
+- **PowerDevil**: Various hardware detection failures
+
+### 5. Additional Service Errors
+- **WireGuard/wsdd**: Network unreachable errors on docker bridges
+- **PAM environment**: Multiple variable expansion warnings
+- **KWallet**: D-Bus proxy assertion failures
+
+## System Analysis
+```bash
+# Boot time breakdown (systemd-analyze blame):
+5.913s systemd-networkd-wait-online.service
+4.531s mount-cifs-shares.service
+1.884s docker.service
+981ms systemd-binfmt.service
+584ms systemd-modules-load.service
+```
+
+## Recommended Fixes
+
+### Immediate Solutions
+1. **Disable network mount at boot** (mount on-demand instead):
+   ```bash
+   systemctl disable mount-cifs-shares.service
+   ```
+   Or modify the service to not block graphical.target
+
+2. **Clear old crash dumps**:
+   ```bash
+   sudo rm -rf /var/lib/systemd/coredump/*
+   sudo rm -rf ~/.cache/drkonqi/
+   ```
+
+3. **Configure network to not wait for all interfaces**:
+   - Modify systemd-networkd-wait-online to use `--any` flag
+   - Or reduce timeout with `--timeout=10`
+
+### NixOS Configuration Fixes
+1. **Fix CIFS mounts** in the configuration:
+   - Verify misc-home share name is correct
+   - Add `x-systemd.automount` option to mount on first access
+   - Add `x-systemd.idle-timeout=60` to unmount when idle
+   - Add `_netdev` option to properly mark as network mount
+
+2. **Optimize network-online.target**:
+   ```nix
+   systemd.network.wait-online.anyInterface = true;
+   systemd.network.wait-online.timeout = 10;
+   ```
+
+3. **Fix OpenGL/Graphics issues**:
+   - Ensure proper GPU drivers are loaded
+   - Check if `hardware.opengl` is properly configured
+   - Verify Wayland/X11 session requirements
+
+### Long-term Improvements
+1. Move CIFS mounts to user session (not system boot)
+2. Implement systemd user service for network shares
+3. Configure DrKonqi to clean up old crashes automatically
+4. Review and optimize boot service dependencies
+
+## Verification Commands
+```bash
+# Check boot time
+systemd-analyze
+systemd-analyze blame
+systemd-analyze critical-chain
+
+# Monitor next login
+journalctl -f -u display-manager
+
+# Check CIFS mount status
+mount | grep cifs
+systemctl status mount-cifs-shares
+
+# Check for crashes
+coredumpctl list
+```
+
+## Related Files
+- `/etc/nixos/modules/core/cifs-mounts.nix` - CIFS mount configuration
+- `/etc/nixos/modules/desktop/kde.nix` - KDE/Plasma configuration
+- System logs: `journalctl --since "23:33:00" --until "23:35:00"`

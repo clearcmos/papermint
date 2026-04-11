@@ -1,0 +1,39 @@
+---
+title: "Latest Changes - 2025-09-09 09:00 EDT"
+description: "Problem: Overengineered kde.nix caused complete KDE failure"
+---
+
+## KDE Completely Broken - Reverted to Clean Configuration
+
+**Problem:** Overengineered kde.nix caused complete KDE failure
+- Start menu shortcuts stopped working (Steam, applications)
+- Investigation revealed massive KDE crash loops: plasmashell, powerdevil, xdg-desktop-portal-kde all repeatedly crashing
+- Attempts to fix PATH issues made situation worse
+- Display now shows only black screen with frozen mouse cursor
+- SDDM failing to start with greeter crashes (kwin_wayland issues)
+
+**Root Cause:** Over-complex kde.nix with aggressive systemd service overrides
+- "100% solid fixes" for plasma-shutdown hangs
+- Emergency cleanup services
+- Crash handlers and aggressive timeouts
+- Complex PATH manipulation attempts
+- All these "fixes" destabilized the entire KDE stack
+
+**Solution Applied:** 
+- Reverted to clean kde.nix backup from 2025-09-08 (before all overengineering)
+- Removed all complex systemd overrides, timeouts, and crash handlers
+- Rebuilt system successfully
+- Cleared corrupted KDE caches and coredumps
+
+**Current Status:** 
+- System rebuilt with clean configuration
+- SDDM display manager failing to start (exit code 23)
+- sddm-helper and kwin_wayland crashing during greeter startup
+- Black screen with frozen cursor
+- **Next step: Reboot needed to clear corrupted display manager state**
+
+**Files Modified:**
+- `/etc/nixos/modules/desktop/kde.nix` - Reverted to simple working backup
+- Cleared `/home/nicholas/.cache/plasma*`, `/home/nicholas/.cache/kwin*`, `/var/lib/systemd/coredump/*`
+
+**Lesson Learned:** Keep KDE configuration simple. Complex systemd overrides cause more problems than they solve.

@@ -1,0 +1,203 @@
+---
+title: "PAM OAuth2 QR Code ASCII Patching Plan"
+description: "The PAM OAuth2 device flow module (pam_oauth2_device) generates QR codes using an embedded C++ qrcodegen library with ANSI escape sequences that don't render..."
+---
+
+## Overview
+
+The PAM OAuth2 device flow module (`pam_oauth2_device`) generates QR codes using an embedded C++ `qrcodegen` library with ANSI escape sequences that don't render properly across all terminals. This plan outlines how to patch the module to output clean ASCII QR codes with an easy fallback option.
+
+## Problem Analysis
+
+### Current Issue
+- Module uses embedded `qrcodegen` C++ library (not external `qrencode` command)
+- Outputs QR with ANSI escape sequences (`\033[0m`) and Unicode block characters
+- Causes display issues across different terminals (PuTTY, iTerm, various SSH clients)
+- External `qrencode` wrappers don't work because module doesn't call external binary
+
+### Source Location
+- Repository: https://github.com/ICS-MU/pam_oauth2_device
+- QR generation code likely in: `src/` directory
+- Uses Nayuki QR code library (`src/include/nayuki/QrCode.o`)
+
+## Implementation Plan
+
+### Phase 1: Easy Toggle Configuration (Safety Net)
+
+1. **Add configuration option to SSH OAuth module**
+   ```nix
+   # hosts/cmos/ssh-oauth.nix
+   services.sshOAuthDevice = {
+     enable = true;
+     requireDeviceFlow = true;
+     enableQRCode = true;  # New option - easy toggle
+     clientSecretFile = config.age.secrets.ssh-oauth-client-secret.path;
+   };
+   ```
+
+2. **Conditional QR configuration in PAM template**
+   ```nix
+   # modules/services/ssh-oauth-device.nix
+   pamConfigTemplate = ''
+     {
+       "qr": {
+         "show": ${if cfg.enableQRCode then "true" else "false"},
+         "error_correction_level": 1
+       },
+       ...
+     }
+   '';
+   ```
+
+### Phase 2: Source Code Analysis
+
+1. **Download and examine source**
+   ```bash
+   # In overlay preBuild phase
+   find . -name "*.c" -o -name "*.cpp" -o -name "*.h" | xargs grep -l -i qr
+   ```
+
+2. **Identify QR rendering functions**
+   - Look for ANSI escape sequence generation
+   - Find Unicode block character mapping
+   - Locate QR matrix printing logic
+
+3. **Expected locations to patch**
+   - QR printing/rendering function
+   - ANSI color code generation
+   - Character mapping (Unicode blocks → ASCII)
+
+### Phase 3: Patch Development
+
+1. **Create patch file**
+   ```nix
+   # overlays/pam-oauth2-device.nix
+   patches = [
+     (super.writeText "qr-ascii.patch" ''
+       --- a/src/qr_renderer.c
+       +++ b/src/qr_renderer.c
+       @@ -XX,XX +XX,XX @@
+       // Patch content to be determined after source analysis
+     '')
+   ];
+   ```
+
+2. **Patch objectives**
+   - Replace Unicode block characters with `#` and spaces
+   - Strip all ANSI escape sequences
+   - Maintain QR code structural integrity
+   - Preserve error correction functionality
+
+3. **Expected changes**
+   ```c
+   // Before: outputs Unicode blocks with ANSI codes
+   printf("\033[40;97m█\033[0m");
+   
+   // After: outputs simple ASCII
+   printf("#");
+   ```
+
+### Phase 4: Implementation Steps
+
+1. **Backup current working config**
+   ```bash
+   git commit -m "backup: working OAuth before QR patching"
+   ```
+
+2. **Add patch to overlay**
+   ```nix
+   preBuild = ''
+     # Apply QR ASCII patch
+     patch -p1 < ${qrAsciiPatch}
+   '';
+   ```
+
+3. **Test build**
+   ```bash
+   nixos-rebuild test --flake .#cmos
+   ```
+
+4. **Verify QR output**
+   - SSH authentication test
+   - Check for clean ASCII output
+   - Verify scannable QR code functionality
+
+### Phase 5: Fallback Strategy
+
+If patching fails or introduces issues:
+
+1. **Immediate fallback**
+   ```nix
+   services.sshOAuthDevice.enableQRCode = false;
+   ```
+
+2. **Quick rebuild**
+   ```bash
+   nixos-rebuild switch --flake .#cmos
+   ```
+
+3. **Alternative approaches**
+   - Different PAM OAuth module
+   - Custom QR generation script
+   - Client-side terminal configuration
+
+## Risk Assessment
+
+### Low Risk
+- Configuration toggle implementation
+- Disabling QR entirely (fallback)
+
+### Medium Risk
+- Source code patching
+- Maintaining patch against upstream updates
+
+### High Risk
+- Breaking authentication functionality
+- Introducing security vulnerabilities
+
+## Success Criteria
+
+### Minimum Viable
+- ✅ OAuth authentication works
+- ✅ Easy QR disable option available
+- ✅ No breaking changes to existing functionality
+
+### Ideal Success
+- ✅ Clean ASCII QR codes (# and spaces only)
+- ✅ No ANSI escape sequences
+- ✅ Universal terminal compatibility
+- ✅ Scannable QR codes
+- ✅ Easy toggle between QR modes
+
+## Implementation Timeline
+
+1. **Phase 1** (10 min): Add configuration toggle
+2. **Phase 2** (20 min): Analyze source code
+3. **Phase 3** (30-60 min): Develop patch
+4. **Phase 4** (15 min): Test implementation
+5. **Phase 5** (5 min): Fallback if needed
+
+**Total estimated time**: 1.5-2 hours maximum
+
+## Files to Modify
+
+1. `/etc/nixos/hosts/cmos/ssh-oauth.nix` - Add toggle option
+2. `/etc/nixos/modules/services/ssh-oauth-device.nix` - Conditional QR config
+3. `/etc/nixos/overlays/pam-oauth2-device.nix` - Add patch
+4. `/etc/nixos/docs/qr.md` - This documentation
+
+## Rollback Plan
+
+If anything goes wrong:
+1. Set `enableQRCode = false`
+2. Run `nixos-rebuild switch --flake .#cmos`
+3. OAuth authentication continues working without QR
+4. Clean up patch attempts in overlay
+5. Document lessons learned
+
+## Notes
+
+- Keep patches minimal and targeted
+- Test thoroughly before committing
+- Document all changes for future maintenance
+- Consider upstream contribution if patch works well

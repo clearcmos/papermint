@@ -1,0 +1,523 @@
+---
+title: "World of Warcraft Declarative Setup Documentation"
+description: "The WoW module (wow.nix) provides a fully declarative setup for World of Warcraft on NixOS, automating the installation and configuration process while maint..."
+---
+
+## Overview
+
+The WoW module (`wow.nix`) provides a fully declarative setup for World of Warcraft on NixOS, automating the installation and configuration process while maintaining portability through NAS-based data synchronization.
+
+## Architecture Components
+
+### 1. Data Management Layer
+- **NAS Integration**: Syncs WoW client data from centralized NAS storage
+- **Local Storage**: Maintains local copy for optimal gaming performance
+- **Backup System**: Weekly automated backups to preserve game data and settings
+
+### 2. Steam Integration Layer
+- **Shortcut Management**: Programmatic Steam shortcut creation using Python VDF parser
+- **Proton Configuration**: Automatic compatibility layer setup for Windows games
+- **Fixed App IDs**: Consistent Steam integration across deployments
+
+### 3. Installation Automation
+- **Battle.net Installer**: Automated download and staging
+- **Directory Structure**: Pre-configured Steam compatdata environment
+- **Service Orchestration**: Systemd services for reliable startup sequencing
+
+## Dependencies
+
+### System Requirements
+```nix
+# Required modules (automatically imported)
+./gaming.nix     # Steam, Proton, gaming optimizations
+./cifs-mounts.nix # NAS connectivity for data sync
+./env.nix        # Environment variables for NAS configuration
+```
+
+### External Dependencies
+- **NAS Server**: CIFS/SMB share for WoW data storage
+- **Steam Account**: Required for Proton compatibility layer
+- **Battle.net Account**: Required for WoW authentication and licensing
+- **WoW License**: Valid World of Warcraft subscription or license
+
+### Package Dependencies
+```nix
+# Automatically installed by wow.nix
+python3          # Steam shortcuts management
+rsync           # Efficient data synchronization
+curl            # Battle.net installer download
+cifs-utils      # NAS mounting (from cifs-mounts.nix)
+steam           # Gaming platform (from gaming.nix)
+```
+
+## Configuration Options
+
+### Module Options
+```nix
+wow.enable = true;                    # Enable WoW declarative setup
+wow.autoSync = true;                  # Auto-sync from NAS on boot
+wow.configureSteamShortcuts = true;   # Auto-configure Steam shortcuts
+```
+
+### File Paths and Structure
+```
+# NAS Storage Path
+/mnt/{CIFS_SHARE}/gaming/wow/
+├── Data/                    # WoW game assets
+├── _retail_/               # Live game client
+├── World of Warcraft Launcher.exe
+└── Launcher.db
+
+# Local Storage Path  
+/home/nicholas/.local/share/wow/
+├── Battle.net-Setup.exe    # Downloaded installer
+└── compatdata/
+    └── 2879567900/        # Fixed Steam App ID
+        └── pfx/
+            └── drive_c/
+                └── Program Files (x86)/
+                    └── World of Warcraft/
+                        ├── Data/
+                        ├── _retail_/
+                        └── World of Warcraft Launcher.exe
+
+# Steam Integration
+/home/nicholas/.local/share/Steam/userdata/{USER_ID}/config/shortcuts.vdf
+```
+
+## How Steam Integration Works
+
+### Fixed App ID System
+The module uses **fixed Steam App IDs** to ensure consistent behavior across deployments:
+- **2879567900**: Battle.net Installer shortcut
+- **2879567901**: WoW Launcher shortcut (post-installation)
+
+This prevents the random ID generation that normally occurs when adding non-Steam games.
+
+### Steam Shortcut Configuration
+```python
+# Battle.net Installer Shortcut
+{
+    "AppName": "Battle.net Installer",
+    "Exe": "/home/nicholas/.local/share/wow/Battle.net-Setup.exe",
+    "StartDir": "/home/nicholas/.local/share/wow",
+    "LaunchOptions": "",
+    "Proton": "proton_experimental"
+}
+
+# WoW Launcher Shortcut (created after Battle.net installation)
+{
+    "AppName": "World of Warcraft", 
+    "Exe": "~/.local/share/wow/compatdata/2879567900/pfx/drive_c/Program Files (x86)/World of Warcraft/World of Warcraft Launcher.exe",
+    "StartDir": "~/.local/share/wow/compatdata/2879567900/pfx/drive_c/Program Files (x86)/World of Warcraft",
+    "LaunchOptions": "",
+    "Proton": "proton_experimental"
+}
+```
+
+### Steam Compatdata Directory Structure
+Steam creates a Windows-like environment in the compatdata directory:
+- **Prefix Path**: `compatdata/2879567900/pfx/` - Wine prefix for Windows compatibility
+- **Drive C**: `pfx/drive_c/` - Emulated Windows C: drive
+- **Program Files**: Standard Windows program installation directory
+- **User Data**: Windows user profile and registry stored in prefix
+
+## Systemd Services
+
+### 1. wow-data-sync.service
+**Purpose**: Synchronizes WoW data from NAS to local storage
+**Dependencies**: `mount-cifs-shares.service`, `network-online.target`
+**Execution**: Runs once on system boot (Type=oneshot, RemainAfterExit=true)
+
+```bash
+# Service workflow
+1. Check if NAS mount exists at /mnt/{CIFS_SHARE}/gaming/wow
+2. Create local directory structure if missing
+3. Use rsync to sync data efficiently (excludes logs and cache)
+4. Set proper file ownership (nicholas:users)
+5. Create Steam compatdata structure
+```
+
+### 2. battlenet-download.service  
+**Purpose**: Downloads Battle.net installer
+**Dependencies**: `network-online.target`
+**Execution**: Runs once on system boot
+
+```bash
+# Service workflow
+1. Create local WoW directory
+2. Check if Battle.net-Setup.exe already exists
+3. Download from Battle.net CDN if missing
+4. Set executable permissions and ownership
+```
+
+### 3. wow-steam-shortcuts.service (User Service)
+**Purpose**: Configures Steam shortcuts programmatically
+**Dependencies**: `graphical-session.target`
+**Execution**: User service, runs when user session starts
+
+```bash
+# Service workflow  
+1. Locate Steam user data directory
+2. Parse existing shortcuts.vdf (binary format)
+3. Add Battle.net installer shortcut with fixed App ID
+4. Add WoW launcher shortcut with fixed App ID  
+5. Configure Proton Experimental compatibility
+6. Write updated shortcuts.vdf
+```
+
+### 4. wow-backup.service + Timer
+**Purpose**: Weekly backup of WoW data to NAS
+**Schedule**: Weekly with 1-hour randomized delay
+**User**: nicholas (preserves permissions)
+
+## Data Synchronization Strategy
+
+### Initial Deployment (Fresh Install)
+1. NAS check fails → Create empty local structure
+2. Battle.net installer downloads
+3. User manually installs Battle.net and WoW
+4. Weekly backup service saves data to NAS
+
+### Subsequent Deployments (With NAS Data)
+1. NAS data found → Full rsync to local storage
+2. Steam shortcuts configured automatically
+3. WoW client data ready for use
+4. Battle.net launcher shortcut works immediately
+
+### Rsync Configuration
+```bash
+rsync -av --progress \
+    --exclude="*.log" \      # Exclude log files
+    --exclude="Cache/" \     # Exclude temporary cache
+    --exclude="Logs/" \      # Exclude debug logs
+    "${NAS_PATH}/" \
+    "${LOCAL_PATH}/"
+```
+
+## Manual Steps Still Required
+
+### 1. Battle.net Account Authentication
+- **Why Manual**: Requires MFA, captcha, or security challenges
+- **When**: First time launching Battle.net launcher
+- **Frequency**: Once per deployment (saved in Wine prefix)
+
+### 2. WoW License Activation
+- **Why Manual**: Requires account selection and license validation
+- **When**: First time launching WoW through Battle.net
+- **Frequency**: Once per deployment
+
+### 3. Initial Steam Setup
+- **Why Manual**: Steam binary VDF format limitations in 2025
+- **Workaround**: Python script attempts automated shortcut creation
+- **Fallback**: Manual "Add Non-Steam Game" if automation fails
+
+## Troubleshooting
+
+### Service Status Checks
+```bash
+# Check WoW data sync
+sudo systemctl status wow-data-sync.service
+journalctl -u wow-data-sync.service
+
+# Check Battle.net download
+sudo systemctl status battlenet-download.service
+
+# Check Steam shortcuts (user service)
+systemctl --user status wow-steam-shortcuts.service
+```
+
+### Common Issues
+
+#### NAS Mount Problems
+```bash
+# Check NAS connectivity
+sudo systemctl status mount-cifs-shares.service
+ping ${CIFS_HOST}
+
+# Manual mount test
+sudo mount -t cifs -o credentials=/etc/.host1-cifs \
+    //${CIFS_HOST}/${CIFS_SHARE} /mnt/${CIFS_SHARE}
+```
+
+#### Steam Compatibility Issues
+```bash
+# Check Steam installation
+steam --version
+
+# Check Proton installation
+ls ~/.local/share/Steam/compatibilitytools.d/
+
+# Manual Proton test
+STEAM_COMPAT_DATA_PATH=~/.local/share/wow/compatdata/2879567900 \
+~/.local/share/Steam/compatibilitytools.d/GE-Proton*/proton run \
+~/Battle.net-Setup.exe
+```
+
+#### File Permission Issues
+```bash
+# Fix ownership
+sudo chown -R nicholas:users ~/.local/share/wow/
+
+# Check Steam directory permissions
+ls -la ~/.local/share/Steam/userdata/*/config/
+```
+
+#### Wine/Proton Crashes (ERROR #132, ACCESS_VIOLATION)
+
+**Symptoms**: Game crashes with "ERROR #132" or ACCESS_VIOLATION in ntdll.dll after extended play sessions (2+ hours).
+
+**Root Cause**: These are Wine/DXVK memory management bugs, not WoW or addon issues. The crash occurs in Wine's Windows NT emulation layer (ntdll.dll) when dereferencing a freed or corrupted pointer.
+
+##### Known Recurring Crash Pattern
+
+Multiple crashes have been observed with **identical signatures**, confirming this is a reproducible bug:
+
+| Date | Session Duration | Lua Memory | Crash Address | Notes |
+|------|------------------|------------|---------------|-------|
+| 2026-01-04 | 1h 54m | N/A | `0x00007fffff20b0df` | **d3d11.dll** crash (DXVK), not ntdll - GE-Proton 10-17 |
+| 2026-01-02 | 3h 55m | 278 MB | `0x00006ffffff68668` | ntdll.dll, jemalloc WAS loaded, still crashed |
+| 2025-12-28 | 2h 26m | 338 MB | `0x00006ffffff68668` | ntdll.dll |
+| 2025-12-25 | 5h 34m | 276 MB | `0x00006ffffff68668` | ntdll.dll |
+
+##### Current Mitigation Status (2026-01-04)
+
+**Current test setup:**
+- Using **GE-Proton 10-28** (declaratively managed via `gaming.nix` override)
+- **jemalloc** loaded via `LD_PRELOAD` (confirmed loaded, but did NOT prevent crashes alone)
+- **PROTON_FORCE_LARGE_ADDRESS_AWARE=1** to address Wine address space exhaustion
+- **WINE_FULLSCREEN_FSR removed** - FSR enabled by default in GE-Proton, explicit setting may cause conflicts
+- **DXVK_ASYNC removed** - Deprecated in DXVK 2.0+, superseded by Graphics Pipeline Libraries
+
+**Steam launch options for Battle.net:**
+```
+LD_PRELOAD=$JEMALLOC_PATH PROTON_FORCE_LARGE_ADDRESS_AWARE=1 %command%
+```
+
+The `JEMALLOC_PATH` environment variable is set by `gaming.nix` and points to the jemalloc library.
+
+**NixOS declarative GE-Proton management:**
+GE-Proton version is pinned in `modules/desktop/gaming/gaming.nix` via override:
+```nix
+proton-ge-bin-latest = pkgs.proton-ge-bin.overrideAttrs (oldAttrs: rec {
+  version = "GE-Proton10-28";
+  src = pkgs.fetchzip {
+    url = "https://github.com/GloriousEggroll/proton-ge-custom/releases/download/${version}/${version}.tar.gz";
+    hash = "sha256-6NvSGX8445la6WU6z9UaaKJm30eg094cuTyhHVDjbOo=";
+  };
+});
+```
+
+**Important findings:**
+- **Two different crash types identified:**
+  1. `ntdll.dll` crashes (Wine NT layer) - after 3-4+ hour sessions
+  2. `d3d11.dll` crashes (DXVK) - occurred with GE-Proton 10-17 after ~2 hours
+- **jemalloc alone doesn't fix ntdll crashes** - Crash still occurred with jemalloc loaded (2026-01-02)
+- **GE-Proton 10-17 had d3d11 crash** - Upgraded to 10-28 which has updated DXVK
+- **WINE_FULLSCREEN_FSR enabled by default** in GE-Proton 7-24+, no need to set explicitly
+- **gamescope** was tested but caused mouse input issues with camera movement
+
+**KDE taskbar workaround:** If taskbar appears over fullscreen, run in-game:
+```
+/console gxRestart
+```
+This restarts the graphics engine and forces proper fullscreen.
+
+**Next steps to test if crashes persist with GE-Proton 10-28:**
+
+1. **Monitor for crashes** - GE-Proton 10-28 has updated DXVK which may fix d3d11 crashes
+
+2. **If d3d11 crashes persist:** Try Proton Experimental (different DXVK version)
+
+3. **If ntdll crashes persist:** Try DirectX 11 mode in-game (System → Graphics → Graphics API → DirectX 11)
+   - Reported to fix heap corruption crashes per [Blizzard forums](https://us.forums.blizzard.com/en/wow/t/wow-crash-heapcorruption/1743420)
+
+4. **Report to Wine Bugzilla** - The identical crash signatures make this a good bug report:
+   - Include crash logs with stack traces
+   - Reference [DXVK issue #1318](https://github.com/doitsujin/dxvk/issues/1318) (address space exhaustion)
+
+**Crash signature** (same across all occurrences):
+```
+Exception: ACCESS_VIOLATION - The instruction at "0x00006ffffff68668"
+referenced memory at "0xffffffffffffffff".
+The memory could not be "read".
+
+Stack Trace:
+DBG-ADDR<00006ffffff68668>("ntdll.dll")
+DBG-ADDR<0000000142b77933>("WoWClassic.exe")
+DBG-ADDR<0000000142aef43f>("WoWClassic.exe")
+DBG-ADDR<0000000142acaa37>("WoWClassic.exe")
+DBG-ADDR<0000000142ac15ce>("WoWClassic.exe")
+```
+
+**Key indicators this is a Wine/DXVK issue (NOT your system)**:
+- `&lt;Addons.Current> (null)` - No addon was executing at crash time
+- `&lt;Memory.HighLoad> No` - Not out of RAM
+- `&lt;GxDeviceLostCount> 0` - GPU is fine
+- Memory address `0xffffffffffffffff` (-1) = freed/null pointer dereference
+- Crash location in `ntdll.dll` (Wine's NT layer)
+
+##### Contributing Factors
+
+- **Long sessions**: Memory pressure accumulates over time
+- **High addon Lua memory**: 300+ MB is heavy (Details, WeakAuras, Questie)
+- **DXVK shader threads**: Compete with WoW's heap allocator
+- **Wine heap differences**: Behaves differently than native Windows
+
+##### Workarounds
+
+**1. Session management** (most effective):
+- Restart WoW every 2-3 hours during long sessions
+- This prevents memory accumulation that triggers the bug
+
+**2. Reduce addon memory pressure**:
+Heavy memory addons to consider disabling:
+- Details + 7 sub-addons (high memory usage)
+- WeakAuras (complex auras consume memory)
+- RXPGuides (if not actively leveling)
+
+**3. Clear shader caches**:
+```bash
+# DXVK/VKD3D shader caches
+rm -f ~/.local/share/Steam/steamapps/compatdata/2879567900/pfx/drive_c/Program\ Files\ \(x86\)/World\ of\ Warcraft/_classic_era_/*.cache
+rm -f ~/.local/share/Steam/steamapps/compatdata/2879567900/pfx/drive_c/Program\ Files\ \(x86\)/World\ of\ Warcraft/_classic_era_/vkd3d-proton.cache
+
+# For Lutris/standalone Wine
+rm -rf ~/.cache/lutris/dxvk_cache/*
+rm -rf ~/.cache/wine/*/dxvk_cache
+
+# Nuclear option: Reset entire Wine prefix (will need to reinstall Battle.net)
+# rm -rf ~/.local/share/wow/compatdata/2879567900/pfx
+```
+
+**4. ~~Steam launch options~~ (DEPRECATED)**:
+~~`DXVK_ASYNC=1`~~ - **Do not use.** Deprecated in DXVK 2.0+, superseded by Graphics Pipeline Libraries. Can cause instability.
+
+**5. Try different Proton version**:
+- **Current test:** GE-Proton (reported more stable for WoW)
+- **Previous:** Proton Experimental (no fullscreen issues, but crashes after ~4hrs)
+- **Fallback:** Proton 9.0 stable (more conservative Wine base)
+
+**6. In-game settings**:
+
+*Reduce memory pressure:*
+- Lower texture resolution
+- Reduce Spell Density (5 → 3)
+- Minimize Ground Clutter
+
+*Multi-monitor performance (IMPORTANT):*
+- **Max Background FPS**: Disable or set high (System → Graphics → Advanced)
+- If enabled, causes severe FPS drop when focusing other monitors
+
+**Kill Stuck WoW Processes**:
+```bash
+# Quick kill script (wowkill alias)
+wowkill
+
+# Or manually
+pkill -9 -f "WoW\|Battle.net\|Agent.exe"
+```
+
+##### Reading Crash Logs
+
+Crash logs location:
+```
+~/.steam/steam/steamapps/compatdata/2879567900/pfx/drive_c/Program Files (x86)/World of Warcraft/_classic_era_/Errors/
+```
+
+**File format**: `YYYY-MM-DD_HH.MM.SS_Crash_PID.txt`
+
+Key sections to check:
+| Section | What to Look For |
+|---------|-----------------|
+| `&lt;Addons.Current>` | `(null)` = not addon issue |
+| `&lt;Memory.HighLoad>` | "No" = RAM is fine |
+| `&lt;GxDeviceLostCount>` | 0 = GPU is fine |
+| `Total lua memory` | High values (300+ MB) = addon pressure |
+| Stack trace | `ntdll.dll` at top = Wine bug |
+| Memory address | `0xffffffffffffffff` = known pattern |
+
+### Performance Optimization
+
+#### Local Storage Recommendations
+- **SSD Required**: WoW benefits significantly from fast storage
+- **Free Space**: Maintain 50GB+ free space for patches and updates
+- **File System**: ext4 or btrfs recommended for Linux compatibility
+
+#### Proton Settings
+- **Version**: Proton Experimental (best compatibility for Battle.net)
+- **DXVK**: Enabled automatically by gaming.nix configuration
+- **Wine Version**: Latest stable through Proton
+
+## Integration with Existing Modules
+
+### gaming.nix Dependencies
+```nix
+# Required configurations from gaming.nix
+programs.steam.enable = true;
+programs.steam.remotePlay.openFirewall = true;
+programs.gamemode.enable = true;
+
+# Wine and compatibility tools
+wineWowPackages.full
+dxvk
+vkd3d
+vulkan-tools
+```
+
+### cifs-mounts.nix Integration
+```nix
+# Required NAS configuration
+cifsShares.enable = true;
+cifsShares.createMountPoints = true;
+cifsShares.skipIfMounted = true;
+```
+
+### Environment Variables (.env)
+```bash
+CIFS_HOST_1=nas.local.domain
+CIFS_HOST_1_SHARE_1=share_name
+CIFS_HOST_1_USER=username
+CIFS_HOST_1_PASS=password
+```
+
+## Security Considerations
+
+### File Permissions
+- WoW directory: 755 (nicholas:users)
+- Battle.net installer: 755 with execute bit
+- Steam shortcuts.vdf: User-writable only
+
+### Network Security
+- CIFS credentials stored in /etc/.host1-cifs (600 permissions)
+- Battle.net installer downloaded over HTTPS
+- No sensitive data in Nix store
+
+### Wine Prefix Isolation
+- Each Steam App ID gets isolated Wine prefix
+- Windows registry contained within compatdata directory
+- No system-wide Wine configuration affected
+
+## Future Improvements
+
+### Potential Enhancements
+1. **Battle.net Auto-login**: Secure credential storage for automated login
+2. **WoW Settings Sync**: Backup/restore WoW UI and key bindings
+3. **Addon Management**: Integration with WoWup or CurseForge
+4. **Multi-WoW Support**: Support for Classic, PTR, and Beta clients
+5. **Steam Deck Optimization**: Specialized configuration for handheld gaming
+
+### Limitations
+1. **Battle.net DRM**: Requires internet connection for license validation
+2. **Steam VDF Format**: Binary format changes may break shortcut automation
+3. **Proton Updates**: New versions may require compatibility testing
+4. **NAS Dependency**: System requires network storage for full automation
+
+This documentation should be updated whenever the wow.nix module is modified or when Steam/Battle.net change their integration mechanisms.
+
+---
+
+**Last Updated**: 2026-01-04
+
+---
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🖥️ [Desktop Overview](overview.md)*

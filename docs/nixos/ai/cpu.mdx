@@ -1,0 +1,277 @@
+---
+title: "CPU-Only Model Configuration for Ollama"
+description: "This guide explains how to run specific models on CPU instead of GPU with the Ollama setup, including when and why you might want to do this."
+---
+
+## Overview
+
+By default, all Ollama models use GPU acceleration (AMD RX 6800 XT with ROCm). However, you can configure specific models or applications to use CPU-only mode for various reasons such as VRAM conservation, power efficiency, or background processing.
+
+## Performance Expectations
+
+### Typical Performance Comparison
+- **GPU (RX 6800 XT)**: 50-100 tokens/second
+- **CPU (Ryzen system)**: 5-15 tokens/second
+- **Speed difference**: 5-10x slower on CPU
+
+### When CPU-Only Makes Sense
+1. **VRAM pressure**: Need GPU memory for other intensive tasks
+2. **Background processing**: Automated categorization, batch jobs
+3. **Non-interactive workflows**: Scripts, cron jobs, batch processing
+4. **Power efficiency**: Lower power consumption during idle periods
+5. **Testing/debugging**: Isolating GPU-related issues
+
+## Configuration Methods
+
+### Method 1: Global CPU Mode (All Models)
+
+Force all Ollama models to use CPU by updating the service configuration:
+
+```nix
+# In /etc/nixos/modules/desktop/ollama.nix
+services.ollama = {
+  # ... existing config ...
+  
+  environmentVariables = {
+    # Existing variables...
+    OLLAMA_NUM_GPU = "0";  # Force all models to CPU
+  };
+};
+```
+
+### Method 2: Per-Application CPU Mode
+
+Configure specific applications to use CPU while others use GPU:
+
+**For keeper (background processing):**
+```bash
+# Set environment variable before running
+OLLAMA_NUM_GPU=0 keeper-cli ai create "content"
+
+# Or permanently in application config
+export OLLAMA_NUM_GPU=0
+keeper-cli ai update untitled
+```
+
+**For smart-commit (temporary CPU mode):**
+```bash
+# Temporary CPU mode for testing
+OLLAMA_NUM_GPU=0 smart-commit
+
+# Or set in shell profile for permanent change
+echo 'export OLLAMA_NUM_GPU=0' >> ~/.bashrc
+```
+
+### Method 3: Runtime Model Switching
+
+Switch models between GPU and CPU during runtime:
+
+```bash
+# Check currently loaded models
+curl -s http://localhost:11434/api/ps | jq
+
+# Force unload all models
+curl -X POST http://localhost:11434/api/generate \
+  -d '{"model": "qwen2.5:7b-instruct", "keep_alive": 0}'
+
+# Load model with CPU-only flag
+OLLAMA_NUM_GPU=0 ollama run qwen2.5:7b-instruct
+```
+
+### Method 4: API-Level CPU Control
+
+Use API calls to specify CPU-only mode:
+
+```bash
+# Generate text using CPU-only
+curl -X POST http://localhost:11434/api/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen2.5:7b-instruct",
+    "prompt": "Explain CPU vs GPU processing",
+    "options": {
+      "num_gpu": 0
+    }
+  }'
+```
+
+## Hybrid Configuration Strategy
+
+### Recommended Setup for Mixed Workloads
+
+```nix
+# In /etc/nixos/modules/desktop/ollama.nix
+services.ollama = {
+  environmentVariables = {
+    # Limit GPU models to conserve VRAM
+    OLLAMA_MAX_LOADED_MODELS = "2";
+    OLLAMA_NUM_PARALLEL = "4";
+    OLLAMA_MAX_QUEUE = "512";
+    
+    # Default to GPU, override per-application
+    # OLLAMA_NUM_GPU = "1";  # Default GPU mode
+  };
+};
+```
+
+### Application-Specific Recommendations
+
+**GPU-Optimized (Interactive):**
+- smart-commit: Needs fast response for user interaction
+- sage: Real-time command assistance requires speed
+
+**CPU-Optimized (Background):**
+- keeper batch processing: Can tolerate slower processing
+- Automated categorization jobs: Background tasks
+- Testing and development: Non-time-critical tasks
+
+## Implementation Examples
+
+### Example 1: Keeper CPU Configuration
+
+Create a CPU-specific wrapper for keeper:
+
+```bash
+# Create wrapper script
+cat > /usr/local/bin/keeper-cpu << 'EOF'
+#!/bin/bash
+export OLLAMA_NUM_GPU=0
+exec keeper-cli "$@"
+EOF
+chmod +x /usr/local/bin/keeper-cpu
+
+# Use CPU-only keeper
+keeper-cpu ai update untitled
+```
+
+### Example 2: Conditional CPU Mode
+
+Script that switches to CPU mode during high GPU usage:
+
+```bash
+#!/bin/bash
+# Check GPU memory usage
+GPU_USAGE=$(rocm-smi --showmeminfo vram | grep "Used" | awk '{print $3}')
+
+if [[ ${GPU_USAGE%.*} -gt 12000 ]]; then
+    echo "High GPU usage detected, switching to CPU mode"
+    export OLLAMA_NUM_GPU=0
+fi
+
+# Run application with conditional CPU mode
+smart-commit "$@"
+```
+
+### Example 3: Service-Level CPU Override
+
+Create a systemd override for CPU-only background services:
+
+```bash
+# Create override directory
+sudo mkdir -p /etc/systemd/system/keeper-background.service.d/
+
+# Create CPU override
+cat > /etc/systemd/system/keeper-background.service.d/cpu-only.conf << 'EOF'
+[Service]
+Environment=OLLAMA_NUM_GPU=0
+EOF
+
+# Reload and restart
+sudo systemctl daemon-reload
+sudo systemctl restart keeper-background.service
+```
+
+## Monitoring and Validation
+
+### Check Current Model GPU/CPU Status
+
+```bash
+# Monitor GPU memory usage
+watch -n 1 'rocm-smi --showmeminfo vram'
+
+# Check loaded models and their memory usage
+curl -s http://localhost:11434/api/ps | jq '.models[] | {name, size_vram}'
+
+# Monitor Ollama service logs for CPU/GPU loading
+journalctl -fu ollama.service | grep -E "(CPU|GPU|loading)"
+```
+
+### Performance Benchmarking
+
+```bash
+# Benchmark GPU vs CPU performance
+time echo "Write a hello world program" | \
+  curl -s -X POST http://localhost:11434/api/generate \
+  -d @- | jq -r '.response'
+
+# Compare with CPU mode
+OLLAMA_NUM_GPU=0 time echo "Write a hello world program" | \
+  curl -s -X POST http://localhost:11434/api/generate \
+  -d @- | jq -r '.response'
+```
+
+## Troubleshooting
+
+### Common Issues
+
+**Model not switching to CPU:**
+- Ensure environment variable is set before model loading
+- Unload existing GPU model first: `curl -X POST http://localhost:11434/api/generate -d '{"model": "model-name", "keep_alive": 0}'`
+
+**Slow CPU performance:**
+- Verify CPU has sufficient cores and memory
+- Check for CPU throttling: `cat /proc/cpuinfo | grep MHz`
+- Monitor system load: `htop` or `top`
+
+**Mixed GPU/CPU conflicts:**
+- Models loaded on GPU cannot switch to CPU without unloading
+- Use `api/ps` endpoint to check current model locations
+- Clear all models and reload with desired configuration
+
+### Performance Optimization for CPU Mode
+
+```bash
+# Optimize CPU performance
+echo 'performance' | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
+
+# Increase process priority for CPU-bound models
+nice -n -10 OLLAMA_NUM_GPU=0 ollama run qwen2.5:7b-instruct
+
+# Use fewer threads for stability
+export OMP_NUM_THREADS=8
+OLLAMA_NUM_GPU=0 ollama run qwen2.5:7b-instruct
+```
+
+## Integration with NixOS Rebuild
+
+After making changes to CPU/GPU configuration, rebuild the system:
+
+```bash
+# Apply changes
+sudo nixos-rebuild switch --flake .#cmos
+
+# Verify Ollama service configuration
+systemctl status ollama.service
+
+# Check environment variables
+systemctl show ollama.service | grep Environment
+```
+
+## Best Practices
+
+1. **Start with GPU by default** - Only move to CPU for specific use cases
+2. **Monitor VRAM usage** - Use `rocm-smi` to track memory consumption
+3. **Test performance impact** - Benchmark before deploying CPU-only mode
+4. **Use CPU for batch jobs** - Background processing is ideal for CPU mode
+5. **Document configuration** - Keep track of which apps use CPU vs GPU
+
+## Related Documentation
+
+- [AI Model Management](models.md) - General model configuration
+- [GPU Optimization](gpu.md) - ROCm and GPU-specific tuning
+- [Performance Monitoring](monitoring.md) - System resource monitoring
+- [Troubleshooting](troubleshooting.md) - Common AI service issues
+
+---
+
+*Last updated: September 21, 2025*

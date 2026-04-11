@@ -1,0 +1,211 @@
+---
+title: "NixOS Configuration Best Practices"
+description: "For managing multiple computers (desktop, laptop, servers), use a single repository with host-specific folders:"
+---
+
+## Multi-Host Organization (2025 Standards)
+
+### Recommended Structure
+
+For managing multiple computers (desktop, laptop, servers), use a **single repository** with host-specific folders:
+
+```
+nixos-config/
+├── flake.nix
+├── hosts/
+│   ├── desktop/
+│   │   ├── default.nix
+│   │   └── hardware-configuration.nix
+│   ├── laptop/
+│   │   ├── default.nix
+│   │   └── hardware-configuration.nix
+│   └── server/
+│       ├── default.nix
+│       └── hardware-configuration.nix
+├── modules/
+│   ├── core/                  # Required on ALL hosts
+│   │   ├── users.nix
+│   │   ├── ssh.nix
+│   │   └── firewall.nix
+│   ├── desktop/               # GUI-only modules
+│   │   ├── kde.nix
+│   │   ├── gaming.nix
+│   │   └── sunshine.nix
+│   ├── optional/              # Pick-and-choose features
+│   │   ├── ai.nix
+│   │   ├── virtualization.nix
+│   │   └── dev.nix
+│   └── server/                # Server-specific
+│       ├── cifs-mounts.nix
+│       └── backup.nix
+```
+
+### Host Configuration Examples
+
+**Clean, minimal host configs that import only what's needed:**
+
+**hosts/desktop/default.nix:**
+```nix
+{ ... }: {
+  imports = [
+    ../../modules/core            # Everything from core/
+    ../../modules/desktop         # Everything from desktop/  
+    ../../modules/optional/ai.nix
+    ../../modules/optional/dev.nix
+    ./hardware-configuration.nix
+  ];
+  
+  # Host-specific overrides only
+  networking.hostName = "desktop";
+}
+```
+
+**hosts/server/default.nix:**
+```nix
+{ ... }: {
+  imports = [
+    ../../modules/core            # Just the essentials
+    ../../modules/server
+    ../../modules/optional/ai.nix # Optional: AI on server
+    ./hardware-configuration.nix
+  ];
+  
+  networking.hostName = "server";
+  services.openssh.enable = true;
+}
+```
+
+**hosts/laptop/default.nix:**
+```nix
+{ ... }: {
+  imports = [
+    ../../modules/core
+    ../../modules/desktop
+    # No gaming.nix - laptop doesn't need it
+    ../../modules/optional/dev.nix
+    ./hardware-configuration.nix
+  ];
+  
+  networking.hostName = "laptop";
+}
+```
+
+### Deployment Commands
+
+```bash
+# Local rebuild
+nixos-rebuild switch --flake .#desktop
+
+# Remote rebuild
+nixos-rebuild switch --flake .#server --target-host user@server-ip
+
+# Test configuration
+nixos-rebuild test --flake .#hostname
+```
+
+## Why Single Repo vs Multiple Repos
+
+### ✅ Single Repository Advantages
+- **Shared modules** - Reuse common configuration across hosts
+- **Easy synchronization** - One `git pull` updates all machines  
+- **DRY principle** - Don't repeat configuration
+- **Version consistency** - All hosts use same flake input versions
+- **Easier maintenance** - Update shared modules once
+
+### ❌ Multiple Repositories Disadvantages
+- Duplicate common configurations
+- Version drift between machines
+- More repositories to maintain
+- Can't easily share modules
+- Harder to keep configurations in sync
+
+## Module Organization Principles
+
+### 1. **Core Modules** (Required everywhere)
+- User accounts and SSH keys
+- Basic security (firewall, SSH)
+- Essential system packages
+- Network configuration
+
+### 2. **Desktop Modules** (GUI systems only)
+- Desktop environment (KDE, GNOME)
+- Gaming configurations
+- Media applications
+- Display management
+
+### 3. **Optional Modules** (Pick-and-choose)
+- Development tools
+- AI/ML services
+- Virtualization
+- Specialized applications
+
+### 4. **Server Modules** (Server-specific)
+- Network services
+- Backup configurations
+- Monitoring
+- Remote access tools
+
+## Enterprise Best Practices
+
+### Custom Namespacing
+```nix
+{
+  options.our.roles.web-server = {
+    enable = mkEnableOption "web server role";
+  };
+
+  config = mkIf cfg.enable {
+    our.basic.enable = true;
+    our.networking.enable = true;
+  };
+}
+```
+
+### Role-Based Modules
+- Create enable/disable options for entire configurations
+- Use `lib.mkDefault` and `lib.mkForce` for priority management
+- Implement conditional configurations with `mkIf`
+
+### Configuration Management
+- Use flakes for reproducible builds
+- Implement proper secret management (1Password, agenix)
+- Version control all configurations
+- Test changes before applying permanently
+
+## Migration from Current Setup
+
+Your current flat structure can be reorganized as follows:
+
+**Current → New Structure:**
+```
+# Current files → New locations
+gaming.nix     → modules/desktop/gaming.nix
+ai.nix         → modules/optional/ai.nix
+sunshine.nix   → modules/desktop/sunshine.nix
+ssh.nix        → modules/core/ssh.nix
+firewall.nix   → modules/core/firewall.nix
+cifs-mounts.nix → modules/server/cifs-mounts.nix
+```
+
+**Benefits of reorganization:**
+- Clear separation of concerns
+- Easy to see what goes where
+- Simple to add new hosts
+- Professional, scalable structure
+- Better team collaboration (if needed)
+
+## Current vs Future State
+
+**Current (Works fine for single machine):**
+- Flat structure in `/etc/nixos/`
+- All modules imported in `configuration.nix`
+- Good for personal use, single machine
+
+**Recommended (Scales to multiple machines):**
+- Organized folder structure
+- Host-specific configurations
+- Shared module library
+- Professional standard
+- Enterprise-ready
+
+The reorganization is optional for single-machine setups but becomes essential when managing multiple computers.

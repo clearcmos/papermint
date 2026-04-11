@@ -1,0 +1,53 @@
+---
+title: "SentinelOne Device Management & Cross-Platform Cleanup"
+description: "SentinelOne device groups drifted over time — agents ended up in wrong groups, departed employees left orphaned agents consuming licenses, and there was no e..."
+---
+
+## The Problem
+
+SentinelOne device groups drifted over time — agents ended up in wrong groups, departed employees left orphaned agents consuming licenses, and there was no easy way to cross-check which devices in S1 matched what was in Kandji or Okta. Cleaning this up manually meant spreadsheet comparisons across 1,000+ devices.
+
+## What Was Built
+
+A set of SentinelOne API tools (~6,400 lines of Python) focused on device inventory management and cross-platform identity matching. Built to solve immediate cleanup needs — some tools are more polished than others.
+
+### Core Tools (Regularly Used)
+
+| Tool | Purpose |
+|------|---------|
+| `giga-script` (677 lines) | Multi-purpose S1 tool — device lookups, group operations, Google Admin cross-referencing |
+| `move-to-group` | Bulk device group reassignment |
+| `kandji-cross-check` | Cross-reference S1 agents against Kandji MDM inventory to find mismatches |
+| `okta-integration` | Match S1 agents to Okta users by email to find orphaned agents |
+| `get-all-devices` | Full S1 device inventory export |
+| `list-devices` | Filtered device listing |
+
+### Supporting Tools
+
+| Tool | Purpose |
+|------|---------|
+| `gadmin-cross-check` | Cross-reference S1 agents against Google Admin device inventory |
+| `uuid-tag` | Tag devices by UUID |
+| `uuid-check` | Verify UUID assignments |
+| `get-single-uuid-info` | Device info by UUID |
+| `get-single-ip-info` | Device lookup by IP |
+| `okta-read-ip` | Cross-reference IPs between S1 and Okta login events |
+| `eap-actions` | Early access program device management |
+| `in-person-eap-scanner` | On-site device scanning for EAP enrollment |
+| `test-s1-apis` | API connectivity validation |
+
+## What It Actually Does
+
+- **Group cleanup**: Programmatically move devices into correct S1 groups based on identity data from Okta and Kandji
+- **Orphaned agent detection**: Find S1 agents with no matching Okta user (departed employees still consuming licenses)
+- **Inventory mismatches**: Devices in Kandji but not S1 (missing endpoint protection) or in S1 but not Kandji (unmanaged devices)
+
+## Impact
+
+- Device group cleanup that previously required manual spreadsheet work runs programmatically
+- Orphaned agent identification helps reduce unnecessary SentinelOne licensing costs
+- Cross-platform mismatches are surfaced on demand instead of discovered accidentally
+
+## Honest Assessment
+
+These tools solved real problems but were built for immediate needs, not long-term maintainability. Some are well-structured, others are quick-and-dirty. The cross-referencing logic works but the tooling overall is less polished than the Okta or Google Workspace suites.

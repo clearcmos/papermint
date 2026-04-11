@@ -1,0 +1,486 @@
+---
+title: "️ Fail2ban Intrusion Prevention"
+description: "*Automated brute force protection for Traefik reverse proxy*"
+---
+
+## 🎯 Overview
+
+Fail2ban monitors Traefik access logs and temporarily blocks IP addresses exhibiting malicious behavior patterns (brute force attacks, authentication failures, scanning, rate limit abuse). It acts as the first automated defense layer before attacks reach authentication systems.
+
+**Deployment**: misc host only (Traefik runs on misc)
+**Status**: ✅ Active since 2025-11-01
+**Ban Strategy**: Temporary bans (1-3 hours) with automatic expiry
+
+---
+
+## 🏗️ Architecture
+
+### How Fail2ban Works
+
+```
+1. Traefik logs request → systemd journal
+2. Fail2ban monitors journal via systemd backend
+3. Pattern matches against custom filters
+4. Threshold exceeded → iptables DROP rule added
+5. Timer expires → iptables rule removed (auto-unban)
+```
+
+**Benefits over permanent bans:**
+- No firewall rule bloat (auto-cleanup)
+- Legitimate users on dynamic IPs won't be permanently blocked
+- Stops 99% of automated attacks (bots move on after first ban)
+- No accidental self-lockout risk
+
+### Ban Duration Philosophy
+
+- **Short bans (30m-1h)**: Authentication failures - gives legitimate users time to recover
+- **Medium bans (1-2h)**: Rate limit abuse - more aggressive attacks
+- **Long bans (3h)**: Aggressive scanning - clear malicious intent
+
+---
+
+## 📊 Active Jails
+
+Fail2ban runs **6 specialized jails** for Traefik protection:
+
+| Jail | Detects | Threshold | Ban Time | Status |
+|------|---------|-----------|----------|--------|
+| **traefik-oauth2-auth** | OAuth2-proxy login failures (401/403) | 5 in 10m | 1h | ✅ Active |
+| **traefik-oauth2-callback** | OAuth2 callback abuse | 10 in 5m | 30m | ✅ Active |
+| **traefik-http-auth** | General HTTP auth failures (401/403) | 10 in 10m | 1h | ✅ Active |
+| **traefik-ratelimit** | Rate limit violations (429) | 3 in 5m | 2h | ✅ Active |
+| **traefik-bad-request** | Scanning patterns (404 floods) | 20 in 10m | 1h | ✅ Active |
+| **traefik-aggressive-scan** | High-frequency attacks | 50 in 1m | 3h | ✅ Active |
+
+### What Gets Banned
+
+**Automatic bans trigger on:**
+- Failed OAuth2-proxy authentication (wrong password, invalid session)
+- Keycloak login failures (incorrect credentials)
+- Rate limit abuse (hitting Traefik rate limiters)
+- Suspicious scanning (probing for vulnerabilities, directory traversal)
+- High-frequency requests (DDoS-like behavior from single IP)
+
+**Whitelisted IPs (never banned):**
+- `127.0.0.1/8` - localhost
+- `::1` - IPv6 localhost
+- `192.168.1.0/24` - Your LAN network
+
+---
+
+## 🔧 Configuration
+
+### Jail Configuration Files
+
+Location: `/etc/nixos/modules/services/fail2ban.nix`
+
+**Example jail configuration:**
+```nix
+traefik-oauth2-auth = ''
+  enabled = true
+  backend = systemd
+  filter = traefik-oauth2-auth
+  journalmatch = _SYSTEMD_UNIT=traefik.service
+  maxretry = 5        # 5 failures
+  findtime = 10m      # within 10 minutes
+  bantime = 1h        # ban for 1 hour
+  action = iptables-allports[name=traefik-oauth2]
+'';
+```
+
+### Filter Patterns
+
+Filters are defined in `/etc/fail2ban/filter.d/traefik-*.conf`:
+
+**OAuth2 auth failures:**
+```conf
+failregex = ^.*"ClientHost":"<HOST>".*"OriginStatus":(401|403).*$
+```
+
+**Rate limit violations:**
+```conf
+failregex = ^.*"ClientHost":"<HOST>".*"OriginStatus":429.*$
+```
+
+**Scanning patterns:**
+```conf
+failregex = ^.*<HOST>.*"(\.php|\.asp|wp-admin|phpMyAdmin)".*$
+```
+
+---
+
+## 📡 Monitoring Commands
+
+### Check Jail Status
+
+**View all jails:**
+```bash
+ssh misc.home.arpa 'fail2ban-status'
+```
+
+**Output:**
+```
+=== Fail2ban Status for Traefik ===
+
+>>> Jail: traefik-oauth2-auth
+Status for the jail: traefik-oauth2-auth
+|- Filter
+|  |- Currently failed:	2
+|  |- Total failed:	145
+|  `- Journal matches:	_SYSTEMD_UNIT=traefik.service
+`- Actions
+   |- Currently banned:	1
+   |- Total banned:	8
+   `- Banned IP list:	203.0.113.5
+```
+
+### Check Specific Jail
+
+```bash
+ssh misc.home.arpa 'fail2ban-client status traefik-oauth2-auth'
+```
+
+### View Recent Bans
+
+```bash
+# Show ban events from journal
+ssh misc.home.arpa 'journalctl -u fail2ban | grep "Ban"'
+
+# Output:
+# Nov 01 14:30:22 misc fail2ban[123]: [traefik-oauth2-auth] Ban 203.0.113.5
+```
+
+### View Recent Unbans
+
+```bash
+ssh misc.home.arpa 'journalctl -u fail2ban | grep "Unban"'
+
+# Output:
+# Nov 01 15:30:22 misc fail2ban[123]: [traefik-oauth2-auth] Unban 203.0.113.5
+```
+
+### Real-Time Monitoring
+
+```bash
+# Watch Fail2ban logs in real-time
+ssh misc.home.arpa 'journalctl -u fail2ban -f'
+```
+
+---
+
+## 🔓 Unban Procedures
+
+### Manual Unban (Emergency)
+
+If you accidentally lock yourself out:
+
+```bash
+# Unban specific IP from all jails
+ssh misc.home.arpa 'fail2ban-unban 198.51.100.42'
+
+# Output:
+# Unbanning 198.51.100.42 from all jails...
+#   ✓ Unbanned from traefik-oauth2-auth
+#   ✓ Unbanned from traefik-http-auth
+# Done!
+```
+
+### Unban from Specific Jail
+
+```bash
+ssh misc.home.arpa 'fail2ban-client set traefik-oauth2-auth unbanip 198.51.100.42'
+```
+
+### Check If IP Is Banned
+
+```bash
+# Check iptables rules
+ssh misc.home.arpa 'iptables -L -n | grep 198.51.100.42'
+```
+
+---
+
+## 🧪 Testing Fail2ban
+
+### Safe Testing Procedure
+
+**Test OAuth2 authentication jail:**
+
+1. **From external device (phone on LTE or VPS):**
+   ```bash
+   # Trigger 5 failed OAuth2 attempts (use wrong credentials)
+   for i in {1..5}; do
+     curl https://glances.bedrosn.com
+   done
+   ```
+
+2. **Check if IP gets banned:**
+   ```bash
+   ssh misc.home.arpa 'fail2ban-client status traefik-oauth2-auth'
+   # Look for "Banned IP list"
+   ```
+
+3. **Verify ban is working:**
+   ```bash
+   # From same external device - should timeout
+   curl -I https://glances.bedrosn.com
+   # Expected: Connection timeout (packets dropped)
+   ```
+
+4. **Manual unban to restore access:**
+   ```bash
+   ssh misc.home.arpa 'fail2ban-unban YOUR.IP.ADDRESS'
+   ```
+
+**⚠️ WARNING**: Do NOT test from your LAN - it's whitelisted and won't get banned!
+
+---
+
+## 📈 Expected Behavior
+
+### Normal Operation
+
+**Daily metrics (typical homelab):**
+- 10-50 failed attempts from random scanners
+- 5-15 IPs banned per day
+- 0 false positives (legitimate users banned)
+
+**Common attack patterns detected:**
+- WordPress scanner bots (looking for wp-admin)
+- SQL injection probes
+- Credential stuffing attempts on OAuth2 endpoints
+- Automated vulnerability scanners
+
+### Attack Response Timeline
+
+**Example: Brute force attack**
+```
+14:00:00 - Attacker tries password 1 (fail)
+14:00:15 - Attacker tries password 2 (fail)
+14:00:30 - Attacker tries password 3 (fail)
+14:00:45 - Attacker tries password 4 (fail)
+14:01:00 - Attacker tries password 5 (fail)
+14:01:01 - BANNED for 1 hour (all attempts 6-10000 blocked)
+15:01:01 - Auto-unban (IP can try again)
+```
+
+**Result:** Attack stopped after 5 attempts, attacker wastes time on timeouts.
+
+---
+
+## 🚨 Troubleshooting
+
+### Issue: False Positives
+
+**Symptom:** Legitimate user gets banned
+
+**Diagnosis:**
+```bash
+# Check why IP was banned
+ssh misc.home.arpa 'journalctl -u fail2ban | grep "198.51.100.42"'
+```
+
+**Solution:**
+```bash
+# Immediate: Unban the user
+ssh misc.home.arpa 'fail2ban-unban 198.51.100.42'
+
+# Permanent: Add IP to whitelist
+# Edit /etc/nixos/modules/services/fail2ban.nix:
+ignoreIP = [
+  "127.0.0.0/8"
+  "::1"
+  "192.168.1.0/24"
+  "198.51.100.42"  # Add whitelisted IP
+];
+
+# Rebuild
+nixos-rebuild switch --flake .#misc --target-host misc.home.arpa
+```
+
+### Issue: Jail Not Working
+
+**Symptom:** No bans despite obvious attack patterns
+
+**Diagnosis:**
+```bash
+# Check jail is enabled
+ssh misc.home.arpa 'fail2ban-client status traefik-oauth2-auth'
+
+# Check filter patterns are matching
+ssh misc.home.arpa 'journalctl -u traefik | grep "401\|403" | head -5'
+
+# Check Fail2ban is reading Traefik logs
+ssh misc.home.arpa 'fail2ban-client get traefik-oauth2-auth logpath'
+```
+
+**Common causes:**
+- Filter regex doesn't match log format
+- Traefik not logging to systemd journal
+- Ban threshold too high (increase maxretry to test)
+
+**Solution:**
+```bash
+# Test filter pattern manually
+ssh misc.home.arpa 'fail2ban-regex /var/log/traefik/access.log /etc/fail2ban/filter.d/traefik-oauth2-auth.conf'
+```
+
+### Issue: Service Not Starting
+
+**Symptom:** `systemctl status fail2ban` shows failed
+
+**Diagnosis:**
+```bash
+# Check service logs
+ssh misc.home.arpa 'journalctl -u fail2ban -n 50'
+
+# Common errors:
+# - Invalid regex in filter
+# - Permission issues on log files
+# - Conflicting iptables rules
+```
+
+**Solution:**
+```bash
+# Validate configuration
+ssh misc.home.arpa 'fail2ban-client -t'
+
+# Restart service
+ssh misc.home.arpa 'systemctl restart fail2ban'
+```
+
+---
+
+## 🔍 Advanced Monitoring
+
+### Ban Statistics
+
+```bash
+# Total bans across all jails
+ssh misc.home.arpa 'iptables -L -n | grep -c "DROP"'
+
+# Bans by jail
+ssh misc.home.arpa 'fail2ban-client status' | grep "Currently banned"
+```
+
+### Top Banned IPs
+
+```bash
+# Extract banned IPs from journal
+ssh misc.home.arpa 'journalctl -u fail2ban --since "1 week ago" | grep "Ban" | awk "{print \$NF}" | sort | uniq -c | sort -rn | head -10'
+```
+
+### Ban/Unban Rate
+
+```bash
+# Bans in last 24 hours
+ssh misc.home.arpa 'journalctl -u fail2ban --since "24 hours ago" | grep -c "Ban"'
+
+# Unbans in last 24 hours
+ssh misc.home.arpa 'journalctl -u fail2ban --since "24 hours ago" | grep -c "Unban"'
+```
+
+---
+
+## 🎯 Best Practices
+
+### ✅ DO:
+- Monitor ban logs weekly for patterns
+- Test unban procedure before emergency
+- Keep LAN whitelist current
+- Adjust thresholds if false positives occur
+- Document whitelisted IPs and reasons
+
+### ❌ DON'T:
+- Use permanent bans (firewall bloat)
+- Whitelist broad IP ranges without justification
+- Disable jails without understanding impact
+- Ignore repeated bans from same IP (may need longer ban time)
+- Test from LAN (it's whitelisted)
+
+---
+
+## 🔐 Security Considerations
+
+### Attack Surface
+
+**What Fail2ban Protects Against:**
+- ✅ Brute force password attacks
+- ✅ Automated vulnerability scanning
+- ✅ Rate limit abuse
+- ✅ Directory traversal attempts
+- ✅ Low-sophistication DDoS
+
+**What Fail2ban Does NOT Protect Against:**
+- ❌ Distributed attacks (different IPs)
+- ❌ Low-and-slow attacks (below thresholds)
+- ❌ Zero-day exploits
+- ❌ Sophisticated targeted attacks with VPN rotation
+
+**Defense in Depth:** Fail2ban is layer 1. OAuth2-proxy + Keycloak authentication (layer 2) and application security (layer 3) provide additional protection.
+
+### Privacy Implications
+
+**IP Address Logging:**
+- Fail2ban logs attacker IPs locally only
+- No external services contacted
+- Logs rotated via systemd journal limits
+- GDPR compliance: Legitimate interest (security)
+
+---
+
+## 📖 Configuration Reference
+
+### File Locations
+
+```
+/etc/nixos/modules/services/fail2ban.nix   # Main configuration
+/etc/fail2ban/filter.d/traefik-*.conf      # Filter patterns (auto-generated)
+/run/fail2ban/fail2ban.sock                # Control socket
+/var/log/fail2ban.log                      # Legacy log (systemd journal preferred)
+```
+
+### Key Configuration Options
+
+```nix
+# Global settings
+maxretry = 5;           # Failures before ban
+findtime = "10m";       # Time window for counting failures
+bantime = "1h";         # Ban duration
+
+# Whitelist
+ignoreIP = [ "192.168.1.0/24" ];
+
+# Ban action
+banaction = "iptables-allports";  # Block all ports, not just service port
+```
+
+---
+
+## 🚀 Future Enhancements
+
+**Potential improvements:**
+- **Recidive jail**: Ban repeat offenders for longer (1 week)
+- **GeoIP blocking**: Automatic blocking by country (low priority)
+- **Push notifications**: Notification when IPs are banned
+- **Prometheus metrics**: Ban rate monitoring in Grafana
+- **Crowdsec integration**: Community threat intelligence (overkill for homelab)
+
+---
+
+## 📚 Related Documentation
+
+- **[Security Overview](overview.md)** - Overall security architecture
+- **[Traefik Configuration](../services/traefik.md)** - Reverse proxy setup
+- **[Network Security](network-security-overview.md)** - Firewall and network layers
+
+---
+
+**Last Updated**: 2025-11-01
+**Deployed**: 2025-11-01
+**Next Review**: 2025-12-01
+**Maintained By**: Infrastructure Security Team
+
+---
+
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🔐 [Security](overview.md) | 🌐 [Services](../services/overview.md)*

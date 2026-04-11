@@ -1,0 +1,447 @@
+---
+title: "Kitty Terminal Emulator"
+description: "*GPU-accelerated terminal with theme support and remote control*"
+---
+
+## 🎯 Overview
+
+Kitty is a fast, feature-rich, GPU-accelerated terminal emulator configured with the beautiful **Catppuccin Mocha** dark theme. It provides smooth rendering, extensive customization, and advanced features like remote control and tab management.
+
+**Key Features**:
+- 🚀 **GPU Acceleration**: Hardware-accelerated rendering for smooth performance
+- 🎨 **200+ Themes**: Easy theme switching with kitty-themes package
+- 🔧 **Highly Configurable**: Extensive customization options
+- 📑 **Tab Support**: Powerline-style tabs with slanted design
+- 🔌 **Remote Control**: Control Kitty from scripts via API
+- 💎 **Modern UI**: Transparency, blur effects, and beautiful colors
+
+---
+
+## 🎨 Configuration
+
+### 🖌️ **Default Theme: Catppuccin Mocha**
+
+**Color Scheme**:
+- **Background**: `#1E1E2E` (dark purple-gray)
+- **Foreground**: `#CDD6F4` (light lavender)
+- **Accent**: `#CBA6F7` (purple)
+- **Blue**: `#89B4FA`
+- **Green**: `#A6E3A1`
+- **Red**: `#F38BA8`
+
+### 🔠 **Font Configuration**
+
+**Primary Font**: JetBrains Mono
+- Modern monospace font designed for developers
+- Excellent ligature support
+- Clear differentiation between similar characters (0/O, 1/l/I)
+
+**Font Size**: 11pt (adjustable in config)
+
+### 🪟 **Window Settings**
+
+```
+Initial Size: 1200x800 pixels
+Padding: 8px
+Background Opacity: 0.95 (95% opaque)
+Background Blur: 20px (Gaussian blur)
+```
+
+### 📑 **Tab Bar Configuration**
+
+- **Position**: Top
+- **Style**: Powerline with slanted separators
+- **Active Tab**: Purple background (`#CBA6F7`)
+- **Inactive Tab**: Dark gray background (`#181825`)
+
+---
+
+## 🛠️ Usage
+
+### 🚀 **Launching Kitty**
+
+```bash
+# Start Kitty
+kitty
+
+# Start with specific directory
+kitty --directory /path/to/dir
+
+# Start with specific command
+kitty --hold htop
+```
+
+### ⌨️ **Key Shortcuts**
+
+**Tabs**:
+- `Ctrl+Shift+T` - New tab
+- `Ctrl+Shift+Q` - Close tab
+- `Ctrl+Shift+Right` - Next tab
+- `Ctrl+Shift+Left` - Previous tab
+- `Ctrl+Shift+Alt+T` - Rename tab
+
+**Windows** (splits within tabs):
+- `Ctrl+Shift+Enter` - New window (vertical split)
+- `Ctrl+Shift+W` - Close window
+- `Ctrl+Shift+]` - Next window
+- `Ctrl+Shift+[` - Previous window
+
+**Clipboard**:
+- `Ctrl+Shift+C` - Copy
+- `Ctrl+Shift+V` - Paste
+- **Copy on Select**: Enabled (automatic copy when selecting text)
+
+**Fonts**:
+- `Ctrl+Shift++` - Increase font size
+- `Ctrl+Shift+-` - Decrease font size
+- `Ctrl+Shift+Backspace` - Reset font size
+
+**Remote Control**:
+- `Ctrl+Shift+Escape` - Kitty shell (remote control REPL)
+
+---
+
+## 🎨 Theme Management
+
+### 🔄 **Switching Themes**
+
+Kitty includes a **theme switcher script** for quick theme changes:
+
+```bash
+# List available themes (200+ themes)
+kitty-theme
+
+# Apply a theme
+kitty-theme <theme-name>
+
+# Popular themes:
+kitty-theme Catppuccin-Mocha      # Default
+kitty-theme Nord
+kitty-theme Dracula
+kitty-theme Gruvbox
+kitty-theme Tokyo-Night
+kitty-theme Solarized-Dark
+```
+
+**Theme Files Location**: `/nix/store/.../share/kitty-themes/themes/`
+
+### 🖌️ **Customizing Colors**
+
+Edit configuration file:
+```bash
+# Edit Kitty config
+nano ~/.config/kitty/kitty.conf
+
+# Modify color values
+foreground              #FFFFFF  # Text color
+background              #000000  # Background color
+cursor                  #FF0000  # Cursor color
+
+# Reload Kitty config
+# Press Ctrl+Shift+F5 or restart Kitty
+```
+
+---
+
+## 🔧 Advanced Features
+
+### 🔌 **Remote Control**
+
+Kitty can be controlled remotely via its API:
+
+```bash
+# List all Kitty windows
+kitty @ ls
+
+# Send text to active window
+kitty @ send-text "echo Hello\n"
+
+# Create new tab with specific command
+kitty @ launch --type=tab --title="htop" htop
+
+# Set window title
+kitty @ set-window-title "My Window"
+
+# Change colors on the fly
+kitty @ set-colors --all foreground=#FFFFFF background=#000000
+```
+
+**Socket**: `/tmp/kitty` (configured for remote control)
+
+### 📜 **Scrollback**
+
+```bash
+# View scrollback in less
+Ctrl+Shift+H
+
+# Search scrollback
+Ctrl+Shift+/
+
+# Scroll up/down
+Shift+Page Up / Shift+Page Down
+```
+
+### 🔗 **URL Handling**
+
+- **Hover**: URLs underlined when hovering with mouse
+- **Click**: Ctrl+Click to open URLs in browser
+- **Style**: Curly underline for URLs
+
+### 📋 **Copy/Paste Enhancements**
+
+- **Copy on Select**: Automatically copies selected text
+- **Paste Protection**: Warns when pasting large text
+- **URL Detection**: Automatically detects and highlights URLs
+
+---
+
+## 🎯 Configuration File
+
+### 📁 **Location**
+
+```
+~/.config/kitty/kitty.conf
+```
+
+### 📝 **Example Customizations**
+
+**Change Font Size**:
+```conf
+font_size 12.0
+```
+
+**Disable Transparency**:
+```conf
+background_opacity 1.0
+background_blur 0
+```
+
+**Change Tab Bar Position**:
+```conf
+tab_bar_edge bottom
+```
+
+**Change Tab Bar Style**:
+```conf
+tab_bar_style separator
+tab_separator " | "
+```
+
+**Custom Key Bindings**:
+```conf
+# Map F1 to launch htop
+map f1 launch --type=tab htop
+
+# Map Ctrl+T to new tab
+map ctrl+t new_tab
+```
+
+### 🔄 **Reload Configuration**
+
+After editing `kitty.conf`:
+```bash
+# Reload without restarting
+Ctrl+Shift+F5
+
+# Or restart Kitty
+```
+
+---
+
+## 🚀 Performance
+
+### ⚡ **GPU Acceleration**
+
+Kitty uses **OpenGL** for rendering:
+- Smooth scrolling and animations
+- Efficient rendering of large outputs
+- Reduced CPU usage for terminal operations
+
+**Settings**:
+```conf
+repaint_delay 10
+input_delay 3
+sync_to_monitor yes
+```
+
+### 📊 **Performance Monitoring**
+
+```bash
+# Show FPS and latency
+kitty --debug-rendering
+
+# Profile performance
+kitty --debug-font-fallback
+```
+
+---
+
+## 🐛 Troubleshooting
+
+### ❌ **Kitty Won't Start**
+
+```bash
+# Check if Kitty is installed
+which kitty
+
+# Check for errors
+kitty --debug-config
+
+# Reset configuration
+mv ~/.config/kitty/kitty.conf ~/.config/kitty/kitty.conf.backup
+```
+
+### 🎨 **Theme Not Applying**
+
+```bash
+# Verify theme file exists
+ls ~/.config/kitty/kitty.conf
+
+# Check for syntax errors
+kitty --debug-config
+
+# Reload config
+Ctrl+Shift+F5
+```
+
+### 🔠 **Font Issues**
+
+```bash
+# List available fonts
+kitty --debug-font-fallback
+
+# Check if JetBrains Mono is installed
+fc-list | grep "JetBrains Mono"
+
+# Test font rendering
+kitty --debug-rendering
+```
+
+### 🪟 **Transparency Not Working**
+
+**Wayland**:
+- Transparency should work out of the box
+
+**X11**:
+- Requires compositor (e.g., picom, compton)
+- Check compositor is running:
+  ```bash
+  pgrep -a picom
+  ```
+
+---
+
+## 🔗 Integration
+
+### 🐚 **Shell Integration**
+
+Kitty includes shell integration for enhanced features:
+
+**Features**:
+- Current directory tracking
+- Command output marking
+- Error detection
+- Prompt marking
+
+**Enabled by default** in configuration:
+```conf
+shell_integration enabled
+```
+
+### 🔌 **Nerd Fonts Support**
+
+Powerline symbols configured:
+```conf
+symbol_map U+E0A0-U+E0A3,U+E0C0-U+E0C7 PowerlineSymbols
+```
+
+Supports icons in terminal applications:
+- `lsd` (LSDeluxe)
+- `exa`
+- `starship` prompt
+- `neovim` with icons
+
+---
+
+## 📚 Tips & Tricks
+
+### 💡 **Useful Commands**
+
+```bash
+# Copy output of command to clipboard
+ls -la | kitty @ send-text --stdin
+
+# Open new Kitty window from current directory
+kitty @ launch --cwd=current
+
+# Take screenshot of terminal
+kitty @ send-text --match all "\nscreenshot\n"
+
+# Split window horizontally
+Ctrl+Shift+Enter
+
+# Create named tab
+Ctrl+Shift+Alt+T
+```
+
+### 🎨 **Theme Recommendations**
+
+**Dark Themes**:
+- Catppuccin-Mocha (default)
+- Nord
+- Dracula
+- Tokyo-Night
+- Gruvbox-Dark
+
+**Light Themes**:
+- Catppuccin-Latte
+- Solarized-Light
+- GitHub-Light
+
+### 📋 **Configuration Snippets**
+
+**Minimal UI**:
+```conf
+hide_window_decorations yes
+window_padding_width 0
+```
+
+**Powerline Tabs**:
+```conf
+tab_bar_style powerline
+tab_powerline_style slanted
+```
+
+**No Transparency**:
+```conf
+background_opacity 1.0
+background_blur 0
+```
+
+---
+
+## 📖 Related Documentation
+
+- **[Desktop Overview](../desktop/overview.md)** - Desktop environment setup
+- **[Konsole Troubleshooting](../desktop/konsole-troubleshooting.md)** - Alternative terminal
+- **[KDE Configuration](../desktop/kde-fonts-optimization.md)** - Desktop fonts
+- **[Tools Overview](../tools/overview.md)** - CLI tools configuration
+
+---
+
+## 🔗 External Resources
+
+- **Official Website**: https://sw.kovidgoyal.net/kitty/
+- **Documentation**: https://sw.kovidgoyal.net/kitty/overview/
+- **GitHub**: https://github.com/kovidgoyal/kitty
+- **Theme Gallery**: https://github.com/kovidgoyal/kitty-themes
+
+---
+
+**Last Updated**: 2025-10-20
+**Theme**: Catppuccin Mocha
+**Font**: JetBrains Mono 11pt
+**Configuration**: `~/.config/kitty/kitty.conf`
+
+---
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🖥️ [Desktop](../desktop/overview.md) | 🛠️ [Tools](../tools/overview.md)*

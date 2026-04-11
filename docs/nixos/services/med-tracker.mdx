@@ -1,0 +1,81 @@
+---
+title: "Med-Tracker - Medication Dashboard"
+description: "*Medication tracking with safe dosing enforcement*"
+---
+
+## Overview
+
+Medication tracker with web dashboard and CLI enforcing safe dosing intervals to prevent accidental overdosing. Tracks cooldown windows, daily limits, and window-based dosing (e.g., "max 2mg per 4 hours").
+
+**Module:** `modules/services/med-tracker.nix`
+**App code:** `apps/med-tracker/` (app.py, meds-cli.py, static/index.html)
+**Port:** 8110 (LAN only)
+**URL:** http://meds.home.arpa (or http://misc.home.arpa:8110)
+**Host:** misc
+**Auth:** None (LAN-only, trusted network)
+
+## Architecture
+
+- **Framework:** FastAPI + Uvicorn (Python 3)
+- **Database:** SQLite at `/var/lib/med-tracker/meds.db`
+- **User:** Dynamic systemd user (low-privilege)
+
+## Access
+
+```bash
+# CLI (installed on all hosts)
+meds
+
+# Web dashboard
+http://meds.home.arpa
+
+# API
+curl http://misc.home.arpa:8110/api/status | jq
+curl http://misc.home.arpa:8110/api/medications | jq
+```
+
+## Dosing Logic
+
+**Window-based** (when `max_per_window` is set):
+- Example: "1-2mg every 4 hours" — take 1mg at 10:00, can still take 1mg more within the 4-hour window
+- Window resets as earlier doses expire
+
+**Legacy cooldown** (when `max_per_window` is NULL):
+- Any dose triggers full cooldown period
+
+**Daily limit**: Rolling 24-hour window enforced independently
+
+## API Endpoints
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/medications` | GET/POST | List or add medications |
+| `/api/medications/{name}` | DELETE | Remove medication |
+| `/api/status` | GET | Current status of all meds |
+| `/api/history` | GET | Recent dose history |
+| `/api/dose` | POST | Log a dose |
+| `/api/dose/{id}` | DELETE | Remove a dose entry |
+| `/health` | GET | Health check |
+
+## Troubleshooting
+
+```bash
+# Service status
+ssh misc.home.arpa 'systemctl status med-tracker'
+
+# Logs
+ssh misc.home.arpa 'journalctl -u med-tracker -n 50'
+
+# Check database
+ssh misc.home.arpa 'sqlite3 /var/lib/med-tracker/meds.db "SELECT * FROM medications"'
+
+# Reset database
+ssh misc.home.arpa 'rm /var/lib/med-tracker/meds.db && systemctl restart med-tracker'
+```
+
+---
+
+**Last Updated**: 2026-03-06
+
+---
+*[Home](../README.md) | [Services Overview](overview.md)*

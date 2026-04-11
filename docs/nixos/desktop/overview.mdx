@@ -1,0 +1,401 @@
+---
+title: "️ Desktop Environment"
+description: "*Complete desktop environment configuration and optimization*"
+---
+
+## 🎯 Desktop Overview
+
+This section covers the KDE Plasma 6 desktop environment configuration for cmos (primary desktop) and the labwc environment for nixvm (development VM), including application setup, theming, optimization, and troubleshooting.
+
+### 🖥️ Desktop Hosts
+
+| Host | Platform | Desktop | Primary Use |
+|------|----------|---------|-------------|
+| **cmos** | AMD Desktop | KDE Plasma 6 | Gaming, AI/ML, Development |
+| **nixvm** | KVM Virtual Machine | labwc | Development, Testing |
+
+---
+
+## 📚 Desktop Documentation Index
+
+### 🎨 KDE Environment
+**[📁 kde/](kde/)**
+
+| Component | Purpose | Status | Documentation |
+|-----------|---------|--------|---------------|
+| **Plasma 6** | Desktop environment | ✅ Active | Core KDE configuration |
+| **Multi-Monitor** | Display configuration | ✅ Declarative | [kde-multimonitor.md](kde-multimonitor.md) |
+| **Font Optimization** | Typography rendering | ✅ Optimized | [fonts-optimization.md](kde/fonts-optimization.md) |
+| **Icon Fix** | Blank icon prevention | ✅ Declarative | [kde-icon-fix.md](kde-icon-fix.md) |
+| **Logout Fix** | Session management | ❌ Removed | [kde-logout-fix.md](kde-logout-fix.md) |
+| **Pre/Post Fonts** | Font configuration | ✅ Applied | Pre/post font configs |
+
+### 🖲️ Terminal Environment
+**[📁 konsole/](konsole/)**
+
+| Component | Purpose | Status | Documentation |
+|-----------|---------|--------|---------------|
+| **Konsole** | Primary terminal | ✅ Active | [troubleshooting.md](konsole/troubleshooting.md) |
+| **cpv** | Clipboard utility | ✅ Active | Copies visible terminal text |
+| **Zsh** | Shell environment | ✅ Active | Shell configuration |
+| **Tmux** | Terminal multiplexer | ✅ Active | [../tools-tmux.md](../tools/tmux.md) |
+
+### 🎮 Applications
+**[📁 applications/](applications/)**
+
+| Application | Category | Status | Documentation |
+|-------------|----------|--------|---------------|
+| **Brave Browser** | Web Browser | ✅ Active | [brave.md](brave.md) |
+| **ChatGPT Quick** | AI Assistant | ✅ Active | [chatgpt-quick.md](chatgpt-quick.md) |
+| **Discord** | Communication | ✅ Fixed (XWayland) | [discord-gpu-crash-fix.md](discord-gpu-crash-fix.md) |
+| **Qt/XCB Freeze** | Troubleshooting | ✅ Documented | [kwin-xcb-freeze.md](kwin-xcb-freeze.md) |
+| **DroidCam** | Webcam | ✅ Active | [droidcam.md](droidcam.md) |
+| **VM Management** | Virtualization | ✅ Active | [vm-management.md](vm-management.md) |
+| **Sunshine** | Game Streaming | ⚠️ Optional | [sunshine.md](sunshine.md) |
+| **World of Warcraft** | Gaming | ✅ Active | [wow.md](wow.md) |
+
+### 💰 Local Web Apps
+
+| Application | Purpose | Port | Status |
+|-------------|---------|------|--------|
+| **Investment Tracker** | Canadian TFSA/RRSP/Mortgage tracking | 8003 | ✅ Active |
+
+---
+
+**Last Updated**: 2026-01-03
+
+---
+
+## 🎨 KDE Plasma 6 Configuration
+
+### 🖼️ Visual Configuration
+
+**Theme Settings**:
+- **Global Theme**: Breeze Dark
+- **Plasma Style**: Breeze Dark
+- **Application Style**: Breeze
+- **Window Decorations**: Breeze
+- **Icons**: Breeze Dark
+- **Cursors**: Breeze
+
+**Display Configuration**:
+- **Primary Monitor**: 4K @ 60Hz
+- **Secondary Monitor**: 1440p @ 144Hz (gaming)
+- **Scaling**: 125% (optimal for 4K)
+- **Color Profile**: sRGB
+
+### 🎯 Performance Optimization
+
+**Compositor Settings**:
+- **Backend**: OpenGL 3.1
+- **VSync**: Adaptive
+- **Animation Speed**: 2x (faster)
+- **Effects**: Minimal for gaming performance
+
+**Memory Management**:
+- **Swap Usage**: Optimized for 32GB RAM
+- **Cache Settings**: Tuned for development workloads
+- **Background Apps**: Minimal for gaming sessions
+
+### ⌨️ Input Configuration
+
+**Keyboard**:
+- **Layout**: US English
+- **Compose Key**: Right Alt
+- **Repeat Rate**: Fast
+- **Special Keys**: Gaming-optimized
+
+**Custom Shortcuts**:
+| Shortcut | Action | Documentation |
+|----------|--------|---------------|
+| **Meta+F10** | Turn off screen | KDE Power Management |
+| **Meta+F11** | Toggle Bluetooth + connect Q30 | [bluetooth.md](bluetooth.md) |
+| **Meta+F12** | ChatGPT quick input (CDP injection) | [chatgpt-quick.md](chatgpt-quick.md) |
+
+**Peripherals**:
+| Device | Tool | Documentation |
+|--------|------|---------------|
+| **Soundcore Life Q30** | OpenSCQ30 CLI | [soundcore-openscq30.md](soundcore-openscq30.md) |
+
+**Mouse**:
+- **Acceleration**: Disabled (gaming)
+- **Sensitivity**: Medium-high
+- **Button Mapping**: Standard + gaming profiles
+
+---
+
+## 🔧 System Integration
+
+### 🌐 Network Integration
+
+**File Sharing**:
+- **Samba Mounts**: Auto-mount network shares
+- **SSH Integration**: Seamless remote access
+- **Cloud Sync**: Google Drive via KDE Online Accounts
+
+**Service Discovery**:
+- **mDNS/Avahi**: Local service discovery
+- **SSH**: Key-based authentication
+- **Remote Desktop**: KDE Connect integration
+
+### 🔊 Audio Configuration
+
+**PipeWire Setup**:
+- **Low Latency**: Gaming and AI optimized
+- **Multiple Outputs**: Headphones + speakers
+- **Audio Routing**: Flexible application routing
+- **Gaming Audio**: Optimized for competitive gaming
+
+### 🎮 Gaming Integration
+
+**Steam Configuration**:
+- **Proton**: Latest version with DXVK
+- **GPU Scheduling**: Balanced with AI workloads
+- **Performance**: High-refresh rate gaming
+- **VR Ready**: OpenXR support
+
+**Game Streaming**:
+- **Steam Remote Play**: Local network streaming
+- **Sunshine**: Optional NVIDIA GameStream alternative
+- **KDE Connect**: Mobile gaming integration
+
+---
+
+## 🛠️ Development Environment
+
+### 👨‍💻 IDE Configuration
+
+**Primary Development**:
+- **VSCode**: Primary IDE with extensions
+- **JetBrains Tools**: Language-specific IDEs
+- **Terminal**: Konsole with zsh
+- **Git Integration**: Seamless version control
+
+**AI Development**:
+- **Python Environment**: Conda/pip with ROCm
+- **Jupyter**: Local and remote notebooks
+- **AI Tools**: Ollama integration for coding assistance
+- **Model Management**: Local LLM development
+
+### 🔗 Remote Development
+
+**SSH Configuration**:
+- **Key Management**: Per-host SSH keys
+- **Remote Editing**: VSCode remote development
+- **Port Forwarding**: Development server access
+- **Multiplexing**: tmux for persistent sessions
+
+---
+
+## 🖥️ VM Desktop Environment (nixvm)
+
+### 🌊 labwc Configuration
+
+**nixvm** runs a lightweight labwc desktop optimized for VM usage:
+
+| Component | Description |
+|-----------|-------------|
+| **Window Manager** | labwc Wayland compositor |
+| **Status Bar** | Waybar with aesthetic Catppuccin theme |
+| **Launcher** | Wofi application launcher |
+| **Notifications** | Mako notification daemon |
+| **Window Switcher** | Hyprshell (Alt+Tab) |
+
+**Key Features**:
+- **Taskbar**: wlr/taskbar showing running apps with click-to-switch
+- **Workspaces**: 5 persistent workspaces (Super+1-5)
+- **Floating bar**: Rounded corners with Catppuccin Mocha styling
+- **3D Acceleration**: VirtIO-GL enabled for smooth graphics
+
+**Hyprshell Configuration**:
+- Supports `HYPRSHELL_SKIP_KEYBINDS=1` to use manual keybind registration
+- Alt+Tab window switcher with visual preview
+- Configured via `/etc/xdg/hyprshell/config.ron`
+
+**Key Shortcuts**:
+| Shortcut | Action |
+|----------|--------|
+| `Super+Return` | Open terminal (Kitty) |
+| `Super+D` / `Super+Space` | Application launcher |
+| `Super+Q` | Close window |
+| `Super+F` | Toggle fullscreen |
+| `Alt+Tab` | Window switcher |
+| `Super+1-5` | Switch workspace |
+
+---
+
+## 🎯 Performance Monitoring
+
+### 📊 System Metrics
+
+**Real-time Monitoring**:
+- **GPU Usage**: radeontop-web interface
+- **CPU**: htop and system monitor
+- **Memory**: KDE system monitor
+- **Network**: Bandwidth monitoring
+
+**Gaming Performance**:
+- **FPS Monitoring**: In-game overlays
+- **Frame Time**: Smooth gaming experience
+- **GPU Scheduling**: AI vs gaming workload balance
+- **Temperature**: Thermal monitoring
+
+### 🔍 Troubleshooting Tools
+
+**Diagnostic Commands**:
+```bash
+# Check KDE session status
+systemctl --user status plasma-plasmashell
+
+# Monitor GPU usage
+radeontop
+
+# Check desktop compositor
+qdbus org.kde.KWin /Compositor org.kde.kwin.Compositing.active
+
+# Audio system status
+systemctl --user status pipewire
+```
+
+---
+
+## 🚨 Common Issues & Solutions
+
+### 🖥️ Display Issues
+
+**Multiple Monitor Problems**:
+- **Configuration Reset**: **[Declarative multi-monitor setup](kde-multimonitor.md)** (persists across reboots)
+- **Scaling Issues**: Per-monitor scaling adjustment
+- **Performance**: Compositor optimization for gaming
+
+**Resolution Problems**:
+- **Custom Resolutions**: xrandr configuration
+- **Refresh Rates**: Optimal gaming vs productivity modes
+- **Color Accuracy**: ICC profile management
+
+### 🧊 Compositor Freezes
+
+**Complete Desktop Freeze (audio still works)**:
+- **Cause**: Qt apps forcing `QT_QPA_PLATFORM=xcb` under Wayland
+- **Symptoms**: XCB SHAPE errors in KWin logs, display frozen, SSH still works
+- **Recovery**: Kill offending app via SSH, switch VT with `sudo chvt 2`
+- **Full Guide**: **[KWin XCB Freeze](kwin-xcb-freeze.md)**
+
+### 🎮 Gaming Issues
+
+**Performance Problems**:
+- **GPU Conflicts**: AI vs gaming scheduling
+- **Audio Latency**: PipeWire optimization
+- **Input Lag**: Compositor bypass for games
+
+**Compatibility Issues**:
+- **Proton**: Steam compatibility layer fixes
+- **Anti-cheat**: BattlEye and EAC support
+- **VR Gaming**: OpenXR configuration
+
+### 🔊 Audio Issues
+
+**PipeWire Problems**:
+- **No Audio**: Service restart procedures
+- **Crackling**: Buffer size optimization
+- **Multiple Outputs**: Audio routing configuration
+
+---
+
+## 📖 Application-Specific Guides
+
+### 🌐 Web Browsing
+
+**[Brave Browser](../desktop/brave.md)**:
+- Privacy configuration
+- Web app creation (PWAs)
+- Performance optimization
+- Extension management
+- Gaming-focused settings
+
+### 💬 Communication
+
+**[Discord](discord-gpu-crash-fix.md)**:
+- Forced XWayland mode (Electron 35 Wayland renderer SIGABRT)
+- GPU crash fix history and investigation notes
+- Related upstream issues tracked
+- Screen sharing configuration
+- Gaming overlay settings
+
+### 🎮 Gaming
+
+**[World of Warcraft](applications/wow.md)**:
+- Wine/Lutris configuration
+- Performance optimization
+- Add-on management
+- Multiboxing setup
+
+**[Game Streaming](applications/sunshine.md)**:
+- Sunshine server setup
+- Remote gaming configuration
+- Network optimization
+- Mobile gaming client setup
+
+---
+
+## 🔧 Maintenance Procedures
+
+### 📅 Regular Maintenance
+
+**Daily**:
+- Check system performance during gaming sessions
+- Verify AI service integration
+- Monitor GPU temperature and usage
+
+**Weekly**:
+- Update desktop applications
+- Clean temporary files and caches
+- Backup desktop configuration
+
+**Monthly**:
+- Review and optimize desktop performance
+- Update gaming configurations
+- Test remote desktop functionality
+
+### 🛠️ Configuration Management
+
+**Backup Procedures**:
+- KDE configuration export
+- Application settings backup
+- Custom keybinding preservation
+- Theme and wallpaper management
+
+**Restore Procedures**:
+- Fresh installation desktop setup
+- Configuration migration between hosts
+- Application data restoration
+
+---
+
+## 📖 Related Documentation
+
+### 🤖 AI Integration
+- **[AI Services](../ai/overview.md)** - Local AI integration with desktop
+- **[AI Applications](../ai/applications.md)** - AI-powered desktop applications
+
+### 🔐 Security
+- **[Desktop Security](../security/overview.md)** - Desktop-specific security measures
+- **[Remote Access](../security/authentication/README.md)** - Secure remote desktop
+
+### 🌐 Services
+- **[File Services](../services/file-services-overview.md)** - Network file access
+- **[Monitoring](../services/monitoring/README.md)** - Desktop system monitoring
+
+### 🛠️ Tools
+- **[Development Tools](../tools/overview.md)** - Command-line development environment
+- **[Terminal Configuration](../tools/tmux.md)** - Terminal optimization
+
+---
+
+**Last Updated**: 2026-01-11
+**Desktop Environment**: KDE Plasma 6 (cmos), labwc (nixvm)
+**Next Review**: 2026-02-11
+**Gaming Performance**: Optimized for high-refresh gaming + AI workloads
+
+---
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🏗️ [Infrastructure](../infrastructure/overview.md) | 🤖 [AI Services](../ai/overview.md)*

@@ -1,0 +1,385 @@
+---
+title: "Storage & Backup"
+description: "*Comprehensive storage management and data protection strategies*"
+---
+
+## 🎯 Storage Overview
+
+This section covers all aspects of data storage, backup strategies, cloud integration, and data protection across the NixOS infrastructure.
+
+### 🏗️ Storage Architecture
+
+```
+┌─────────────┬─────────────┬─────────────┐
+│    cmos     │    misc     │   jimmich   │
+│ (Desktop)   │ (Services)  │ (Storage)   │
+├─────────────┼─────────────┼─────────────┤
+│ Local NVMe  │ System SSD  │ Bulk HDD    │
+│ AI Models   │ Config DB   │ Media/Files │
+│ Gaming      │ Logs/Cache  │ Backups     │
+└─────────────┴─────────────┴─────────────┘
+           ↕         ↕         ↕
+        Cloud Sync  Network Shares  Backup Hub
+```
+
+---
+
+## 📚 Storage Documentation Index
+
+### 💾 Local Storage
+| Host | Storage Type | Capacity | Purpose | Status |
+|------|-------------|----------|---------|--------|
+| **cmos** | NVMe SSD | 2TB | Gaming, AI models, development | ✅ Active |
+| **misc** | SSD | 500GB | System, services, configurations | ✅ Active |
+| **jimmich** | HDD RAID | 8TB | Bulk storage, media, backups | ✅ Active |
+
+### ☁️ Cloud Storage
+| Service | Provider | Purpose | Status | Documentation |
+|---------|----------|---------|--------|---------------|
+| **Google Drive** | Google | Personal cloud sync | ✅ Active | [google-drive.md](google-drive.md) |
+| **Backup Cloud** | Provider | Off-site backup | ⚠️ Planned | Configuration pending |
+
+### 🖨️ Network Services
+| Service | Type | Purpose | Status | Documentation |
+|---------|------|---------|--------|---------------|
+| **Network Printing** | CUPS | Document printing | ✅ Active | [printer.md](printer.md) |
+| **File Sharing** | Samba/CIFS | Cross-host file access | ✅ Active | Network shares config |
+
+### 🛡️ Backup Systems
+| Type | Frequency | Retention | Status | Documentation |
+|------|-----------|-----------|--------|---------------|
+| **Borg Local** | Daily 5 AM | 14 days | ✅ Active | [storage-backup.md](../storage/backup.md) |
+| **Borg Remote** | After local | 14 days | ✅ Active | [storage-backup.md](../storage/backup.md) |
+| **Configuration** | On change | Indefinite | ✅ Active | Git repository |
+| **Manual Backups** | On-demand | Manual | ✅ Available | [storage-backup.md](../storage/backup.md) |
+
+---
+
+## 💽 Local Storage Management
+
+### 🖥️ Desktop Storage (cmos)
+
+**Primary NVMe (2TB)**:
+- **Operating System**: 100GB (NixOS)
+- **Gaming Library**: 800GB (Steam, Lutris)
+- **AI Models**: 300GB (Ollama, training data)
+- **Development**: 200GB (Projects, tools)
+- **User Data**: 400GB (Documents, media)
+- **Cache/Temp**: 200GB (System cache, downloads)
+
+**Storage Optimization**:
+- **SSD TRIM**: Automatic maintenance
+- **Gaming Cache**: Steam shader cache optimization
+- **AI Model Management**: Automatic model cleanup
+- **Development Tools**: Project-specific environments
+
+### 🌐 Server Storage (misc)
+
+**System SSD (500GB)**:
+- **Operating System**: 50GB (NixOS)
+- **Container Storage**: 100GB (Service data)
+- **Database Storage**: 100GB (PostgreSQL, metadata)
+- **Log Storage**: 50GB (System and service logs)
+- **Configuration**: 10GB (Service configurations)
+- **Cache**: 100GB (Reverse proxy cache)
+- **Reserved**: 90GB (System overhead)
+
+**Performance Optimization**:
+- **Database Tuning**: PostgreSQL optimization
+- **Log Rotation**: Automated log cleanup
+- **Cache Management**: Traefik and service caching
+- **Monitoring**: Storage usage alerts
+
+### 🗄️ Bulk Storage (jimmich)
+
+**RAID Array (8TB)**:
+- **Media Storage**: 4TB (Movies, TV, photos)
+- **File Archive**: 2TB (Document archive)
+- **Backup Storage**: 1.5TB (System backups)
+- **Shared Storage**: 500GB (Cross-host shared files)
+
+**RAID Configuration**:
+- **RAID Level**: RAID 5 (redundancy + capacity)
+- **Hot Spare**: 1 drive spare for automatic rebuild
+- **Monitoring**: SMART monitoring and alerts
+- **Maintenance**: Monthly integrity checks
+
+---
+
+## ☁️ Cloud Storage Integration
+
+### 📤 Google Drive Integration
+
+**[Google Drive Configuration](google-drive.md)**:
+- **Access Method**: KDE Online Accounts with KIO worker
+- **Protocol**: `gdrive:/` virtual filesystem in Dolphin
+- **Sync Type**: On-demand streaming (not local sync)
+- **Authentication**: OAuth2 via signond + signon-ui
+
+**Access in Dolphin**:
+```
+gdrive:/                    # Root of Google Drive
+gdrive:/google11/           # Account-specific access
+```
+
+**Key Features**:
+- **Native Integration**: Direct access in KDE Dolphin file manager
+- **On-Demand Access**: Files streamed when accessed (not cached locally)
+- **Drag & Drop**: Full file operations support
+- **No Local Storage**: Files remain in cloud until explicitly downloaded
+
+**Security Considerations**:
+- **OAuth2 Tokens**: GNOME credentials for Google compatibility
+- **KWallet Storage**: Credentials stored securely in KWallet
+- **Scoped Access**: Limited to Drive API permissions
+- **No Local Sync**: Reduces data exposure risk
+
+### 🔄 Access Commands
+
+**Dolphin File Manager**:
+```bash
+# Open Google Drive in Dolphin
+dolphin gdrive:/
+
+# Or use the KDE address bar
+# Type: gdrive:/
+```
+
+**Account Management**:
+```bash
+# Manage accounts via System Settings
+systemsettings kcm_kaccounts
+```
+
+**Note**: Google Drive via KIO is streaming-only. For offline access or local sync, consider using `rclone` manually.
+
+---
+
+## 🛡️ Backup Strategy
+
+### 📋 Backup Architecture
+
+**[Comprehensive Backup Strategy](../storage/backup.md)**:
+
+**Dual-Destination Borg Backup**:
+- **Local**: `/mnt/data/backups/cmos/borg` (immediate access)
+- **Remote**: `nicholas@offsite.bedrosn.com:/mnt/data/cmos/borg` (off-site protection)
+- **Encryption**: repokey-blake2 with agenix-managed passphrase
+- **Deduplication**: Borg's intelligent chunking
+- **Compression**: zstd level 3
+
+### 🔄 Backup Types & Schedules
+
+**Automated Borg Backups (cmos)**:
+- **Local Backup**: Daily at 5:00 AM EDT
+- **Remote Backup**: Triggered automatically after local success
+- **Retention**: 14 daily backups (auto-pruned)
+- **Monitoring**: Log files and systemd journal
+
+**Backed Up Paths**:
+- **System**: `/etc/nixos` (complete configuration)
+- **User Data**: Documents, Pictures, Videos, git repos
+- **Configurations**: KDE settings, SSH keys, bash history
+- **Root Data**: GPG keys, SSH keys
+
+**Manual Backups**:
+- **Borg Manual**: `backup-cmos-manual-borg` (on-demand Borg)
+- **rsync Manual**: `backup-cmos-manual` (timestamped snapshots)
+
+### 🎯 Backup Verification
+
+**Integrity Checks**:
+```bash
+# Verify repository integrity
+borg check /mnt/data/backups/cmos/borg
+
+# Verify specific archive
+borg check /mnt/data/backups/cmos/borg::cmos-20251014-050001
+
+# List all archives
+export BORG_PASSPHRASE=$(sudo cat /run/agenix/borg-backup-passphrase)
+borg list /mnt/data/backups/cmos/borg
+```
+
+**Recovery Testing**:
+- **Monthly**: Test restore of random files
+- **Quarterly**: Full home directory restore test
+- **Annually**: Complete disaster recovery simulation
+
+---
+
+## 🌐 Network Storage
+
+### 📁 File Sharing Configuration
+
+**Samba/CIFS Shares**:
+```
+Network Shares:
+├── //cmos-home/          (cmos personal files)
+├── //misc-home/          (misc service files)  
+├── //jimmich-home/       (bulk storage)
+└── //shared/             (cross-host shared)
+```
+
+**Share Configuration**:
+- **Authentication**: Integrated with system users
+- **Permissions**: Per-user and per-group access
+- **Security**: SMB3 encryption, signed packets
+- **Performance**: Optimized for gigabit network
+
+**Auto-mounting**:
+- **fstab Integration**: Automatic mounting on boot
+- **Credential Management**: Secure credential storage
+- **Failover**: Graceful handling of network issues
+- **Performance**: Cached access for frequently used files
+
+### 🖨️ Network Printing
+
+**[Printer Configuration](printer.md)**:
+- **Print Server**: CUPS on misc host
+- **Driver Management**: Automatic driver installation
+- **Queue Management**: Job scheduling and priority
+- **Security**: Authenticated printing, job encryption
+
+**Supported Features**:
+- **Network Discovery**: Automatic printer detection
+- **Mobile Printing**: Print from phones and tablets
+- **Scan to Network**: Document scanning to shared folders
+- **Print Accounting**: Usage tracking and quotas
+
+---
+
+## 📊 Storage Monitoring
+
+### 📈 Capacity Management
+
+**Storage Monitoring**:
+```bash
+# Check disk usage across all hosts
+df -h
+
+# Check inode usage
+df -i
+
+# Monitor large files
+du -sh /* | sort -hr
+
+# Check RAID status (jimmich)
+cat /proc/mdstat
+```
+
+**Automated Monitoring**:
+- **Capacity Alerts**: Email alerts at 80% capacity
+- **Performance Monitoring**: I/O latency and throughput
+- **Health Monitoring**: SMART status monitoring
+- **Predictive Alerts**: Disk failure prediction
+
+### 🔍 Performance Analysis
+
+**I/O Performance**:
+- **Disk Latency**: Average and peak latency monitoring
+- **Throughput**: Read/write speed measurements
+- **Queue Depth**: Storage queue length monitoring
+- **Cache Efficiency**: File system cache hit rates
+
+**Network Storage Performance**:
+- **SMB Performance**: Network share access speed
+- **Cloud Access Speed**: Google Drive streaming performance
+- **Backup Performance**: Backup and restore speeds
+- **Network Utilization**: Storage-related network usage
+
+---
+
+## 🚨 Disaster Recovery
+
+### 💥 Failure Scenarios
+
+**Hardware Failure Response**:
+1. **Single Disk Failure**: RAID rebuild procedures
+2. **Complete Host Failure**: Restore from backup to new hardware
+3. **Network Failure**: Offline access and sync recovery
+4. **Data Corruption**: Point-in-time recovery procedures
+
+**Recovery Procedures**:
+- **Emergency Boot**: NixOS recovery boot procedures
+- **Data Recovery**: File system recovery tools
+- **Service Recovery**: Rapid service restoration
+- **Network Recovery**: Alternative connectivity methods
+
+### 🔄 Business Continuity
+
+**Service Continuity**:
+- **Failover Procedures**: Automatic service failover
+- **Data Availability**: Ensure critical data accessibility
+- **Communication**: Emergency communication procedures
+- **Documentation**: Offline access to recovery procedures
+
+**Recovery Time Objectives (RTO)**:
+- **Critical Services**: &lt; 1 hour
+- **Standard Services**: &lt; 4 hours
+- **Archive Data**: &lt; 24 hours
+- **Complete System**: &lt; 48 hours
+
+---
+
+## 🛠️ Maintenance Procedures
+
+### 📅 Regular Maintenance
+
+**Daily**:
+- Monitor storage usage and performance
+- Verify backup completion status
+- Check cloud sync status
+
+**Weekly**:
+- Review storage capacity trends
+- Test backup integrity
+- Clean temporary files and caches
+
+**Monthly**:
+- RAID integrity check (jimmich)
+- Storage performance optimization
+- Review and archive old data
+
+**Quarterly**:
+- Full disaster recovery test
+- Storage hardware health check
+- Backup strategy review and optimization
+
+### 🔧 Optimization Tasks
+
+**Performance Optimization**:
+- **SSD Optimization**: TRIM operations and wear leveling
+- **Cache Tuning**: File system cache optimization
+- **Network Optimization**: SMB and sync performance tuning
+- **Database Optimization**: Query performance and storage efficiency
+
+---
+
+## 📖 Related Documentation
+
+### 🏗️ Infrastructure
+- **[Infrastructure Overview](../infrastructure/overview.md)** - Storage architecture
+- **[Host Configuration](../infrastructure-overview.md#host-specifications)** - Per-host storage
+
+### 🔐 Security
+- **[Secret Management](../security/secrets/README.md)** - Secure storage of credentials
+- **[Backup Security](../security/overview.md)** - Backup encryption and security
+
+### 🌐 Services
+- **[File Services](../services/file-services-overview.md)** - Network file services
+- **[Monitoring](../services/monitoring/README.md)** - Storage monitoring
+
+### 🚨 Troubleshooting
+- **[Storage Issues](../troubleshooting/overview.md)** - Storage troubleshooting
+- **[Backup Recovery](../troubleshooting/overview.md)** - Backup and recovery procedures
+
+---
+
+**Last Updated**: 2025-10-14
+**Backup Status**: ✅ Borg backups active (local + remote)
+**Next Review**: 2025-11-14
+**Storage Utilization**: cmos 65%, misc 45%, jimmich 70%
+
+---
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🏗️ [Infrastructure](../infrastructure/overview.md) | 🌐 [Services](../services/overview.md)*

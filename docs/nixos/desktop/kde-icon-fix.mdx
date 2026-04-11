@@ -1,0 +1,94 @@
+---
+title: "KDE Plasma Blank Icons Fix"
+description: "*Declarative fix for blank/missing application icons in the KDE start menu on NixOS*"
+---
+
+## Problem Description
+
+Multiple application icons appear as blank pages in the KDE Kickoff start menu (Dolphin, DroidCam, DevilutionX, Waydroid, etc.), while others (Discord, Claude, 1Password) display correctly.
+
+The affected icons share a pattern: they only exist in uncommon hicolor size directories (`scalable/`, `96x96/`, `512x512/`), not in standard sizes like `256x256/` or `48x48/`.
+
+## Root Cause
+
+Two issues combine to cause this:
+
+### 1. Crippled local `index.theme` (primary cause)
+
+Apps like Brave PWAs and Wine write `~/.local/share/icons/hicolor/index.theme` with only a few size directories:
+
+```ini
+# What Brave/Wine creates (broken):
+Directories=16x16/apps,32x32/apps,48x48/apps,256x256/apps
+```
+
+Since `~/.local/share` comes **first** in `XDG_DATA_DIRS`, Qt reads this crippled `index.theme` as the authority for the hicolor icon theme, completely ignoring the system one at `/run/current-system/sw/share/icons/hicolor/index.theme`.
+
+Any icon that only exists in undeclared directories (`scalable/`, `96x96/`, `512x512/`, etc.) becomes invisible to Qt — it doesn't even know those directories exist.
+
+### 2. Stale KDE caches (secondary cause)
+
+After `nixos-rebuild` or `nix-collect-garbage`, KDE caches (sycoca, QML bytecode, icon cache) may reference old `/nix/store` paths that no longer exist.
+
+### 3. Pinned taskbar icon paths (related)
+
+Plasma 6 stores absolute `/nix/store/.../app.desktop` paths for pinned taskbar icons, which break after garbage collection.
+
+## Solution
+
+A single declarative systemd user service (`kde-icon-fix`) in `modules/desktop/kde.nix` runs on every login before the graphical session starts:
+
+1. **Regenerates `~/.local/share/icons/hicolor/index.theme`** — scans all `*/apps` subdirectories that actually exist and declares them properly (including scalable with MinSize=1, MaxSize=1024)
+2. **Removes stale `icon-theme.cache`** from the local hicolor directory
+3. **Clears stale QML bytecode caches** (compiled against old store paths)
+4. **Clears stale KDE caches** (`icon-cache.kcache`, `ksycoca6_*`)
+5. **Rebuilds sycoca** (KDE's desktop file and icon database)
+6. **Fixes pinned taskbar icons** — converts `/nix/store/.../app.desktop` paths to portable `applications:app.desktop` URIs
+
+## Manual Troubleshooting
+
+If icons go blank mid-session (before next login):
+
+```bash
+# Rebuild sycoca manually
+kbuildsycoca6 --noincremental
+
+# Or restart plasmashell
+plasmashell --replace &
+
+# Nuclear option: clear everything and relog
+rm -f ~/.cache/icon-cache.kcache ~/.cache/ksycoca6_*
+find ~/.cache -path "*/qmlcache" -type d -exec rm -rf {} +
+# Then log out and back in
+```
+
+## Verification
+
+After logging in, check the start menu for previously blank icons. To verify the service ran:
+
+```bash
+systemctl --user status kde-icon-fix
+```
+
+To check the local index.theme was fixed:
+
+```bash
+grep "^Directories=" ~/.local/share/icons/hicolor/index.theme
+# Should list ALL size directories including scalable/apps
+```
+
+## Related Issues
+
+- [NixOS/nixpkgs#308252](https://github.com/NixOS/nixpkgs/issues/308252) — Pinned KDE icons go blank after GC
+- [NixOS/nixpkgs#322023](https://github.com/NixOS/nixpkgs/issues/322023) — Task manager icons break with rebuild
+- [KDE Discuss](https://discuss.kde.org/t/plasma-6-1-3-pinned-kde-application-icons-go-blank-after-gc-nixos/19444) — Plasma 6.1.3 blank icons after GC
+
+## Implementation Details
+
+- **File**: `modules/desktop/kde.nix`
+- **Service**: `kde-icon-fix.service` (systemd user service)
+- **Runs**: Every login, before `graphical-session.target`
+- **Added**: 2026-03-05
+
+---
+*[Home](../README.md) | [Desktop Overview](overview.md)*

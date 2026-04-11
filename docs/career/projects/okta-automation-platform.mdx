@@ -1,0 +1,95 @@
+---
+title: "Okta Automation Platform — 35 Tools for Identity Operations"
+description: "Managing 1,000+ users across Okta involves repetitive, error-prone manual work: access investigations, group membership audits, bulk provisioning/deprovision..."
+---
+
+## The Problem
+
+Managing 1,000+ users across Okta involves repetitive, error-prone manual work: access investigations, group membership audits, bulk provisioning/deprovisioning, MFA factor exports, compliance evidence collection, and cross-system synchronization. Each task requires navigating the Okta admin console, running API calls manually, and cross-referencing data across systems.
+
+## What Was Built
+
+A library of 35 purpose-built automation tools (~25,600 lines of Python) covering the full identity lifecycle.
+
+### Investigation & Forensics
+
+| Tool | Purpose |
+|------|---------|
+| `investigation-toolkit` | Forensic investigation suite — user lookups, system log analysis, group membership tracing, access timeline reconstruction. Integrated into the `it-support-ticket` Claude Code skill for AI-assisted triage. |
+| `get-user-access` | Full access report for a user — all apps, groups, roles |
+| `get-user-details` | Comprehensive user profile dump |
+| `get-user-devices` | Device inventory for a specific user |
+| `check-provisioning-logs` | Provisioning event analysis for troubleshooting app assignment failures |
+| `verify-okta-status` | Bulk user status verification |
+
+### Bulk Operations
+
+| Tool | Purpose |
+|------|---------|
+| `add-users-to-group` | Bulk group membership additions from CSV |
+| `remove-users-from-group` | Bulk group membership removals with audit logging |
+| `add-single-user-groups` | Add one user to multiple groups in a single operation |
+| `copy-groups-membership` | Clone membership from one group to another |
+| `suspend-users` | Bulk user suspension with safety checks |
+
+### Reporting & Compliance
+
+| Tool | Purpose |
+|------|---------|
+| `app-access-reporter` | Generate access reports for specific applications |
+| `app-user-access-report` | Cross-reference users against app assignments |
+| `audit-group-app` | Audit which apps are assigned to which groups |
+| `export-2fa-factors` | Export MFA factor enrollment for compliance audits |
+| `export-org-levels` | Organization hierarchy export |
+| `export-users` | Full user directory export |
+| `export-users-gws-groups` | Cross-system export: Okta users with Google Workspace group memberships |
+| `evidence-add` | Compliance evidence collection for audits |
+| `report-adoption` | Application adoption metrics |
+
+### Cross-System Integration
+
+| Tool | Purpose |
+|------|---------|
+| `kandji-device-sync` | Synchronize Okta user data with Kandji MDM device records |
+| `rippling-compare` | Compare Okta user data against Rippling HR system |
+| `check-o365-access` | Verify Microsoft 365 access matches Okta group membership |
+
+### Group & Membership Management
+
+| Tool | Purpose |
+|------|---------|
+| `list-groups` | Export all Okta groups with metadata |
+| `list-groups-users` | Export all groups with full member lists |
+| `list-group-members` | Members of a specific group |
+| `list-inactive-users` | Identify users inactive beyond a threshold |
+| `push-groups-membership-exporter` | Export push group membership for SCIM-provisioned apps |
+| `mailing-list-membership-exporter` | Export mailing list memberships |
+
+### Specialized Tools
+
+| Tool | Purpose |
+|------|---------|
+| `scan-wfa` | Work-from-abroad detection via Okta login geography |
+| `scan-wfa-jira` | WFA detection with automatic Jira ticket creation |
+| `get-user-inactive` | Identify dormant accounts |
+| `get-user-profiles-from-file` | Batch profile lookups from input file |
+| `get-device-by-serial` | Device lookup by serial number |
+| `get-org-levels` | Organization unit hierarchy extraction |
+
+## Architecture Patterns
+
+All tools follow consistent patterns:
+- **1Password credential retrieval** with environment variable fallback
+- **Rate limit handling** with exponential backoff
+- **Pagination** through all Okta API responses (critical — the org has ~2,000 group rules)
+- **CSV/JSON output** for downstream processing
+- **Progress bars** (tqdm) for long-running operations
+- **Dry-run modes** where destructive operations are involved
+
+## Impact
+
+- Investigation toolkit reduces L3 ticket investigation from 30-60 minutes to 5-10 minutes
+- Bulk operations that previously took hours of manual console work execute in minutes
+- Compliance exports that required manual screenshot collection are now automated with full data capture
+- Cross-system audits (Okta vs. Kandji, Okta vs. O365, Okta vs. Rippling) catch access drift automatically
+- The entire suite is reusable — any ISS team member can run these tools without understanding the Okta API

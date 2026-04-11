@@ -1,0 +1,333 @@
+---
+title: "Operations & Maintenance"
+description: "*Best practices, deployment procedures, and routine maintenance*"
+---
+
+## 🎯 Operations Overview
+
+This section covers operational procedures, best practices, deployment strategies, and routine maintenance tasks for the NixOS infrastructure.
+
+### 🛠️ Core Operations
+
+```
+Operations & Maintenance
+├── 🚀 Deployment        (Fresh installs, updates)
+├── 📋 Best Practices    (Operational guidelines)
+├── 🔄 Maintenance       (Routine tasks, monitoring)
+├── 📊 Performance       (Optimization, tuning)
+└── 🚨 Emergency         (Incident response)
+```
+
+---
+
+## 📚 Operations Documentation Index
+
+### 🚀 Deployment & Setup
+
+| Procedure | Purpose | Status | Documentation |
+|-----------|---------|--------|---------------|
+| **Fresh Deployment** | New host setup | ✅ Active | [fresh.md](fresh.md) |
+| **Bootstrap System** | Automated installation | ✅ Active | [bootstrap/](bootstrap/) |
+| **System Updates** | NixOS rebuilds | ✅ Active | Update procedures |
+| **Service Deployment** | New service setup | ✅ Active | Service deployment guide |
+| **Configuration Management** | Config tracking | ✅ Active | Git-based configuration |
+
+### 📋 Best Practices
+
+| Area | Purpose | Status | Documentation |
+|------|---------|--------|---------------|
+| **Operational Guidelines** | Daily operations | ✅ Active | [practices.md](practices.md) |
+| **Security Procedures** | Security operations | ✅ Active | Security best practices |
+| **Backup Procedures** | Data protection | ✅ Active | Backup operational guide |
+| **Monitoring Setup** | System monitoring | ✅ Active | Monitoring procedures |
+
+### 🔄 Maintenance Tasks
+
+| Task | Frequency | Purpose | Status |
+|------|-----------|---------|--------|
+| **System Updates** | Weekly | Security and stability | ✅ Automated |
+| **Backup Verification** | Daily | Data integrity | ✅ Automated |
+| **Log Rotation** | Daily | Storage management | ✅ Automated |
+| **Performance Review** | Monthly | Optimization | ✅ Manual |
+
+---
+
+## 🚀 Deployment Procedures
+
+### 🆕 Fresh Host Deployment
+
+**[Fresh Installation Guide](fresh.md)**:
+
+**Bootstrap Methods**:
+- **[Automated ISO Installation](bootstrap/automated-iso.md)** - Server hosts (misc, jimmich)
+- **[YubiKey Secure Bootstrap](bootstrap/yubikey-secure.md)** - Desktop hosts with high security
+
+**Bootstrap Process**:
+1. **Base Installation**: Automated NixOS installation via USB or secure loader
+2. **Network Configuration**: Static IP and SSH access (pre-configured)
+3. **Secret Deployment**: Copy agenix keys to target host
+4. **Flake Deployment**: Deploy full configuration from cmos
+5. **Service Configuration**: Host-specific service activation
+6. **Verification**: Confirm services and secrets are working
+
+**Deployment Commands**:
+```bash
+# Local host deployment
+nixos-rebuild switch --flake .#$(hostname)
+
+# Remote host deployment  
+nixos-rebuild switch --flake .#misc --target-host misc.home.arpa
+
+# Test deployment (non-persistent)
+nixos-rebuild test --flake .#$(hostname)
+
+# Check deployment changes
+nixos-rebuild dry-run --flake .#$(hostname)
+```
+
+### 🔄 System Updates
+
+**Update Process**:
+```bash
+# Update flake inputs
+nix flake update
+
+# Review changes
+git diff flake.lock
+
+# Test update on non-critical host
+nixos-rebuild test --flake .#test-host
+
+# Deploy to production
+nixos-rebuild switch --flake .#production-host
+```
+
+**Update Schedule**:
+- **Security Updates**: Within 24 hours of release
+- **Regular Updates**: Weekly maintenance window
+- **Major Updates**: Monthly with full testing
+- **Emergency Updates**: Immediate deployment if critical
+
+---
+
+## 📋 Best Practices
+
+### 🛡️ Security Operations
+
+**[Operational Best Practices](practices.md)**:
+
+**Daily Security Tasks**:
+- Monitor authentication logs for anomalies
+- Verify backup completion and integrity
+- Check service health and performance
+- Review system logs for security events
+
+**Security Protocols**:
+- **Principle of Least Privilege**: Minimal access rights
+- **Defense in Depth**: Multiple security layers
+- **Regular Audits**: Quarterly security reviews
+- **Incident Response**: Documented response procedures
+
+### 📊 Performance Management
+
+**Performance Monitoring**:
+- **System Metrics**: CPU, memory, disk, network
+- **Service Metrics**: Response time, availability, errors
+- **User Experience**: Login time, interface responsiveness
+- **Resource Planning**: Capacity planning and scaling
+
+**Optimization Procedures**:
+```bash
+# System performance analysis
+htop
+iotop -ao
+netstat -i
+
+# Service performance analysis
+systemctl status --all
+journalctl --vacuum-time=7d
+
+# Database optimization (if applicable)
+# Service-specific optimization procedures
+```
+
+### 🔄 Change Management
+
+**Configuration Changes**:
+1. **Planning**: Document change requirements
+2. **Testing**: Test in isolated environment
+3. **Approval**: Review and approve changes
+4. **Implementation**: Deploy with monitoring
+5. **Verification**: Confirm successful deployment
+6. **Documentation**: Update documentation
+
+**Rollback Procedures**:
+```bash
+# NixOS generation rollback
+nixos-rebuild switch --rollback
+
+# Git-based configuration rollback
+git revert <commit-hash>
+nixos-rebuild switch --flake .#$(hostname)
+
+# Service-specific rollback
+systemctl stop <service>
+# Restore previous configuration
+systemctl start <service>
+```
+
+---
+
+## 🔧 Maintenance Procedures
+
+### 📅 Regular Maintenance Schedule
+
+**Daily Tasks**:
+- System health monitoring via Cockpit
+- Backup verification and status check
+- Security log review for anomalies
+- Service availability confirmation
+
+**Weekly Tasks**:
+- System update deployment
+- Performance metrics review
+- Log cleanup and rotation
+- Documentation updates
+
+**Monthly Tasks**:
+- Comprehensive security review
+- Performance optimization analysis
+- Infrastructure capacity planning
+- Disaster recovery testing
+
+**Quarterly Tasks**:
+- Complete security audit
+- Hardware health assessment
+- Business continuity review
+- Technology stack evaluation
+
+### 🛠️ Preventive Maintenance
+
+**System Health Checks**:
+```bash
+# Disk health monitoring
+smartctl -a /dev/sda
+
+# Memory testing (schedule during maintenance window)
+memtest86+
+
+# Network interface monitoring
+ethtool eth0
+
+# Service dependency verification
+systemctl list-dependencies --all
+```
+
+**Cleanup Procedures**:
+```bash
+# NixOS generation cleanup
+nix-collect-garbage -d
+
+# Log cleanup
+journalctl --vacuum-time=30d
+
+# Temporary file cleanup
+find /tmp -type f -atime +7 -delete
+
+# Cache cleanup
+nix-store --gc
+```
+
+---
+
+## 📊 Monitoring & Alerting
+
+### 📈 System Monitoring
+
+**Monitoring Stack**:
+- **Cockpit**: Web-based system management
+- **Glances**: Real-time system metrics
+- **Journald**: Centralized logging
+- **Custom Scripts**: Automated health checks
+
+**Key Metrics**:
+- **Availability**: Service uptime and responsiveness
+- **Performance**: Response times and throughput
+- **Resource Usage**: CPU, memory, disk, network
+- **Security**: Authentication failures, intrusion attempts
+
+### 🚨 Alerting Configuration
+
+**Alert Thresholds**:
+- **Critical**: Service down, security breach
+- **Warning**: High resource usage, performance degradation
+- **Info**: Maintenance events, configuration changes
+
+**Notification Methods**:
+- **Email**: Critical alerts and daily summaries
+- **Dashboard**: Real-time status display
+- **Logs**: Detailed event recording
+
+---
+
+## 🚨 Emergency Procedures
+
+### 🆘 Incident Response
+
+**Emergency Response Process**:
+1. **Detection**: Automated monitoring or manual discovery
+2. **Assessment**: Determine severity and impact
+3. **Containment**: Prevent further damage
+4. **Resolution**: Fix the immediate problem
+5. **Recovery**: Restore normal operations
+6. **Post-Incident**: Document and improve processes
+
+**Emergency Contacts**:
+- **System Administrator**: Primary response
+- **Security Team**: Security incidents
+- **Network Team**: Infrastructure issues
+- **Management**: Business impact communication
+
+### 🔄 Business Continuity
+
+**Critical Service Recovery**:
+- **Authentication Services**: Keycloak, OAuth2 proxy
+- **Monitoring Services**: Cockpit, Glances
+- **File Services**: Samba shares, backup systems
+- **Desktop Services**: KDE, development environment
+
+**Recovery Time Objectives**:
+- **Authentication**: 15 minutes
+- **Monitoring**: 30 minutes
+- **File Services**: 1 hour
+- **Desktop Services**: 2 hours
+
+---
+
+## 📖 Related Documentation
+
+### 🏗️ Infrastructure
+- **[Infrastructure Overview](../infrastructure/overview.md)** - System architecture
+- **[Host Configuration](../infrastructure-overview.md#deployment-architecture)** - Deployment details
+
+### 🔐 Security
+- **[Security Operations](../security-overview.md#security-procedures)** - Security procedures
+- **[Secret Management](../security/secrets/README.md)** - Operational security
+
+### 🌐 Services
+- **[Service Management](../services-overview.md#service-management)** - Service operations
+- **[Monitoring Setup](../services/monitoring/README.md)** - Monitoring procedures
+
+### 🚨 Troubleshooting
+- **[Emergency Procedures](../troubleshooting-overview.md#emergency-procedures)** - Incident response
+- **[System Recovery](../troubleshooting-overview.md#system-recovery)** - Recovery procedures
+
+---
+
+**Last Updated**: 2025-10-03
+**Operations Team**: System Administration
+**Next Review**: 2025-11-03
+**SLA Target**: 99.9% availability
+
+---
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🏗️ [Infrastructure](../infrastructure/overview.md) | 🔧 [Best Practices](practices.md)*

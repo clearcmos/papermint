@@ -1,0 +1,46 @@
+---
+title: "KDE Font Configuration Analysis"
+description: "File: /home/nicholas/.config/kdeglobals"
+---
+
+## Current Applied Settings (2025-08-23)
+
+### KDE Display Settings
+**File:** `/home/nicholas/.config/kdeglobals`
+- **Scale Factor**: 1.5x (line 162: `ScaleFactor=1.5`)
+- **Screen Scale Factors**: All displays set to 1.5x (line 163)
+- **Theme**: Breeze Dark (line 139: `LookAndFeelPackage=org.kde.breezedark.desktop`)
+
+### Font DPI Override
+**File:** `/home/nicholas/.config/kcmfonts`
+- **Forced Font DPI**: 144 (line 2: `forceFontDPI=144`)
+- This overrides automatic DPI detection and works with 1.5x scaling
+
+### NixOS Font Configuration
+**File:** `/etc/nixos/kde.nix` (lines 67-109)
+
+**Font Packages Installed:**
+- noto-fonts, noto-fonts-cjk-sans, noto-fonts-emoji
+- liberation_ttf, ubuntu_font_family
+- inter, roboto, fira-code, fira-code-symbols
+
+**Font Rendering Settings:**
+- **Antialiasing**: Enabled (line 87)
+- **Hinting**: Full hinting enabled with autohint (lines 91-95)
+- **Subpixel Rendering**: RGB order with default LCD filter (lines 97-100)
+- **Embedded Bitmaps**: Enabled for better emoji rendering (line 89)
+
+**Default Font Stack:**
+- **Sans-serif**: Ubuntu → Inter → Noto Sans → Liberation Sans
+- **Serif**: Liberation Serif → Noto Serif  
+- **Monospace**: Fira Code → Liberation Mono
+- **Emoji**: Noto Color Emoji
+
+## Font Rendering Configuration Details
+
+The current setup provides:
+
+1. **Full hinting** (line 94: `style = "full"`) - Maximum text crispness
+2. **RGB subpixel rendering** (line 98: `rgba = "rgb"`) - Standard LCD subpixel layout
+3. **Autohinting enabled** (line 93) - Automatic font hint adjustments
+4. **Default LCD filter** (line 99) - Balanced subpixel filtering

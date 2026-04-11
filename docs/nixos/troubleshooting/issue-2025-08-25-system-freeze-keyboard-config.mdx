@@ -1,0 +1,176 @@
+---
+title: "System Crash Investigation and Resolution"
+description: "Date: August 25, 2025"
+---
+
+**System**: MSI Desktop - 13th Gen Intel i7-13700K + AMD RX 6800 XT  
+**NixOS Version**: 25.05.808519.9cb344e96d5b  
+
+## Problem Description
+
+System experiencing random hard freezes requiring forced reboots:
+- Freezes occurred during terminal use (not just GUI applications)
+- System would freeze and kick user back to KDE login screen
+- Login screen itself would freeze after password entry
+- Generation mismatch issue (system asking for generation 61 when current is 81)
+
+## Investigation Process
+
+### 1. Initial Diagnostics
+- **Memory**: 32GB RAM with plenty available, no OOM kills detected
+- **Hardware errors**: No machine check exceptions or ECC errors found
+- **Filesystem**: ext4 filesystem healthy, no I/O errors
+- **Thermal**: System temperatures normal (28°C thermal zone)
+- **Services**: No failed systemd services
+
+### 2. Log Analysis
+Key findings from system logs:
+```bash
+# Watchdog warnings in kernel logs
+Aug 25 00:27:52 cmos kernel: watchdog: watchdog0: watchdog did not stop!
+
+# No kernel panics or hardware errors detected
+# Discord crashes present but not root cause of freezes
+```
+
+### 3. Configuration Analysis
+**Root causes identified in NixOS configuration:**
+
+#### Issue #1: Disabled NMI Watchdog (`kernel-tweaks.nix`)
+```nix
+boot.kernelParams = [ "nmi_watchdog=0" ];
+```
+**Problem**: Prevents detection and recovery from kernel hangs/deadlocks
+
+#### Issue #2: Aggressive AMD GPU Parameters (`amd-gpu.nix`)
+```nix
+boot.kernelParams = [ 
+  "amdgpu.pcie_atomics=1"           # Can cause PCIe bus hangs
+  "amdgpu.ppfeaturemask=0xffffffff" # Enables ALL power features (unstable)
+  "amdgpu.gpu_recovery=1"           # Recovery enabled but ineffective without NMI
+];
+```
+**Problem**: Over-aggressive GPU settings causing system instability
+
+### 4. Generation Mismatch Explanation
+- System correctly running generation 81
+- Boot loader only keeps subset of generation entries, not all generations
+- This is normal NixOS behavior, not a problem
+
+## Resolution Applied
+
+### Fix #1: Re-enable NMI Watchdog
+**File**: `/etc/nixos/kernel-tweaks.nix`
+```nix
+# Before
+boot.kernelParams = [ "nmi_watchdog=0" ];
+
+# After  
+boot.kernelParams = [ ];  # NMI watchdog now enabled by default
+```
+
+### Fix #2: Disable Aggressive GPU Optimizations
+**File**: `/etc/nixos/amd-gpu.nix`
+```nix
+# Before
+enableOptimizations = true;
+
+# After
+enableOptimizations = false;  # Conservative GPU settings
+```
+
+## Expected Results
+
+With these changes:
+1. **NMI Watchdog**: System can detect and potentially recover from kernel hangs
+2. **Conservative GPU**: Eliminates PCIe bus instability and GPU-related freezes
+3. **Stability**: Should eliminate random freezes and login screen hangs
+
+## Testing Plan
+
+After applying fixes:
+1. Monitor system for 48-72 hours under normal workload
+2. Test intensive GPU workloads (gaming, AI inference)
+3. Verify no more random freezes or login issues
+
+## Rollback Plan
+
+If issues persist:
+```bash
+# Temporarily roll back to previous generation
+sudo nixos-rebuild switch --rollback
+
+# Or boot into older generation from GRUB menu
+```
+
+## Future Optimizations
+
+Once stability is confirmed, can gradually re-enable optimizations:
+1. Test with only `amdgpu.gpu_recovery=1` first
+2. Add `amdgpu.pcie_atomics=1` if stable
+3. **Never** use `amdgpu.ppfeaturemask=0xffffffff` on this hardware
+
+## Notes
+
+- AMD RX 6800 XT (gfx1030) is sensitive to aggressive power management
+- Intel 13th gen + AMD GPU combo requires conservative PCIe settings
+- NMI watchdog is critical for system stability monitoring
+- Always test GPU optimizations incrementally, not all at once
+
+---
+
+## UPDATE: Real Root Cause Discovered (2025-08-25 00:45)
+
+**Investigation revealed the actual culprit was keyboard configuration changes, not AMD GPU settings.**
+
+### New Findings
+
+#### The Real Problem: Keyboard Configuration
+- **Complex dual-layout**: `layout = "us,ca"` with `variant = ",fr-legacy"`
+- **Qt Platform Failures**: Dual layouts caused Qt platform plugin initialization failures
+- **KDE Login Issues**: SDDM couldn't start Wayland sessions due to keyboard complexity
+
+#### Timeline Correction
+- **August 23rd**: AMD GPU settings added - **worked fine**
+- **After Generation 81**: Complex keyboard config added
+- **Result**: KDE desktop login failures, not system freezes
+
+### Current Status (Generation 83)
+✅ **Keyboard**: Reverted to simple US layout in `configuration.nix`  
+✅ **AMD GPU**: Re-enabled optimizations (were working fine before)  
+✅ **Expected**: Both freezing AND login issues should be resolved
+
+### If AMD Settings Still Cause Problems
+
+**Step 1: Disable GPU optimizations only**
+```bash
+# Edit /etc/nixos/amd-gpu.nix
+enableOptimizations = false;  
+./rebuild.sh
+```
+
+**Step 2: Incremental re-enabling (if needed)**
+```bash
+# Try conservative settings first
+boot.kernelParams = [ 
+  "amdgpu.gpu_recovery=1"    # Only GPU recovery
+];
+```
+
+**Step 3: Last resort - minimal GPU config**
+```bash
+# Remove all optimizations, use basic amdgpu only
+boot.kernelParams = [ ];  # Empty array
+# Keep hardware.graphics basic
+```
+
+### Testing Priority
+1. **First test**: KDE desktop login (should work now)
+2. **Second test**: System stability with full AMD optimizations
+3. **If unstable**: Follow AMD disable steps above
+
+---
+
+**Status**: Keyboard reverted, AMD optimizations restored  
+**Next Review**: Test KDE login, then monitor for 24-48 hours  
+**Last Updated**: August 25, 2025 00:45

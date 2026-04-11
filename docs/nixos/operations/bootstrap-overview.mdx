@@ -1,0 +1,129 @@
+---
+title: "Bootstrap System Documentation"
+description: "*Comprehensive guide for deploying fresh NixOS hosts using automated and secure bootstrap methods*"
+---
+
+## 🎯 Overview
+
+This section documents the bootstrap infrastructure for deploying fresh NixOS installations across the homelab. Two distinct methods are available depending on the target host type and security requirements.
+
+---
+
+## 📚 Bootstrap Methods
+
+### 🤖 [Automated ISO Installation](automated-iso.md)
+**Best for: Server hosts (misc, jimmich)**
+
+Fully automated USB boot installation with zero manual intervention:
+- Auto-detects and wipes target disk (excludes USB)
+- Creates standardized 3-partition layout
+- Installs NixOS with static IP and SSH pre-configured
+- Enables immediate SSH access from cmos
+- Ready for flake deployment in 5-10 minutes
+
+**Use cases:**
+- Fresh server installations
+- Quick disaster recovery
+- Standardized deployment pipeline
+
+### 🔐 [YubiKey Secure Bootstrap](yubikey-secure.md)
+**Best for: Desktop hosts with high security requirements (cmos)**
+
+Hardware-authenticated remote bootstrap using YubiKey PIV:
+- ChaCha20-Poly1305 encryption with age-plugin-yubikey
+- Ed25519 cryptographic signatures with minisign
+- Physical touch requirement for decryption
+- Safe for public hosting (all secrets hardware-encrypted)
+
+**Use cases:**
+- Secure desktop deployments
+- Remote bootstrap over untrusted networks
+- Publicly hosted bootstrap infrastructure
+
+---
+
+## 🗺️ Quick Navigation
+
+| Method | Host Type | Setup Time | Security Level | Documentation |
+|--------|-----------|------------|----------------|---------------|
+| Automated ISO | Servers | 5-10 min | Medium (LAN-only) | [automated-iso.md](automated-iso.md) |
+| YubiKey Secure | Desktop | 15-20 min | High (Hardware) | [yubikey-secure.md](yubikey-secure.md) |
+
+---
+
+## 🔧 Common Workflow
+
+All bootstrap methods follow this general pattern:
+
+1. **Prepare bootstrap media** - Build ISO or create secure loader
+2. **Boot target system** - From USB or network boot
+3. **Automated installation** - Let the bootstrap run unattended
+4. **Deploy secrets** - Copy agenix keys to target
+5. **Deploy flake configuration** - Full system configuration from cmos
+6. **Verify deployment** - Check services and network configuration
+
+---
+
+## 📋 Prerequisites
+
+### All Methods
+- Access to cmos (deployment host)
+- Git repository at `/etc/nixos` with current configuration
+- Target host hardware configured for boot (UEFI/BIOS)
+- Network connectivity (LAN or WAN depending on method)
+
+### Automated ISO Method
+- USB drive (8GB+ recommended)
+- Physical access to target machine
+- UEFI boot capability
+
+### YubiKey Secure Method
+- YubiKey 5 series with PIV support
+- NixOS with `services.pcscd.enable = true`
+- 1Password service account token
+- Web hosting for bootstrap files (optional)
+
+---
+
+## 🚨 Critical Considerations
+
+### Security
+- **Automated ISO**: Suitable for LAN-only deployments, contains public SSH keys
+- **YubiKey Secure**: Suitable for WAN deployments, all secrets hardware-encrypted
+- Both methods require agenix key transfer after installation
+
+### Network Configuration
+- Automated ISO: Uses static IP (192.168.1.5 for misc)
+- YubiKey Secure: Configurable during bootstrap script creation
+- Verify interface names match configuration (`en*`, `enp3s0f0`, etc.)
+
+### Disk Safety
+- **Both methods are destructive** - target disk is completely wiped
+- Automated ISO includes safety checks (excludes USB, minimum size)
+- Always verify target disk before proceeding
+
+---
+
+## 📖 Detailed Documentation
+
+- **[Automated ISO Installation](automated-iso.md)** - Complete guide for server bootstrap
+- **[YubiKey Secure Bootstrap](yubikey-secure.md)** - Hardware-authenticated deployment
+- **[Bootstrap Scripts](scripts.md)** - Reference for helper scripts and automation
+
+---
+
+## 🔗 Related Documentation
+
+- [Fresh Host Deployment](../fresh.md) - General deployment strategy
+- [Secret Management](../security/secrets-agenix.md) - Agenix workflow
+- [Network Configuration](../infrastructure/overview.md) - Network setup details
+
+---
+
+**Last Updated**: 2025-10-03
+**Maintained By**: Infrastructure Team
+**Next Review**: 2025-11-03
+
+---
+
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🔧 [Operations](../README.md)*

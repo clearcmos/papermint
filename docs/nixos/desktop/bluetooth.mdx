@@ -1,0 +1,137 @@
+---
+title: "Bluetooth Configuration"
+description: "Bluetooth configuration for cmos desktop with Soundcore Life Q30 headphones support. Includes a Meta+F11 keyboard shortcut to toggle Bluetooth and auto-conne..."
+---
+
+**Last Updated**: 2026-01-03
+
+## Overview
+
+Bluetooth configuration for cmos desktop with Soundcore Life Q30 headphones support. Includes a **Meta+F11** keyboard shortcut to toggle Bluetooth and auto-connect headphones.
+
+**See also:** [Soundcore OpenSCQ30](soundcore-openscq30.md) - Query firmware version, control ANC/EQ settings from CLI
+
+**Location**: `/etc/nixos/modules/desktop/bluetooth.nix`
+
+## 🎹 Keyboard Shortcut (Meta+F11)
+
+Press **Meta+F11** to:
+- **If Bluetooth ON**: Turn Bluetooth off
+- **If Bluetooth OFF**: Turn Bluetooth on and auto-connect Q30 headphones
+
+### Technical Implementation
+
+The shortcut uses a **KWin script + systemd** approach because Plasma 6 Wayland doesn't properly grab keys for service shortcuts. The implementation:
+
+1. **bt-toggle script** (`/run/current-system/sw/bin/bt-toggle`) - Shell script that toggles BT and connects Q30
+2. **bt-toggle.service** - systemd user service that runs the bt-toggle script
+3. **KWin script** (`~/.local/share/kwin/scripts/bttoggle/`) - Registers shortcut at compositor level
+4. **configure-bt-toggle-kwin-script.service** - systemd user service that configures KWin script on login
+
+The KWin script registers a shortcut that KWin grabs at the compositor level, then calls systemd via D-Bus to start `bt-toggle.service`.
+
+**Important**: The KWin script metadata.json must include `"KPackageStructure": "KWin/Script"` for Plasma 6 compatibility.
+
+### Manual Shortcut Configuration
+
+If the shortcut isn't working after a fresh install:
+1. Open **System Settings** → **Keyboard** → **Shortcuts**
+2. Expand **KWin**
+3. Find **"Toggle Bluetooth"**
+4. Set to **Meta+F11**
+
+## 📋 Current Configuration
+
+```nix
+# Enable Bluetooth support with Intel AX211 workaround
+hardware.bluetooth = {
+  enable = true;
+  powerOnBoot = true;
+  settings = {
+    General = {
+      Experimental = true;
+      FastConnectable = true;
+    };
+    Policy = {
+      AutoEnable = true;
+    };
+  };
+};
+
+# Kernel parameter workaround for Intel AX211 A2DP issues
+boot.extraModprobeConfig = ''
+  options btusb disable_msft_ext=1
+'';
+
+# PipeWire with Bluetooth codec support
+services.pipewire = {
+  enable = true;
+  alsa.enable = true;
+  alsa.support32Bit = true;
+  pulse.enable = true;
+  wireplumber.enable = true;
+  wireplumber.extraConfig.bluetoothEnhancements = {
+    "monitor.bluez.properties" = {
+      "bluez5.enable-sbc-xq" = true;
+      "bluez5.enable-msbc" = true;
+      "bluez5.enable-hw-volume" = true;
+      "bluez5.roles" = [ "a2dp_sink" "a2dp_source" "hsp_hs" "hsp_ag" "hfp_hf" "hfp_ag" ];
+      "bluez5.codecs" = [ "sbc" "sbc_xq" "aac" "ldac" "aptx" "aptx_hd" ];
+    };
+  };
+};
+```
+
+## 🔧 Troubleshooting
+
+### Check Bluetooth Status
+```bash
+bluetoothctl show
+bluetoothctl devices
+```
+
+### Check Q30 Connection
+```bash
+bluetoothctl info E8:EE:CC:46:F1:AC
+pactl list cards | grep -A 25 Q30
+```
+
+### Force A2DP Profile (High Quality Audio)
+```bash
+pactl set-card-profile bluez_card.E8_EE_CC_46_F1_AC a2dp-sink
+```
+
+### Check KWin Script Status
+```bash
+qdbus org.kde.KWin /Scripting org.kde.kwin.Scripting.isScriptLoaded bttoggle
+```
+
+### Check Shortcut Binding
+```bash
+qdbus --literal org.kde.kglobalaccel /kglobalaccel org.kde.KGlobalAccel.action 285212730
+# Should return: {"kwin", "Toggle Bluetooth", ...}
+```
+
+### Test bt-toggle Script Manually
+```bash
+bt-toggle
+```
+
+## 📦 Packages
+
+- `bluez` - Bluetooth protocol stack
+- `bluez-tools` - Additional Bluetooth utilities
+- `kdePackages.bluedevil` - KDE Bluetooth integration
+- `libnotify` - Desktop notifications for bt-toggle
+
+## 🐛 Known Issues
+
+### Intel AX211 A2DP Issues
+The Intel AX211 Bluetooth adapter has known issues with A2DP codec negotiation. The `disable_msft_ext=1` kernel parameter works around this.
+
+### Plasma 6 Wayland Service Shortcuts
+Service shortcuts (`.desktop` files with keyboard shortcuts) don't properly grab keys in Plasma 6 Wayland. The workaround is to use KWin scripts which handle key grabs at the compositor level, combined with systemd user services for actual execution via D-Bus.
+
+---
+
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md)*

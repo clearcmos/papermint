@@ -1,0 +1,209 @@
+---
+title: "Jellyfin User Management"
+description: "This document explains how to manage Jellyfin users declaratively using agenix secrets."
+---
+
+**Last Updated**: 2025-10-30
+
+This document explains how to manage Jellyfin users declaratively using agenix secrets.
+
+## Overview
+
+Jellyfin users are defined in a JSON secret file (`jellyfin-users-config.age`) that contains:
+- Username (used for login)
+- Display name (shown in Jellyfin UI)
+- Hashed password (Jellyfin's pbkdf2-sha512 format)
+
+The system automatically provisions these users with:
+- ✅ Full media playback access (all libraries)
+- ✅ Content downloading enabled
+- ❌ **Content deletion disabled** (users cannot delete media)
+- ❌ Administrator rights disabled
+- ❌ Public sharing disabled
+
+## Secret Format
+
+The `jellyfin-users-config.age` secret uses this JSON structure:
+
+```json
+{
+  "users": [
+    {
+      "username": "alice",
+      "displayName": "Alice Smith",
+      "hashedPassword": "$PBKDF2$iterations=1000$dTRENDJEOTM1MDYyNQ$Kw81EDxoLkQb3IO+YFP6TQ5NQCFjBatA1E1zB8W8DLs="
+    },
+    {
+      "username": "bob",
+      "displayName": "Bob Johnson",
+      "hashedPassword": "$PBKDF2$iterations=1000$RjdDOThGRkZCMjQ5NDdF$someOtherHashHere"
+    }
+  ]
+}
+```
+
+## Adding New Users
+
+### Step 1: Generate Jellyfin Password Hash
+
+Jellyfin uses a specific pbkdf2-sha512 format. Generate it using this Python script:
+
+```bash
+python3 << 'EOF'
+import hashlib
+import base64
+import secrets
+import getpass
+
+# Get password from user
+password = getpass.getpass("Enter password: ")
+
+# Generate salt (16 random bytes)
+salt = secrets.token_bytes(16)
+
+# Jellyfin uses PBKDF2-SHA512 with 1000 iterations
+iterations = 1000
+hash_bytes = hashlib.pbkdf2_hmac('sha512', password.encode('utf-8'), salt, iterations, dklen=256)
+
+# Encode in Jellyfin's format
+salt_b64 = base64.b64encode(salt).decode('utf-8')
+hash_b64 = base64.b64encode(hash_bytes).decode('utf-8')
+
+print(f"$PBKDF2$iterations={iterations}${salt_b64}${hash_b64}")
+EOF
+```
+
+### Step 2: Update the Secret
+
+1. **Decrypt the existing secret** (from cmos, since it has edit access):
+   ```bash
+   cd /etc/nixos/secrets
+   nix run github:ryantm/agenix -- -d jellyfin-users-config.age -i ../keys/cmos-agenix.key > /tmp/jellyfin-users.json
+   ```
+
+2. **Edit the JSON** to add your new user:
+   ```bash
+   nano /tmp/jellyfin-users.json
+   # Add new user object to the "users" array
+   ```
+
+3. **Re-encrypt the secret**:
+   ```bash
+   cd /etc/nixos/secrets
+   cat /tmp/jellyfin-users.json | nix run github:ryantm/agenix -- -e jellyfin-users-config.age -i ../keys/cmos-agenix.key
+   ```
+
+4. **Clean up temporary file**:
+   ```bash
+   shred -u /tmp/jellyfin-users.json
+   ```
+
+5. **Deploy to jimmich**:
+   ```bash
+   cd /etc/nixos
+   git add secrets/jellyfin-users-config.age
+   nixos-rebuild switch --flake .#jimmich --target-host jimmich.home.arpa
+   ```
+
+### Step 3: Backup to 1Password
+
+```bash
+python3 /etc/nixos/scripts/backup-secrets.py
+```
+
+## Initial Setup
+
+If the secret doesn't exist yet, create it from scratch:
+
+```bash
+# Create the JSON file
+cat > /tmp/jellyfin-users.json << 'EOF'
+{
+  "users": [
+    {
+      "username": "alice",
+      "displayName": "Alice Smith",
+      "hashedPassword": "PASTE_GENERATED_HASH_HERE"
+    }
+  ]
+}
+EOF
+
+# Encrypt it
+cd /etc/nixos/secrets
+cat /tmp/jellyfin-users.json | nix run github:ryantm/agenix -- -e jellyfin-users-config.age -i ../keys/cmos-agenix.key
+
+# Clean up
+shred -u /tmp/jellyfin-users.json
+
+# Add to git and deploy
+cd /etc/nixos
+git add secrets/jellyfin-users-config.age
+nixos-rebuild switch --flake .#jimmich --target-host jimmich.home.arpa
+```
+
+## User Permissions
+
+All normal users (non-admin) are provisioned with these permissions:
+
+| Permission | Enabled | Notes |
+|------------|---------|-------|
+| Media Playback | ✅ Yes | Can watch/listen to all content |
+| All Folders Access | ✅ Yes | Access to all media libraries |
+| Content Downloading | ✅ Yes | Can download media for offline viewing |
+| Content Deletion | ❌ **No** | **Cannot delete media files** |
+| Administrator | ❌ No | Cannot access admin console |
+| Public Sharing | ❌ No | Cannot share content publicly |
+| Sync Transcoding | ❌ No | No offline sync transcoding |
+
+The admin user (nicholas) retains full administrator permissions.
+
+## Technical Implementation
+
+**Location**: `/etc/nixos/modules/services/jellyfin.nix`
+
+The module:
+1. Reads the decrypted secret at evaluation time using `builtins.readFile`
+2. Parses the JSON structure with `builtins.fromJSON`
+3. Maps each user to `declarative-jellyfin` user format
+4. Merges with the admin user (nicholas)
+5. Passes to `services.declarative-jellyfin.users`
+
+**Secret Definition**:
+- `/etc/nixos/secrets/secrets.nix` - Defines `jellyfin-users-config.age` with access for cmos (edit) and jimmich (read)
+- `/etc/nixos/modules/core/security/secrets.nix` - Declares the secret for agenix
+
+## Troubleshooting
+
+### Users not appearing after rebuild
+
+Check that the secret exists and is decrypted:
+```bash
+# On jimmich
+sudo cat /run/agenix/jellyfin-users-config
+```
+
+### Invalid JSON format
+
+Validate your JSON before encrypting:
+```bash
+jq . /tmp/jellyfin-users.json
+```
+
+### Wrong password hash format
+
+Jellyfin requires the specific format: `$PBKDF2$iterations=1000$SALT_BASE64$HASH_BASE64`
+
+Use the Python script above to generate correct hashes.
+
+### Permissions issues
+
+If users can delete content, verify the configuration applied correctly:
+```bash
+nixos-rebuild test --flake .#jimmich --target-host jimmich.home.arpa
+ssh jimmich.home.arpa 'systemctl status declarative-jellyfin.service'
+```
+
+---
+
+*🏠 [Home](../README.md) | 📚 [Services Overview](./overview.md)*

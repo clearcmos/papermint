@@ -1,0 +1,569 @@
+---
+title: "️ Tools & Utilities"
+description: "*Command-line tools, development utilities, and system administration helpers*"
+---
+
+## 🎯 Tools Overview
+
+This section covers all command-line tools, development utilities, and system administration helpers used across the NixOS infrastructure.
+
+### 🏗️ Tool Categories
+
+```
+Tools & Utilities
+├── 🖥️ Terminal Tools       (tmux, shell utilities)
+├── 📖 Documentation        (man pages, help systems)  
+├── 🔧 Development Tools     (git, editors, debuggers)
+├── 🌐 Network Tools         (curl, ssh, monitoring)
+├── 📊 System Tools          (monitoring, diagnostics)
+└── 🎨 Productivity Tools    (QR codes, media tools)
+```
+
+---
+
+## 📚 Tools Documentation Index
+
+### 🖥️ Terminal & Shell Tools
+
+| Tool | Purpose | Status | Documentation |
+|------|---------|--------|---------------|
+| **tmux** | Terminal multiplexer | ✅ Active | [tmux.md](tmux.md) |
+| **zsh** | Enhanced shell | ✅ Active | Shell configuration |
+| **fish** | User-friendly shell | ⚠️ Available | Alternative shell |
+| **starship** | Shell prompt | ✅ Active | Prompt customization |
+
+### 📖 Documentation & Help
+
+| Tool | Purpose | Status | Documentation |
+|------|---------|--------|---------------|
+| **man pages** | System documentation | ✅ Active | [man.md](man.md) |
+| **gissue** | GitHub issue manager | ✅ Active | [reference-man-gissue.md](../reference/man-gissue.md) |
+| **create-repo** | GitHub repo creation | ✅ Active | [reference-man-create-repo.md](../reference/man-create-repo.md) |
+| **gpush** | Multi-repo git sync | ✅ Active | Smart commit + push workflow |
+| **thog** | Git history secret scan | ✅ Active | [Secret Removal](../security/git-secret-removal.md) |
+| **thog-all** | Filesystem secret scan | ✅ Active | [Secret Removal](../security/git-secret-removal.md) |
+| **gscan** | Multi-repo scanner | ✅ Active | [Secret Removal](../security/git-secret-removal.md) |
+| **suricata** | Alert suppression | ✅ Active | [reference-man-suricata.md](../reference/man-suricata.md) |
+| **tldr** | Simplified man pages | ✅ Available | Quick command reference |
+| **cheat** | Command cheatsheets | ✅ Available | Cheatsheet system |
+
+### 🔧 Development Tools
+
+| Tool | Purpose | Status | Configuration |
+|------|---------|--------|---------------|
+| **git** | Version control | ✅ Active | Core + workflow functions |
+| **VSCode** | Primary IDE | ✅ Active | Extensions and settings |
+| **vim/neovim** | Terminal editor | ✅ Active | Vim configuration |
+| **emacs** | Alternative editor | ⚠️ Available | Emacs configuration |
+
+### 🌐 Network & Communication
+
+| Tool | Purpose | Status | Usage |
+|------|---------|--------|-------|
+| **curl** | HTTP client | ✅ Active | API testing, downloads |
+| **wget** | File downloader | ✅ Active | Bulk downloads |
+| **ssh** | Secure shell | ✅ Active | Remote access |
+| **rsync** | File synchronization | ✅ Active | Backup and sync |
+
+### 📊 System Administration
+
+| Tool | Purpose | Status | Usage |
+|------|---------|--------|-------|
+| **htop** | Process monitor | ✅ Active | System monitoring |
+| **iotop** | I/O monitoring | ✅ Active | Disk performance |
+| **nethogs** | Network monitor | ✅ Active | Network usage |
+| **glances** | System overview | ✅ Active | Comprehensive monitoring |
+
+### 🎨 Productivity & Utilities
+
+| Tool | Purpose | Status | Documentation |
+|------|---------|--------|---------------|
+| **t** (timer-cli) | CLI timer with notifications | ✅ Active | [timer-cli.md](timer-cli.md) |
+| **cpv** | Konsole clipboard tool | ✅ Active | Copy visible terminal text |
+| **QR Generator** | QR code creation | ✅ Active | [qr.md](qr.md) |
+| **ImageMagick** | Image processing | ✅ Active | Image manipulation |
+| **ffmpeg** | Media processing | ✅ Active | Video/audio conversion |
+| **jq** | JSON processor | ✅ Active | JSON manipulation |
+
+---
+
+---
+
+## 🖥️ Terminal Environment
+
+### 🔗 tmux Configuration
+
+**[Terminal Multiplexer Setup](tmux.md)**:
+
+**Key Features**:
+- **Session Management**: Persistent terminal sessions
+- **Window Management**: Multiple terminal windows
+- **Pane Splitting**: Vertical and horizontal splits
+- **Remote Sessions**: Detachable remote sessions
+
+**Essential tmux Commands**:
+```bash
+# Session management
+tmux new-session -s session-name
+tmux attach-session -t session-name
+tmux list-sessions
+
+# Window management
+Ctrl-b c        # Create new window
+Ctrl-b n        # Next window
+Ctrl-b p        # Previous window
+
+# Pane management
+Ctrl-b %        # Split vertically
+Ctrl-b "        # Split horizontally
+Ctrl-b arrow    # Navigate panes
+```
+
+**Configuration Highlights**:
+- **Mouse Support**: Enabled for easy navigation
+- **Status Bar**: Custom status line with system info
+- **Key Bindings**: Vim-like navigation
+- **Session Persistence**: Automatic session saving
+
+### 🐚 Shell Configuration
+
+**Zsh Setup**:
+- **Oh My Zsh**: Framework with plugins
+- **Autocompletion**: Enhanced command completion
+- **History**: Shared history across sessions
+- **Aliases**: Productive command shortcuts
+
+**Key Aliases**:
+```bash
+# System management
+alias ll='ls -alF'
+alias la='ls -A'
+alias l='ls -CF'
+
+# NixOS specific
+alias nrs='nixos-rebuild switch'
+alias nrt='nixos-rebuild test'
+alias nrd='nixos-rebuild dry-run'
+
+# Git shortcuts
+alias gs='git status'
+alias ga='git add'
+alias gc='git commit'
+alias gp='git push'
+```
+
+---
+
+## 📖 Documentation Tools
+
+### 📚 Manual System
+
+**[Man Page System](man.md)**:
+
+**Usage Patterns**:
+```bash
+# Standard man pages
+man command-name
+man 5 file-format
+man -k keyword
+
+# Custom man pages
+man gissue          # Git issue management
+man local-tool      # Local tool documentation
+
+# Search and navigation
+apropos keyword     # Search man pages
+whatis command      # Brief description
+```
+
+**Custom Documentation**:
+- **Local Tools**: Custom man pages for infrastructure tools
+- **Procedures**: System administration procedures
+- **Reference**: Quick reference guides
+- **Examples**: Command usage examples
+
+### 🔍 Help Systems
+
+**Integrated Help**:
+- **tldr**: Simplified command examples
+- **cheat**: Interactive cheatsheets
+- **--help**: Built-in command help
+- **info**: GNU info documentation
+
+**Quick Reference**:
+```bash
+# Quick command examples
+tldr rsync
+tldr git
+
+# Interactive cheatsheets
+cheat ssh
+cheat tmux
+
+# Built-in help
+command --help
+command -h
+```
+
+---
+
+## 🔧 Development Environment
+
+### 👨‍💻 Editor Configuration
+
+**VSCode Setup**:
+- **Extensions**: Language support, Git integration
+- **Settings**: Consistent formatting and behavior
+- **Themes**: Dark theme for reduced eye strain
+- **Debugging**: Integrated debugging support
+
+**Vim/Neovim Configuration**:
+- **Plugin Manager**: vim-plug or Packer
+- **Language Support**: LSP integration
+- **File Navigation**: Fuzzy finding and tree view
+- **Git Integration**: Built-in Git support
+
+### 🌐 Network Development Tools
+
+**API Development**:
+```bash
+# HTTP testing
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"key": "value"}' https://api.example.com
+
+# JSON formatting
+echo '{"key":"value"}' | jq '.'
+
+# API documentation testing
+curl -s https://api.example.com/docs | jq '.paths'
+```
+
+**Network Debugging**:
+```bash
+# Connection testing
+telnet hostname port
+nc -zv hostname port
+
+# DNS debugging
+nslookup hostname
+dig hostname
+
+# SSL/TLS testing
+openssl s_client -connect hostname:443
+```
+
+---
+
+## 📊 System Administration Tools
+
+### 🔍 Monitoring & Diagnostics
+
+**System Monitoring**:
+```bash
+# Process monitoring
+htop                    # Interactive process viewer
+ps aux | grep process   # Process search
+pgrep -f pattern       # Process find by pattern
+
+# Resource monitoring
+iotop                  # I/O monitoring
+nethogs               # Network usage by process
+df -h                  # Disk usage
+free -h                # Memory usage
+```
+
+**Performance Analysis**:
+```bash
+# CPU analysis
+top
+sar -u 1 10           # CPU utilization
+
+# Memory analysis
+vmstat 1 10           # Virtual memory stats
+cat /proc/meminfo     # Detailed memory info
+
+# Disk analysis
+iostat -x 1 10        # Disk I/O statistics
+lsblk                 # Block device info
+```
+
+### 🌐 Network Administration
+
+**Network Monitoring**:
+```bash
+# Network interface stats
+ip -s link show
+cat /proc/net/dev
+
+# Connection monitoring
+ss -tuln              # Socket statistics
+netstat -tuln         # Network connections
+lsof -i               # Open network files
+
+# Bandwidth monitoring
+iftop                 # Interface bandwidth
+vnstat                # Network statistics
+```
+
+**Network Troubleshooting**:
+```bash
+# Connectivity testing
+ping -c 4 hostname
+traceroute hostname
+mtr hostname          # Combined ping/traceroute
+
+# Port scanning
+nmap -p 80,443 hostname
+nc -zv hostname port
+
+# DNS troubleshooting
+dig @8.8.8.8 hostname
+nslookup hostname
+```
+
+---
+
+## 🎨 Productivity Tools
+
+### 📋 Konsole Utilities
+
+**cpv Command** (Copy Visible):
+
+**Purpose**: Copies all visible text from the currently active Konsole tab to the system clipboard, useful for capturing terminal output without scrollback.
+
+**Usage**:
+```bash
+# Copy visible text from current tab
+cpv
+
+# Works from root shell (auto-detects user session)
+sudo -i
+cpv
+```
+
+**Features**:
+- ✅ **Active Tab Detection**: Automatically captures the currently focused Konsole tab
+- ✅ **Multi-tab Support**: Works correctly even with multiple Konsole tabs open
+- ✅ **Root-aware**: Automatically switches to the user's session when run as root
+- ✅ **KDE Integration**: Uses Klipper (KDE clipboard manager) for reliable clipboard management
+- ✅ **Wayland Compatible**: Full support for Wayland display server
+
+**How It Works**:
+1. Detects the active Konsole window and session via D-Bus
+2. Retrieves all displayed (visible) text using Konsole's D-Bus API
+3. Copies text to system clipboard via Klipper
+4. Persists across terminal sessions
+
+**Use Cases**:
+- Capture command output for documentation
+- Copy error messages for troubleshooting
+- Share terminal sessions with team members
+- Quick clipboard access without mouse selection
+
+**Module**: `modules/desktop/konsole-utils.nix`
+
+### ⏱️ CLI Timer with Notifications
+
+**t Command** (timer-cli):
+
+**Purpose**: Simple command-line timer that sends push notifications to your phone via Firebase Cloud Messaging when timers complete. Perfect for timing tasks, pomodoro sessions, cooking, or any timed activity.
+
+**Usage**:
+```bash
+# Basic timer formats
+t 60s          # 60 seconds
+t 3m           # 3 minutes
+t 2h           # 2 hours
+
+# With spaces (flexible parsing)
+t 60 seconds   # 60 seconds
+t 3 minutes    # 3 minutes
+t 2 hours      # 2 hours
+
+# Decimal times
+t 1.5h         # 1 hour 30 minutes
+t 2.25m        # 2 minutes 15 seconds
+t 30.5s        # 30.5 seconds
+```
+
+**Features**:
+- ✅ **Flexible Time Parsing**: Supports s/sec/seconds, m/min/minutes, h/hr/hours with decimals
+- ✅ **Push Notifications**: FCM notifications to your phone when timer completes
+- ✅ **Clear Feedback**: Shows timer duration and completion time on start
+- ✅ **Secure Secrets**: Uses agenix for Firebase credentials (service account + device token)
+- ✅ **OAuth2 Authentication**: Secure FCM HTTP v1 API with JWT-based authentication
+
+**Example Session**:
+```bash
+$ t 25m
+⏱️  Timer set for 25m
+🕐 Will notify at 03:45:30 PM
+
+# ... 25 minutes later ...
+
+⏰ Timer complete! Sending notification...
+✅ Notification sent!
+```
+
+**How It Works**:
+1. Parses time argument into seconds (supports flexible formats)
+2. Calculates end time and displays countdown info
+3. Sleeps for the specified duration (can Ctrl+C to cancel)
+4. Generates OAuth2 access token using Firebase service account JWT
+5. Sends data-only FCM notification to registered device token
+6. Displays success/failure status
+
+**Push Notification Format**:
+- **Title**: "⏰ Timer Complete"
+- **Body**: "{duration} timer has finished" (e.g., "25m timer has finished")
+- **Priority**: High (Android) for full-screen alarm-style alerts
+
+**Configuration**:
+- **Module**: `modules/desktop/timer-cli.nix`
+- **Secrets** (agenix):
+  - `firebase-service-account.age` - FCM service account credentials
+  - `fcm-device-token.age` - Target device FCM token
+- **Dependencies**: Python 3 with requests, pyjwt, cryptography
+
+**Use Cases**:
+- 🍅 **Pomodoro Sessions**: `t 25m` for focused work intervals
+- ⏲️ **Cooking Timers**: `t 45m` for recipes or baking
+- 💪 **Workout Intervals**: `t 90s` for exercise circuits
+- 🧘 **Meditation**: `t 10m` for timed meditation sessions
+- 📚 **Study Sessions**: `t 1.5h` for deep work blocks
+
+**Keyboard Interrupt**:
+```bash
+$ t 1h
+⏱️  Timer set for 1h
+🕐 Will notify at 04:30:00 PM
+^C
+⚠️  Timer cancelled
+```
+
+**Module**: `modules/desktop/timer-cli.nix`
+**Full Documentation**: [timer-cli.md](timer-cli.md)
+
+### 📱 QR Code Generation
+
+**[QR Code Tools](qr.md)**:
+
+**Command-line QR Generation**:
+```bash
+# Generate QR code for text
+qrencode -t UTF8 "Hello World"
+
+# Generate QR code to file
+qrencode -o qrcode.png "https://example.com"
+
+# WiFi QR code
+qrencode -t UTF8 "WIFI:T:WPA;S:NetworkName;P:Password;;"
+```
+
+**Use Cases**:
+- **WiFi Sharing**: Quick WiFi credential sharing
+- **URL Sharing**: Easy link sharing to mobile devices
+- **Configuration**: Quick config transfer
+- **Authentication**: 2FA setup codes
+
+### 🎬 Media Processing
+
+**Image Processing**:
+```bash
+# ImageMagick operations
+convert image.jpg -resize 800x600 resized.jpg
+convert *.jpg combined.pdf
+mogrify -format png *.jpg
+
+# Batch operations
+for file in *.jpg; do
+  convert "$file" -resize 50% "thumb_$file"
+done
+```
+
+**Video Processing**:
+```bash
+# ffmpeg operations
+ffmpeg -i input.mp4 -c:v libx264 -crf 23 output.mp4
+ffmpeg -i input.mp4 -ss 00:01:00 -t 00:00:30 clip.mp4
+
+# Audio extraction
+ffmpeg -i video.mp4 -vn -acodec copy audio.aac
+```
+
+---
+
+## 🔧 Tool Configuration Management
+
+### ⚙️ Dotfiles Management
+
+**Configuration Files**:
+```
+~/
+├── .tmux.conf          # tmux configuration
+├── .vimrc              # Vim configuration
+├── .zshrc              # Zsh configuration
+├── .gitconfig          # Git configuration
+└── .config/            # Modern config directory
+    ├── nvim/           # Neovim configuration
+    ├── Code/           # VSCode settings
+    └── starship.toml   # Starship prompt
+```
+
+**Version Control**:
+- **Git Repository**: Dotfiles tracked in git
+- **Synchronization**: Consistent across hosts
+- **Backup**: Configuration backup strategy
+- **Restoration**: Quick setup on new systems
+
+### 🔄 Tool Updates
+
+**Update Procedures**:
+```bash
+# NixOS package updates
+nix-channel --update
+nixos-rebuild switch
+
+# Manual tool updates
+npm update -g           # Node.js tools
+pip install --upgrade   # Python tools
+cargo install --force   # Rust tools
+```
+
+**Configuration Validation**:
+```bash
+# Test configurations before applying
+tmux source-file ~/.tmux.conf
+vim -c 'checkhealth' -c 'quit'
+zsh -n ~/.zshrc
+```
+
+---
+
+## 📖 Related Documentation
+
+### 🏗️ Infrastructure
+- **[Infrastructure Overview](../infrastructure/overview.md)** - System architecture
+- **[Host Configuration](../infrastructure-overview.md#host-specifications)** - Per-host tools
+
+### 🖥️ Desktop
+- **[Desktop Environment](../desktop/overview.md)** - Desktop tools integration
+- **[Development Setup](../desktop-overview.md#development-environment)** - IDE configuration
+
+### 🔐 Security
+- **[Secret Management](../security/secrets/README.md)** - Secure tool configuration
+- **[SSH Configuration](../security/overview.md)** - Secure remote access
+
+### 🚨 Troubleshooting
+- **[Diagnostic Tools](../troubleshooting-overview.md#diagnostic-tools)** - Troubleshooting tools
+- **[System Analysis](../troubleshooting/overview.md)** - System diagnostic procedures
+
+---
+
+**Last Updated**: 2025-11-16
+**Tool Environment**: NixOS with declarative configuration
+**Next Review**: 2025-12-16
+**Configuration**: Synchronized across all hosts
+
+---
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🖥️ [Desktop](../desktop/overview.md) | 🔧 [Operations](../operations/overview.md)*

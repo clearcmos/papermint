@@ -1,0 +1,132 @@
+---
+title: "KDE Plasma Logout/Restart Hang Fix"
+description: "> Status: REMOVED — These workarounds were removed from kde.nix as the underlying Plasma/SDDM issue was fixed in later updates. Kept for historical reference."
+---
+
+## Problem Description
+
+When clicking Logout, Restart, or Shutdown in KDE Plasma 6 (Wayland), the system may freeze with:
+- Session appearing to hang indefinitely
+- Being kicked to a black terminal (tty1) instead of SDDM login screen
+- `getty@tty1` service repeatedly restarting
+- `plasma-shutdown` process hanging and not terminating
+
+## Root Cause
+
+The issue is a race condition between:
+1. KDE's `plasma-shutdown` process hanging during session cleanup
+2. SDDM trying to reclaim the display
+3. Getty service attempting to spawn a login prompt on tty1
+
+This creates a conflict where no service can properly control the display.
+
+## Solution Implementation
+
+Applied fixes in `/etc/nixos/modules/desktop/kde.nix`:
+
+### 1. Plasma Shutdown Timeout Service
+```nix
+systemd.user.services.plasma-shutdown-timeout = {
+  description = "Kill hung plasma-shutdown processes";
+  wantedBy = [ "graphical-session.target" ];
+  serviceConfig = {
+    Type = "oneshot";
+    RemainAfterExit = true;
+    ExecStop = "${pkgs.bash}/bin/bash -c 'timeout 5 ${pkgs.procps}/bin/pkill plasma-shutdown || ${pkgs.procps}/bin/pkill -9 plasma-shutdown || true'";
+  };
+};
+```
+- Automatically kills hung `plasma-shutdown` after 5 seconds
+- Runs on any session end (logout/restart/shutdown)
+
+### 2. Getty Conflict Prevention
+```nix
+systemd.services."getty@tty1" = {
+  enable = false;
+  serviceConfig = {
+    Restart = lib.mkForce "no";
+  };
+};
+```
+- Prevents getty from interfering with SDDM on tty1
+- Stops the restart loops seen in logs
+
+### 3. Display Manager Timeout
+```nix
+systemd.services.display-manager.serviceConfig = {
+  TimeoutStopSec = "30s";
+  KillMode = "mixed";
+  SendSIGKILL = "yes";
+};
+```
+- Ensures SDDM doesn't hang indefinitely
+- Force-kills stuck processes after 30 seconds
+
+## Troubleshooting
+
+### Check if the issue is occurring:
+```bash
+# Check for hung plasma-shutdown
+ps aux | grep plasma-shutdown
+
+# Check getty restart loops
+journalctl -u getty@tty1 --since "10 minutes ago"
+
+# Check session status
+loginctl list-sessions
+```
+
+### Manual intervention if still stuck:
+```bash
+# Kill hung plasma-shutdown
+pkill -9 plasma-shutdown
+
+# Restart display manager
+sudo systemctl restart display-manager
+```
+
+## Reverting the Fix
+
+### Method 1: Restore from backup
+```bash
+# List available backups
+ls -la /mnt/data/backups/kde.nix.backup-*
+
+# Restore the backup
+sudo cp /mnt/data/backups/kde.nix.backup-[timestamp] /etc/nixos/modules/desktop/kde.nix
+
+# Rebuild system
+sudo nixos-rebuild switch --flake .#cmos
+```
+
+### Method 2: Comment out the fixes
+Edit `/etc/nixos/modules/desktop/kde.nix` and comment out the three blocks marked with "TO REVERT":
+- Lines 20-30: plasma-shutdown-timeout service
+- Lines 32-39: getty@tty1 override
+- Lines 41-47: display-manager timeout
+
+Then rebuild:
+```bash
+sudo nixos-rebuild switch --flake .#cmos
+```
+
+## Testing the Fix
+
+1. Save all work
+2. Click Logout/Restart in KDE
+3. Should complete within 5-10 seconds
+4. Should return to SDDM login screen (logout) or reboot (restart)
+
+If issues persist after 30 seconds, the system will force-recover automatically.
+
+## Related Issues
+
+- KDE Bug: https://bugs.kde.org/show_bug.cgi?id=484426 (example, may not be exact match)
+- Affects: KDE Plasma 6.3.x on Wayland
+- NixOS specific: Interaction between systemd, SDDM, and getty services
+
+## Implementation Date
+
+- Added: 2025-09-08
+- File: `/etc/nixos/modules/desktop/kde.nix`
+- Backup: `/mnt/data/backups/kde.nix.backup-*`

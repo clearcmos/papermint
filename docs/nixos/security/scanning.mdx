@@ -1,0 +1,518 @@
+---
+title: "Security Scanning Infrastructure"
+description: "Comprehensive vulnerability scanning and security auditing for all NixOS hosts using native tooling and automation."
+---
+
+**Last Updated:** 2025-12-05
+
+Comprehensive vulnerability scanning and security auditing for all NixOS hosts using native tooling and automation.
+
+---
+
+## 📋 Overview
+
+**Deployed On:** misc, jimmich, cmos
+**Module:** `/etc/nixos/modules/security/scanning.nix`
+**Automation:** Monthly Lynis audits via systemd timer
+
+### Tools Installed
+
+| Tool | Version | Purpose | Usage |
+|------|---------|---------|-------|
+| **Lynis** | 3.1.4 | Host hardening auditor | Automated monthly + manual |
+| **Nmap** | 7.98 | Network/vulnerability scanner | Manual (via `nix-vulnscan`) |
+| **rustscan** | 2.3.0 | Fast port scanner | Manual |
+| **masscan** | 1.3.2 | Ultra-fast network scanner | Manual |
+| **OWASP ZAP** | Latest | Web application scanner | Manual (via `nix-zapscan`) |
+| **Nuclei** | Latest | Template-based vulnerability scanner | Manual (via `nix-nuclei`) |
+
+---
+
+## 🚀 Quick Start
+
+### Run Your First Scan
+
+```bash
+# Host hardening audit (safe, read-only)
+sudo systemctl start lynis-audit
+
+# Network vulnerability scan
+nix-vulnscan 192.168.1.5
+
+# Comprehensive penetration test (WAN attack surface)
+sudo nix-pentest --quick
+
+# Web application scan (passive)
+nix-zapscan https://security.bedrosn.com
+
+# Template-based vulnerability scan
+nix-nuclei https://security.bedrosn.com
+```
+
+### View Results
+
+```bash
+# Lynis reports
+ls -lh /var/log/security-scans/lynis/
+cat /var/log/security-scans/lynis/lynis-report-$(hostname)-*.txt | head -50
+
+# Pentest reports (HTML, JSON, text)
+ls -lh /var/log/security-scans/pentest/
+firefox /var/log/security-scans/pentest/pentest-*.html
+
+# Nuclei reports
+ls -lh /var/log/security-scans/nuclei/
+
+# ZAP reports (HTML)
+ls -lh /var/log/security-scans/zap/
+firefox /var/log/security-scans/zap/zap-baseline-*.html
+
+# Lynis service logs
+journalctl -u lynis-audit -n 50
+```
+
+---
+
+## 🛡️ Lynis - Host Hardening Audit
+
+### What It Does
+
+Lynis audits your Linux host configuration against security best practices:
+- Kernel hardening settings
+- SSH configuration
+- Firewall rules
+- File permissions
+- Password policies
+- Running services
+- Compliance checks (HIPAA, PCI-DSS, ISO27001)
+
+### Automated Monthly Audits
+
+**Schedule:** First of every month (randomized 1-hour delay)
+**Service:** `lynis-audit.service`
+**Timer:** `lynis-audit.timer`
+
+```bash
+# Check timer status
+systemctl status lynis-audit.timer
+
+# Check next run time
+systemctl list-timers lynis-audit.timer
+
+# View last run
+journalctl -u lynis-audit.service -n 50
+```
+
+### Manual Scans
+
+```bash
+# Quick audit
+sudo lynis audit system --quick
+
+# Full audit via systemd service (recommended)
+sudo systemctl start lynis-audit
+
+# View hardening index
+grep "hardening_index=" /var/log/security-scans/lynis/lynis-report.dat
+```
+
+### Understanding Results
+
+**Hardening Index:** Score out of 100
+- **85-100:** Excellent
+- **70-84:** Good
+- **50-69:** Average (needs improvement)
+- **&lt;50:** Poor (significant hardening needed)
+
+**Common Recommendations:**
+- Configure password hashing rounds
+- Implement PAM password strength testing
+- Separate partitions for /home, /tmp, /var
+- Harden systemd services with `systemd-analyze security`
+
+---
+
+## 🌐 Nmap - Network Vulnerability Scanner
+
+### What It Does
+
+Scans network hosts for:
+- Open ports and running services
+- Service versions and vulnerabilities (using NSE scripts)
+- OS detection
+- Known CVEs
+
+### Helper Script: `nix-vulnscan`
+
+Wrapper around Nmap with vulnerability detection scripts enabled.
+
+```bash
+# Scan single host
+nix-vulnscan 192.168.1.5
+
+# Scan subnet
+nix-vulnscan 192.168.1.0/24
+
+# Scan with custom output directory
+nix-vulnscan bedrosn.com /tmp/scans
+```
+
+**Output Files:**
+- `nmap-vulnscan-&lt;timestamp>.nmap` - Human-readable report
+- `nmap-vulnscan-&lt;timestamp>.xml` - XML format (for tools)
+- `nmap-vulnscan-&lt;timestamp>.gnmap` - Grep-able format
+
+### Advanced Nmap Usage
+
+```bash
+# Service version detection only
+nmap -sV 192.168.1.5
+
+# Full vulnerability scan with all NSE scripts
+nmap -sV --script vuln 192.168.1.5
+
+# Fast port scan then detailed analysis
+rustscan -a 192.168.1.5 | nmap -sV -sC -
+
+# Scan specific ports
+nmap -p 22,80,443,8080-8099 192.168.1.5
+```
+
+---
+
+## 🔬 Comprehensive Penetration Testing
+
+### What It Does
+
+The `nix-pentest` tool provides unified penetration testing across all WAN-exposed services:
+- **TLS/SSL configuration analysis** via testssl.sh
+- **Nuclei vulnerability scanning** with 8000+ templates
+- **OWASP ZAP web application testing** (baseline and full modes)
+- **HSTS and security header verification**
+- **Consolidated reporting** with known finding annotations
+
+### Helper Script: `nix-pentest`
+
+```bash
+# WAN mode (default) - External attack surface
+sudo nix-pentest                              # Full WAN scan of all bedrosn.com services
+sudo nix-pentest --quick                      # Fast scan (critical/high only)
+sudo nix-pentest --no-zap                     # Skip ZAP scans (faster)
+
+# LAN mode - Internal network assessment
+sudo nix-pentest --lan                        # Full LAN scan of all hosts
+sudo nix-pentest --lan -t misc                # LAN scan specific host
+sudo nix-pentest --lan -t cmos,jimmich        # LAN scan multiple hosts
+```
+
+**Output Files:**
+- `/var/log/security-scans/pentest/pentest-&lt;timestamp>.html` - HTML report
+- `/var/log/security-scans/pentest/pentest-&lt;timestamp>.json` - JSON data
+- `/var/log/security-scans/pentest/pentest-&lt;timestamp>.txt` - Plain text
+
+### Understanding Known Finding Annotations
+
+The pentest tool includes built-in knowledge of false positives and intentional security decisions:
+
+**False Positives** (marked `[FALSE POSITIVE]`):
+- **Weak cipher suite: MD5/NULL** - Nmap reports ciphers from TLS handshake advertisement, but Traefik's actual config uses only modern ciphers (TLS 1.2+). MD5/NULL are never used in practice.
+
+**Known/Accepted Findings** (marked `[KNOWN]`):
+- **Missing X-XSS-Protection header** - This header is deprecated and can actually cause XSS vulnerabilities in older browsers. Modern browsers use CSP instead.
+
+### Report Summary Categories
+
+The pentest report categorizes findings:
+- **False Positives**: Findings that are scanner artifacts, not real issues
+- **Known/Accepted**: Intentional security decisions (documented and accepted)
+- **Actionable**: Real findings that require investigation or remediation
+
+---
+
+## 🕷️ OWASP ZAP - Web Application Scanner
+
+### What It Does
+
+Tests web applications for:
+- XSS (Cross-Site Scripting)
+- SQL Injection
+- CSRF (Cross-Site Request Forgery)
+- Security header issues
+- Cookie vulnerabilities
+- Information disclosure
+
+### Helper Script: `nix-zapscan`
+
+Wrapper around OWASP ZAP Docker container with three scan modes.
+
+#### Baseline Scan (Passive - Safe)
+
+Quick passive analysis without attacking the application.
+
+```bash
+nix-zapscan https://security.bedrosn.com
+```
+
+**Runtime:** 1-5 minutes
+**Safe:** Yes, won't trigger Fail2ban
+**Finds:** Missing headers, cookie issues, info disclosure
+
+#### Full Scan (Active - Aggressive)
+
+Comprehensive scan with active attacks.
+
+```bash
+nix-zapscan https://service.bedrosn.com full
+```
+
+**Runtime:** 10-30+ minutes
+**Safe:** May trigger Fail2ban (use LAN whitelist)
+**Finds:** XSS, SQLi, command injection, actual vulnerabilities
+
+#### API Scan
+
+Specialized scan for REST/GraphQL APIs.
+
+```bash
+nix-zapscan https://api.bedrosn.com api
+```
+
+**Runtime:** 5-15 minutes
+**Safe:** Moderate
+**Finds:** API-specific vulnerabilities
+
+### Scanning OAuth2-Protected Services
+
+ZAP scans unauthenticated endpoints:
+- ✅ **Scans:** OAuth2-proxy login page, redirects, headers
+- ❌ **Doesn't scan:** Backend application (requires authentication)
+
+For authenticated scanning, manual ZAP configuration is required.
+
+### Understanding ZAP Reports
+
+Reports are HTML files saved to `/var/log/security-scans/zap/`.
+
+**Risk Levels:**
+- 🔴 **High:** Critical vulnerabilities (XSS, SQLi, RCE) - Fix immediately
+- 🟠 **Medium:** Security weaknesses - Should fix
+- 🟡 **Low:** Minor issues - Good to fix
+- 🔵 **Informational:** Best practices - Optional
+
+**Common Findings:**
+- Cookie missing HttpOnly flag
+- Missing security headers (CSP, Permissions-Policy)
+- SameSite=None cookies (often intentional for SSO)
+- CSRF token absence
+
+---
+
+## 🚨 Fail2ban Interaction
+
+### Will Scanning Trigger Bans?
+
+**Whitelisted IPs (won't trigger bans):**
+- `127.0.0.0/8` - Localhost
+- `192.168.1.0/24` - Your entire LAN
+- Dynamic WAN IP - Automatically updated every 30 minutes
+
+**OAuth2-proxy services** (glances, memos, security, etc.):
+- **Baseline scan:** Low risk, probably safe
+- **Full scan:** Medium risk, may hit rate limits
+
+**Keycloak services:**
+- **Baseline scan:** Low risk
+- **Full scan:** Medium risk (generates auth redirects)
+
+### Verify Whitelist
+
+```bash
+# Check if you're whitelisted
+ssh misc.home.arpa 'sudo fail2ban-client get traefik-oauth2-auth ignoreip'
+
+# Check for bans after scanning
+ssh misc.home.arpa 'fail2ban-status'
+
+# Unban if needed
+ssh misc.home.arpa 'fail2ban-unban 192.168.1.1'
+```
+
+---
+
+## 📊 Scan Results Storage
+
+### Directory Structure
+
+```
+/var/log/security-scans/
+├── lynis/
+│   ├── lynis-report-cmos-20251102-093721.txt
+│   ├── lynis-cmos-20251102-093721.log
+│   └── lynis-report.dat
+└── zap/
+    ├── zap-baseline-20251102-100002.html
+    └── zap-full-20251102-120534.html
+```
+
+### Retention Policy
+
+- **Lynis:** Last 10 reports per host (automatic cleanup)
+- **ZAP:** No automatic cleanup (manual deletion if needed)
+
+### Accessing Reports
+
+**From LAN:**
+```bash
+# Copy to home directory
+cp /var/log/security-scans/zap/*.html ~/security-reports/
+
+# Open in browser (on cmos)
+firefox /var/log/security-scans/zap/zap-baseline-*.html
+```
+
+**From SSH:**
+```bash
+# SCP to local machine
+scp misc.home.arpa:/var/log/security-scans/zap/zap-*.html ./
+```
+
+---
+
+## 🔧 Configuration
+
+### Module Location
+
+`/etc/nixos/modules/security/scanning.nix`
+
+### Enabled On
+
+- **misc** - Server (primary scanning host)
+- **jimmich** - Media server
+- **cmos** - Desktop workstation
+
+### Systemd Units
+
+**Services:**
+- `lynis-audit.service` - One-shot Lynis audit
+- `fail2ban-update-wan-ip.service` - WAN IP detection (misc only)
+
+**Timers:**
+- `lynis-audit.timer` - Monthly Lynis audits
+- `fail2ban-update-wan-ip.timer` - Every 30 min WAN IP update (misc only)
+
+### Customization
+
+**Change Lynis scan frequency:**
+```nix
+# Edit modules/security/scanning.nix
+systemd.timers.lynis-audit = {
+  timerConfig = {
+    OnCalendar = "weekly";  # Change from "monthly"
+  };
+};
+```
+
+**Add automated network scans:**
+Create a new systemd service/timer for `nix-vulnscan`.
+
+---
+
+## 🎯 Best Practices
+
+### When to Scan
+
+**Lynis (Host Audits):**
+- ✅ Monthly (automated)
+- ✅ After major system configuration changes
+- ✅ Before production deployment
+
+**Nmap (Network Scans):**
+- ✅ After opening new firewall ports
+- ✅ When adding new services
+- ✅ Quarterly security audits
+
+**OWASP ZAP (Web Apps):**
+- ✅ Before deploying new web services
+- ✅ After major application updates
+- ✅ When adding authentication/authorization
+- ✅ Monthly baseline scans for all public services
+
+### Scanning Workflow
+
+1. **Start with Lynis** - Audit host configuration
+2. **Run Nmap** - Identify network services and open ports
+3. **Scan with ZAP (baseline)** - Quick passive web app check
+4. **Review findings** - Prioritize by risk level
+5. **Fix critical issues** - Address High/Medium risks
+6. **Re-scan with ZAP (full)** - Validate fixes
+
+### Safe Scanning Tips
+
+- **Always scan from LAN** when possible (whitelisted)
+- **Start with baseline** before running full scans
+- **Monitor Fail2ban** during aggressive scans
+- **Test on staging** before scanning production
+- **Read ZAP reports carefully** - Some findings are false positives
+
+---
+
+## 🆘 Troubleshooting
+
+### Lynis Service Fails
+
+```bash
+# Check service logs
+journalctl -u lynis-audit.service -n 50
+
+# Run manually to see full output
+sudo lynis audit system
+```
+
+**Common issues:**
+- Missing dependencies (should not happen on NixOS)
+- Permission errors (service runs as root)
+
+### ZAP Container Issues
+
+```bash
+# Check Docker is running
+systemctl status docker
+
+# Pull latest ZAP image manually
+docker pull zaproxy/zap-stable:latest
+
+# Check ZAP logs
+docker logs $(docker ps -a | grep zaproxy | awk '{print $1}' | head -1)
+```
+
+**Common issues:**
+- Permission denied writing reports - ZAP runs as user `zap` (UID 1000)
+- Network connectivity - Ensure Docker can reach target
+- Target unreachable - Check DNS resolution and firewall rules
+
+### Fail2ban Bans During Scanning
+
+```bash
+# Check if banned
+ssh misc.home.arpa 'fail2ban-client status traefik-oauth2-auth'
+
+# Unban yourself
+ssh misc.home.arpa 'fail2ban-unban 192.168.1.1'
+
+# Verify whitelist includes your IP
+ssh misc.home.arpa 'sudo fail2ban-client get traefik-oauth2-auth ignoreip'
+```
+
+---
+
+## 📚 Further Reading
+
+- [Lynis Documentation](https://cisofy.com/documentation/lynis/)
+- [Nmap NSE Scripts](https://nmap.org/nsedoc/)
+- [OWASP ZAP User Guide](https://www.zaproxy.org/docs/)
+- [Mozilla Observatory](https://observatory.mozilla.org/) - Online header scanner
+- [Security Headers](https://securityheaders.com/) - Check your security headers
+
+---
+
+*🏠 [Home](../README.md) | 📚 [Security Docs](./README.md) | 🔒 [Secrets Management](./secrets.md)*

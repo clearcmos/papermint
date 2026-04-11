@@ -1,0 +1,164 @@
+---
+title: "KWin QML Crash - Qt QV4 Engine Segfault"
+description: "Date: 2026-01-04"
+---
+
+**Issue:** KWin crashes with SIGSEGV in Qt's QML engine (QV4::Object::insertMember), killing all windows
+**Severity:** High (loses all open windows, apps continue running headless)
+
+## Problem Description
+
+KWin (Wayland compositor) crashes intermittently, causing all windows to disappear. Applications continue running in the background (audio still plays, processes visible in `ps`), but their windows are gone because the compositor died.
+
+Crash typically occurs during normal desktop use, possibly triggered by window focus changes or Alt+Tab while XWayland applications (like games under Wine/Proton) are running.
+
+## Error Signature
+
+Crash dump location: `/etc/nixos/dumps/`
+
+Key stack trace:
+```
+Application: KWin (), signal: Segmentation fault
+Program terminated with signal SIGSEGV, Segmentation fault.
+
+Thread 1 (Thread 0x7fef03f3f100 (LWP 4205)):
+[KCrash Handler]
+#4  QV4::Object::insertMember() from libQt6Qml.so.6
+#5  QV4::Object::internalPut() from libQt6Qml.so.6
+#6  QV4::Object::internalPut() from libQt6Qml.so.6
+#7  QV4::QObjectWrapper::virtualPut() from libQt6Qml.so.6
+#8  QV4::Runtime::StoreProperty::call() from libQt6Qml.so.6
+#9  0x00007feea9844ef2 in ?? ()  # JIT-compiled QML code
+```
+
+## Root Cause
+
+**This is a Qt bug, not a KWin bug.**
+
+The crash occurs in Qt's QML JavaScript engine (qtdeclarative) during property assignment operations. The QV4 engine's "write barrier" mechanism fails when setting properties on QML objects, likely due to:
+
+1. Race condition where a QObject is deleted while QML still holds a reference
+2. Stale/corrupt QML bytecode disk cache
+3. Type conversion issues in QML scripts
+
+**Related KDE Bugs:**
+- [Bug 509923](https://bugs.kde.org/show_bug.cgi?id=509923) - KWin crash in QV4::Object::insertMember (tagged as `qt-crash`)
+- [Bug 506502](https://bugs.kde.org/show_bug.cgi?id=506502) - QtQuick crashing kwin (fixed in Plasma 6.4.4)
+
+## Affected Versions
+
+| Component | Version | Status |
+|-----------|---------|--------|
+| KWin | 6.3.6 | Affected |
+| Qt | 6.9.x | Bug source |
+| Plasma | 6.4.4+ | Contains workaround |
+
+## Current Workaround (Applied)
+
+**Disable QML disk cache** to prevent stale/corrupt cache entries from triggering the crash.
+
+Added to `modules/desktop/kde.nix`:
+```nix
+environment.sessionVariables = {
+  # ... other variables ...
+  # Workaround for Qt QML crash in KWin (Bug 506502, 509923)
+  # Disables QML bytecode disk cache to prevent stale cache corruption
+  # Can be removed after upgrading to Plasma 6.4.4+
+  QML_DISABLE_DISK_CACHE = "1";
+};
+```
+
+**Impact of workaround:**
+- Slightly slower cold starts for KDE apps (~100-500ms on first load)
+- More CPU during login (QML recompilation each session)
+- No functional impact after initial load
+
+**To apply:**
+```bash
+nixos-rebuild switch --flake .#cmos
+# Then log out and back in (session variable requires new session)
+```
+
+## Long-Term Solution
+
+**Upgrade to Plasma 6.4.4+** which contains the fix "Tabbox: Work around QtQuick crashing kwin" ([changelog](https://kde.org/announcements/changelogs/plasma/6/6.4.3-6.4.4/)).
+
+**Current status (2026-01-04):**
+
+| Channel | KWin Version | Has Fix? |
+|---------|--------------|----------|
+| nixos-25.05 (current) | 6.3.6 | No |
+| nixos-unstable | 6.5.4 | Yes |
+
+**Options to get the fix:**
+
+1. **Wait for nixos-25.11** (next stable release) - will include Plasma 6.5+
+2. **Switch to nixos-unstable** - change `flake.nix`:
+   ```nix
+   nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+   ```
+   *Risk: Unstable channel can have occasional breakage*
+
+## Diagnosis Steps
+
+1. **Check for crash dumps:**
+   ```bash
+   ls -lt /etc/nixos/dumps/ | head -5
+   ```
+
+2. **Analyze crash dump:**
+   Look for `QV4::Object::insertMember` or similar QML engine functions in the stack trace.
+
+3. **Check KWin version:**
+   ```bash
+   kwin_wayland --version
+   ```
+
+4. **Check if workaround is active:**
+   ```bash
+   echo $QML_DISABLE_DISK_CACHE
+   # Should output "1" if active
+   ```
+
+## Recovery
+
+When KWin crashes, applications continue running but have no windows. To recover:
+
+1. **Best option:** Log out and back in
+   - Press Ctrl+Alt+F3 to get to TTY
+   - Run `loginctl terminate-session $(loginctl list-sessions | grep nicholas | awk '{print $1}')`
+   - Press Ctrl+Alt+F1 to return to SDDM
+   - Log in again
+
+2. **Alternative:** Restart KWin (may not work if crash was severe)
+   ```bash
+   kwin_wayland --replace &
+   ```
+
+3. **For games (WoW under Proton):** The game process survives but needs to be killed
+   ```bash
+   wowkill  # or: pkill -9 -f "WoW\|Battle.net"
+   ```
+
+## Not Related To
+
+This crash is **not related to** the Wine/DXVK crashes documented in `docs/desktop/wow.md`. Those are:
+- Crashes inside WoW (ntdll.dll, d3d11.dll)
+- Wine memory management bugs
+- Different crash signatures entirely
+
+This KWin crash is a compositor-level issue that affects the entire desktop, not individual applications.
+
+## References
+
+- [KDE Bug 509923](https://bugs.kde.org/show_bug.cgi?id=509923) - KWin crash report
+- [KDE Bug 506502](https://bugs.kde.org/show_bug.cgi?id=506502) - QtQuick crash fix
+- [Plasma 6.4.4 Changelog](https://kde.org/announcements/changelogs/plasma/6/6.4.3-6.4.4/) - Contains workaround
+- [Qt Bug (upstream)](https://bugreports.qt.io/) - Root cause in qtdeclarative
+
+---
+
+**Last Updated**: 2026-01-04
+
+---
+*[Home](../README.md) | [Navigation](../NAVIGATION.md) | [Troubleshooting Overview](overview.md)*

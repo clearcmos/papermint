@@ -1,0 +1,272 @@
+---
+title: "Okta Identity Infrastructure as Code"
+description: "Technical Brief - sanitized, no proprietary details"
+---
+
+::: sanitize-note
+This document is sanitized. No company names, API keys, internal system names, or proprietary code. All details describe architecture, patterns, and decisions - not source code.
+:::
+
+:::: section
+::: pitch
+Contributed to the organization\'s **Okta identity infrastructure, managed entirely through Terraform** - 70+ app integrations, HR-driven birthright access, SAML Configuration-as-Code, push groups for Google Workspace, and PHI data restrictions. My contributions focused on SAML app onboarding, push group configurations, birthright access rules, SCIM provisioning, and HR migration support. The source of truth is the HR system: employee attributes flow into Okta as custom profile fields, and Terraform group rules automatically determine who gets access to what. Every change goes through a PR, a CircleCI plan review, and peer approval before it touches production.
+:::
+::::
+
+::::::::::::::::::::::::::: section
+## Architecture
+
+:::::::::::: card
+### How HR Data Drives Access
+
+::::::::::: layers
+:::: {.layer .layer-source}
+[Source of Truth - HR System]{.layer-title} [- Employee data imported into Okta as custom user profile attributes. Drives all downstream access decisions.]{.layer-desc}
+
+::: layer-items
+division department subdepartment employmentType title company workHours state/province
+:::
+::::
+
+:::: {.layer .layer-engine}
+[Terraform Modules]{.layer-title} [- Reusable modules that translate HR attributes into Okta group rules, app assignments, and push groups.]{.layer-desc}
+
+::: layer-items
+org_unit / org_unit_v2 functional_group key_individual app_group push_group
+:::
+::::
+
+:::: {.layer .layer-rules}
+[Group Rules & Conditional Access]{.layer-title} [- Okta group membership rules evaluate HR attributes at runtime. PHI access layered with working-abroad restrictions.]{.layer-desc}
+
+::: layer-items
+Birthright access rules PHI confidentiality gate Working abroad exclusion Role-based profiles
+:::
+::::
+
+:::: {.layer .layer-targets}
+[Downstream Systems]{.layer-title} [- SAML SSO, SCIM provisioning, and push groups sync access to 70+ apps and Google Workspace.]{.layer-desc}
+
+::: layer-items
+SAML apps (SSO) SCIM provisioning Google Workspace groups Multi-tenant platform
+:::
+::::
+:::::::::::
+::::::::::::
+
+:::::::::::::::: card
+### PR Workflow
+
+::::::::::::::: workflow
+::::: wf-step
+::: wf-num
+1
+:::
+
+::: wf-content
+#### Open PR with Terraform changes
+
+New app integration, access rule modification, group membership change, or SAML configuration update.
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+2
+:::
+
+::: wf-content
+#### CircleCI runs validation and plan
+
+Terragrunt validates syntax, then generates a plan showing exactly what will change. Dependency depth limited to 1 to prevent cascading plans.
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+3
+:::
+
+::: wf-content
+#### Review the plan output
+
+Carefully check what\'s being added, changed, or destroyed. Identity changes are high-risk - a bad rule can lock people out or grant unintended access.
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+4
+:::
+
+::: wf-content
+#### Peer approval and merge
+
+Team review required. Merge triggers apply with a separate CI context (plan uses read-only credentials, apply uses write credentials).
+:::
+:::::
+:::::::::::::::
+::::::::::::::::
+:::::::::::::::::::::::::::
+
+::::::: section
+## Spotlight: Key Patterns
+
+::: card
+### Birthright Access via HR Attributes
+
+When someone joins the organization, their HR data determines what they get access to automatically. No tickets, no manual provisioning.
+
+- **Division-level:** \"Technology\" employees get dev tools, CI/CD, and monitoring. \"Service Operations\" gets the clinical platform and support tools.
+- **Department-level:** Narrower access within divisions. \"IT & Security\" gets identity admin tools. \"Product Management\" gets analytics and roadmap tools.
+- **Employment type:** Full-time employees get the full suite. Contractors get a scoped subset. Agency workers get even less. Rules handle both legacy HR codes and new classification fields simultaneously during an HR system migration.
+- **Key individuals:** Executive titles (CEO, CTO, VP) matched by job title string get specific elevated access like billing admin and signing rights.
+:::
+
+::: card
+### SAML Configuration-as-Code
+
+SAML app integrations managed entirely in Terraform - app configuration, role groups, attribute mappings, and signing settings.
+
+- **Compliance platform:** Dual integration - OAuth service account for API read access (users, groups, policies, roles) plus SAML SSO for user login. Nine role groups from Admin to Employee, each as a separate Terraform resource.
+- **GRC platform:** Five role-specific groups with priority ordering. Custom user schema property defines the role enum. SAML attribute statements pass the role through the assertion so the app knows what permissions to grant.
+- **Multi-tenant product platform:** Single Okta org managing SAML connections to 10+ environments across dev, staging, and production in multiple regions. Each tenant has its own SCIM endpoint and profile mappings.
+:::
+
+::: card
+### Push Groups for Google Workspace
+
+Google group membership driven by the same HR attributes, through Okta push groups that sync automatically.
+
+- 15+ push groups covering divisions, employment types, and functional teams
+- Clean separation: the `push_group` module creates the bare group, the `org_unit` module attaches the membership rule
+- When someone\'s division changes in the HR system, their Google group memberships update automatically - no manual sync
+:::
+
+::: card
+### SCIM Provisioning
+
+Configured SCIM (System for Cross-domain Identity Management) in Okta to automatically provision and deprovision users in downstream apps.
+
+- User lifecycle events (create, update, deactivate) push automatically from Okta to integrated apps
+- Profile attribute mappings control which fields sync - employee number, department, custom fields
+- Configured manually in the Okta UI (not Terraform) due to an API limitation that would erase the SCIM integration on apply
+- SCIM token refresh automated via CircleCI scheduled pipeline across all environments
+:::
+:::::::
+
+::::::::::::::::::: section
+## Key Technical Decisions
+
+:::::: card
+### org_unit_v2: Consolidating Rules at Scale
+
+::: decision
+[Problem]{.decision-label .problem} [The original org_unit module created one Okta group rule per app per organizational unit. With 70+ apps and dozens of org units, rule count was exploding. Okta has limits on total rules, and each rule is an API object that slows down plan times.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [The team redesigned the module (v2) to consolidate: one rule assigns all non-PHI apps, one rule assigns all PHI apps (with restrictions). Uses MD5 hashing of group IDs for stable resource naming during create-before-destroy lifecycle.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [Dramatically fewer rules for the same access coverage. Faster Terraform plans, fewer API calls, well within Okta limits.]{.decision-text}
+:::
+::::::
+
+:::::: card
+### PHI Data Access as a Layered Gate
+
+::: decision
+[Problem]{.decision-label .problem} [Healthcare data (PHI) requires strict access controls. Not everyone in a division should see clinical data, and employees working from non-approved locations must be excluded even if they normally have access.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [Two-layer gate in the group rules. PHI apps require membership in the confidentiality agreement group AND exclusion from the working-abroad group. These conditions are evaluated at rule level, not app level, so they persist automatically.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [PHI access is enforced structurally, not procedurally. When someone starts working abroad, their HR record changes, the working-abroad group picks them up, and PHI access drops automatically. No ticket needed.]{.decision-text}
+:::
+::::::
+
+:::::: card
+### Dual HR Attribute Support During Migration
+
+::: decision
+[Problem]{.decision-label .problem} [The organization was migrating HR systems. The old system used company codes (DIALO, DIACC, etc.) and a simple employment type field. The new system uses structured fields like \"Salaried, full-time\" and \"Hourly, part-time\". Both systems coexist during the transition.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [Group rules evaluate both old and new attributes with OR logic. As employees migrate to the new HR system, the new attributes start matching. Legacy attributes are gradually commented out as company codes are decommissioned.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [Zero access disruption during the HR migration. No big-bang cutover. Rules gracefully handle employees on either system.]{.decision-text}
+:::
+::::::
+
+:::::: card
+### Separate CI Contexts for Plan vs. Apply
+
+::: decision
+[Problem]{.decision-label .problem} [Identity infrastructure is high-risk. A bad apply can lock out users, grant unintended access, or break SSO for the entire organization. CI needs to be safe by default.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [CircleCI uses read-only credentials for plan (anyone can see what would change) and write credentials for apply (only after merge and approval). Dependency depth capped at 1 to prevent cascading plans from touching unrelated modules.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [Safe plan reviews on every PR. No accidental applies. The person reviewing the PR sees exactly the same plan that will execute on merge.]{.decision-text}
+:::
+::::::
+:::::::::::::::::::
+
+:::::::::::::: section
+## Talking Points
+
+::::::::::::: {.card .stories}
+### \"Tell me about this project\"
+
+:::: talk-point
+::: answer
+I contributed to the organization\'s Okta identity infrastructure, all managed as Terraform code - 70+ app integrations, SAML SSO configurations, birthright access rules, push groups for Google Workspace, and SCIM provisioning. My focus was on SAML app onboarding, push group configurations, birthright access rules, and SCIM setup. The key idea is that **the HR system is the source of truth** - employee attributes like division, department, and employment type flow into Okta as custom profile fields, and Terraform group rules automatically determine what each person gets access to. When someone joins, moves teams, or leaves, access updates happen automatically.
+:::
+::::
+
+### \"What does a typical PR look like?\"
+
+:::: talk-point
+::: answer
+It depends. Sometimes it\'s onboarding a new SaaS app - I\'d write the SAML configuration, create role groups, define attribute mappings, and set up the assignment rules. Sometimes it\'s adjusting birthright access - a new department forms, or a team needs access to an additional tool. Every PR runs through CircleCI which generates a Terraform plan. **I\'d review the plan carefully because identity changes are high-risk** - a bad rule can lock people out or grant access they shouldn\'t have. Then peer review, approval, and merge triggers the apply.
+:::
+::::
+
+### \"What was the hardest part?\"
+
+:::: talk-point
+::: answer
+The HR system migration. We were moving from one HRIS to another, and all the birthright access rules were built on the old system\'s attribute format - company codes like \"DIALO\" and a simple \"Employee/Contractor\" field. The new system uses structured fields like \"Salaried, full-time.\" I had to **make the rules evaluate both old and new attributes simultaneously** so that nobody lost access during the transition. No big-bang cutover - just gradual migration with OR logic in the rules, decommissioning old codes as entities were fully migrated.
+:::
+::::
+
+### \"How do you handle PHI compliance?\"
+
+:::: talk-point
+::: answer
+Two-layer gate, enforced structurally in the group rules. PHI apps require both a **signed confidentiality agreement** (membership in that group) and **not being in the working-abroad group**. When someone\'s HR record shows they\'re working from a non-approved location, the working-abroad group picks them up and PHI access drops automatically. No ticket, no manual intervention. The compliance team loves it because it\'s not dependent on someone remembering to revoke access.
+:::
+::::
+
+### \"What did you learn?\"
+
+:::: talk-point
+::: answer
+That **identity infrastructure is the highest-leverage thing you can automate well, and the most dangerous thing you can automate poorly**. A single bad group rule can grant PHI access to contractors or lock out an entire division. The CI safety net - read-only plans, peer review, separate apply credentials - isn\'t overhead, it\'s the whole point. I also learned that the best access model is one where the HR system does the work: when the source of truth changes, access follows. No tickets, no manual steps, no drift.
+:::
+::::
+:::::::::::::
+::::::::::::::
+
+Project brief - not for distribution. All details sanitized.

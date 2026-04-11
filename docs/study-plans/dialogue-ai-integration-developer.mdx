@@ -1,0 +1,356 @@
+---
+title: "Study Plan: AI Integration Developer — Dialogue"
+description: "Target role: AI Integration Developer, Provider Stream group, Dialogue (Montreal)"
+---
+
+Status: **Building skills, no rush** | Flexible study hours
+
+---
+
+## Gap Analysis
+
+| Requirement | Your Current Level | Gap Size |
+|---|---|---|
+| Python 5+ years (FastAPI/Django) | Can't read/write Python independently | **Critical** |
+| AWS (Bedrock, Lambda, ECS) | S3 only. Good GCP knowledge (Cloud Functions, IAM, gcloud) | **Large** (but GCP transfers conceptually) |
+| Terraform + Kubernetes | Terraform with Okta (strong). No K8s. | **Medium** |
+| Distributed systems, event-driven arch | Conceptual understanding from building async tools | **Medium-Large** |
+| Redis, Celery, async task queues | No direct experience | **Large** |
+| LLM evaluation (LangSmith etc.) | Heavy Claude Code user, no formal eval framework experience | **Medium** |
+| REST API integration, rate limiting | **Strong** — 25+ system integrations, rate limiting, pagination | Minimal |
+| CI/CD, IaC | **Strong** — CircleCI, Terraform, Cloud Functions | Minimal |
+| Security (HIPAA, SOC2, PIPEDA) | Security correlation work, no healthcare compliance | **Medium** |
+| Bilingual (FR/EN) | **Strong** — Montreal native | None |
+| Docker/Containers | Basic awareness, no hands-on | **Medium** |
+
+---
+
+## Phase 1: Python Foundations (Weeks 1-6)
+
+**Goal:** Read and write basic Python independently. Understand control flow, data structures, functions, classes, error handling.
+
+This is the #1 priority. Everything else in the job description runs on Python. You already understand the *concepts* (APIs, rate limiting, pagination, auth patterns) — you need the *syntax*.
+
+### Primary Path (Coursera)
+
+**1. [Python for Everybody Specialization](https://www.coursera.org/specializations/python) — University of Michigan**
+- 5 courses, ~8 months at suggested pace but you can go faster
+- Start here. Covers: variables, loops, conditionals, functions, data structures, files, databases, web scraping
+- You'll recognize many patterns from your AI-assisted work — this will click faster than you expect
+- **Do courses 1-3 minimum** (Getting Started, Data Structures, Web Data)
+
+**2. [Python 3 Programming Specialization](https://www.coursera.org/specializations/python-3-programming) — University of Michigan**
+- The "next step" after Python for Everybody — more depth on functions, classes, testing
+- **Do after courses 1-3 above**
+
+### Supplementary (Free)
+
+- **[py4e.com](https://www.py4e.com/)** — Free companion site for the Coursera course. Same content, extra exercises
+- **[Python Official Tutorial](https://docs.python.org/3/tutorial/)** — Reference when you want to look something up
+- **Daily practice:** Start *reading* your own iss-utils scripts. Open one per day, try to follow the control flow before asking Claude to explain it. This is the single highest-leverage habit you can build.
+
+### Milestone
+> Can read a 100-line Python script and explain what it does without AI help. Can write a simple script that calls an API, handles pagination, and writes results to a file.
+
+---
+
+## Phase 2: Web APIs with FastAPI (Weeks 5-10)
+
+**Goal:** Build REST APIs in Python using FastAPI. Understand request/response, path parameters, query parameters, request bodies, async/await, dependency injection.
+
+*Overlap with Phase 1 is intentional — start this when you're comfortable with Python basics (after ~4 weeks).*
+
+### Primary Path (Coursera)
+
+**1. [Build Next-Gen LLM Apps with LangChain & LangGraph](https://www.coursera.org/specializations/build-next-gen-llm-apps-with-langchain-langgraph)**
+- Covers building APIs that interact with LLMs — directly relevant to the Dialogue role
+- Practical, project-based
+
+### Supplementary (Free)
+
+- **[FastAPI Official Tutorial](https://fastapi.tiangolo.com/learn/)** — The best FastAPI resource. Written by the creator. Step-by-step, with runnable examples
+- **[Building RESTful APIs with FastAPI — Amigoscode](https://www.classcentral.com/course/youtube-fastapi-tutorial-building-restful-apis-with-python-92897)** (YouTube, free) — Covers HTTP methods, async programming, database integration
+- **[Python FastAPI Tutorial — Tech with Tim](https://www.classcentral.com/course/youtube-python-fast-api-tutorial-117079)** (YouTube, 58 min, free) — Quick overview of FastAPI fundamentals
+- **[FastAPI for Beginners — Telusko](https://www.classcentral.com/course/youtube-fastapi-for-beginners-python-web-framework-479965)** (YouTube, 2 hours, free) — Full CRUD app from scratch
+- **[Get Started with FastAPI — Real Python](https://realpython.com/get-started-with-fastapi/)** — Written tutorial, well-structured
+
+### Hands-On Project
+> Build a simple API that wraps one of your existing iss-utils scripts. Example: an Okta user lookup API with FastAPI that takes a username, calls the Okta API, and returns JSON. This bridges your existing knowledge with the new framework.
+
+### Milestone
+> Can build a FastAPI application with multiple endpoints, request validation, error handling, and async database queries.
+
+---
+
+## Phase 3: Docker & Kubernetes (Weeks 7-12)
+
+**Goal:** Containerize applications, understand orchestration, deploy to a cluster.
+
+### Primary Path (Coursera)
+
+**1. [Docker for the Absolute Beginner — Hands-On](https://www.coursera.org/learn/packt-docker-for-the-absolute-beginner-hands-on)**
+- Start here. Covers installation, images, containers, volumes, networking, Docker Compose
+- Updated May 2025
+
+**2. [Introduction to Containers w/ Docker, Kubernetes & OpenShift](https://www.coursera.org/learn/ibm-containers-docker-kubernetes-openshift) — IBM**
+- Bridges Docker to Kubernetes. Covers container orchestration concepts.
+
+**3. [Kubernetes for Beginners](https://www.coursera.org/learn/packt-kubernetes-for-beginners-pj7v5) — Packt**
+- Pods, deployments, services, scaling, rolling updates
+- Updated May 2025
+
+### Supplementary (Free)
+
+- **[Kubernetes Official Interactive Tutorial](https://kubernetes.io/docs/tutorials/)** — Browser-based, no local setup needed
+- **[Docker Getting Started Guide](https://docs.docker.com/get-started/)** — Official, step-by-step
+
+### Hands-On Project
+> Containerize the FastAPI app from Phase 2. Write a Dockerfile, build an image, run it locally. Then write a Kubernetes deployment manifest and deploy to a local cluster (minikube or kind).
+
+### Milestone
+> Can write a Dockerfile, build/push images, write K8s manifests (Deployment, Service, ConfigMap), and deploy an application to a cluster.
+
+---
+
+## Phase 4: AWS Services (Weeks 9-16)
+
+**Goal:** Map your GCP knowledge to AWS equivalents. Learn Lambda, ECS, Bedrock specifically.
+
+Your GCP knowledge gives you a conceptual head start:
+| GCP (you know this) | AWS (learn this) |
+|---|---|
+| Cloud Functions | Lambda |
+| Cloud Run | ECS (Fargate) |
+| IAM | IAM (similar concepts, different syntax) |
+| Cloud Scheduler | EventBridge |
+| GCS (buckets) | S3 (you know this already) |
+| gcloud CLI | AWS CLI |
+| — | Bedrock (no GCP equivalent — this is AWS's managed LLM service) |
+
+### Primary Path (Coursera)
+
+**1. [AWS Fundamentals Specialization](https://www.coursera.org/specializations/aws-fundamentals) — AWS**
+- Core concepts, compute, storage, networking. Free to enroll.
+- Start here to get the AWS mental model
+
+**2. [Terraform in AWS from Basics to Guru](https://www.coursera.org/specializations/pearson-terraform-in-aws-from-basics-to-guru) — Pearson**
+- You already know Terraform with Okta. This teaches you Terraform with AWS resources (VPCs, EC2, Lambda, ECS)
+- Directly transferable skill
+
+**3. [Intro to AWS — Your First Steps in Cloud Computing](https://www.coursera.org/learn/packt-intro-to-aws-your-first-steps-in-cloud-computing-l4paq)**
+- Covers serverless with Lambda + API Gateway, and containerization with ECS
+- Updated May 2025
+
+### Supplementary (Free)
+
+- **[AWS Skill Builder](https://skillbuilder.aws/)** — Free AWS training platform. Search for Lambda, ECS, Bedrock courses.
+- **[AWS Bedrock Getting Started](https://docs.aws.amazon.com/bedrock/latest/userguide/getting-started.html)** — Official docs for the managed LLM service. Critical for this role.
+- **[AWS Free Tier](https://aws.amazon.com/free/)** — 12 months free for many services. Use this for hands-on practice.
+
+### Hands-On Project
+> Deploy the containerized FastAPI app (from Phase 3) to AWS ECS. Then create a Lambda function that calls AWS Bedrock to summarize text, triggered by an API Gateway endpoint. This covers 3 of the job's key AWS services in one project.
+
+### Milestone
+> Can deploy a containerized app to ECS, create Lambda functions, use Bedrock for LLM inference, and manage it all with Terraform.
+
+---
+
+## Phase 5: Distributed Systems & Async Patterns (Weeks 13-18)
+
+**Goal:** Understand event-driven architecture, message queues, Celery + Redis, async task processing.
+
+### Primary Path (Coursera)
+
+**1. [Generative AI Engineering with LLMs Specialization](https://www.coursera.org/specializations/generative-ai-engineering-with-llms) — IBM**
+- Covers building apps with LLM frameworks, deploying, scaling
+- Practical approach to LLM integration (exactly what the Dialogue role does)
+
+**2. [Distributed Systems courses on Coursera](https://www.coursera.org/courses?query=distributed+systems)**
+- Look for courses covering: message queues, event-driven patterns, CAP theorem, eventual consistency
+
+### Supplementary (Free)
+
+- **[Celery Official Getting Started](https://docs.celeryq.dev/en/stable/getting-started/introduction.html)** — The canonical intro to distributed task queues in Python
+- **[Redis University (free)](https://university.redis.io/)** — Free courses on Redis fundamentals, data structures, caching patterns
+- **[FastAPI Background Tasks docs](https://fastapi.tiangolo.com/tutorial/background-tasks/)** — How async works in FastAPI specifically
+- **[System Design Primer (GitHub)](https://github.com/donnemartin/system-design-primer)** — Free, comprehensive. Covers message queues, async workflows, caching, load balancing. Reference material, not a course — read sections as needed.
+
+### Hands-On Project
+> Add a Celery + Redis task queue to the FastAPI app. Example: an endpoint that accepts a long-running request (e.g., "analyze this user's Okta logs"), queues it as a Celery task, and returns a task ID. A second endpoint checks task status and returns results when done.
+
+### Milestone
+> Can explain event-driven architecture, implement a Celery worker with Redis broker, handle async task processing, and design a system with multiple communicating services.
+
+---
+
+## Phase 6: LLM Integration & Evaluation (Weeks 15-22)
+
+**Goal:** Build systems that integrate LLMs into production workflows. Implement evaluation frameworks to validate LLM outputs.
+
+*This is the core differentiator of the Dialogue role — "Intelligent Provider" infrastructure.*
+
+### Primary Path (Coursera)
+
+**1. [Generative AI with Large Language Models](https://www.coursera.org/learn/generative-ai-with-llms) — DeepLearning.AI + AWS**
+- 3 weeks, ~16 hours. Covers the full LLM lifecycle: scoping, selecting, fine-tuning, deploying
+- Hands-on labs in AWS environment (provided)
+- **Note:** Requires basic Python + some ML familiarity. Take this after Phase 1-2.
+
+**2. [LLMOps Specialization](https://www.coursera.org/specializations/large-language-model-operations) — Duke University**
+- Covers deploying LLMs on Azure, AWS, Databricks
+- 20+ hands-on projects
+- Includes evaluation, monitoring, and production deployment
+
+**3. [Build Next-Gen LLM Apps with LangChain & LangGraph](https://www.coursera.org/specializations/build-next-gen-llm-apps-with-langchain-langgraph)**
+- From experimentation to enterprise-grade production
+- Covers the complete lifecycle of building, deploying, and scaling LLM applications
+
+### Supplementary (Free)
+
+- **[LangChain Academy — Intro to LangSmith](https://academy.langchain.com/courses/intro-to-langsmith)** (free) — Official course on agent observability and evaluations. Directly covers the LangSmith requirement in the job posting.
+- **[LangSmith Evaluation Quickstart](https://docs.smith.langchain.com/evaluation/tutorials)** — Official docs with hands-on tutorials
+- **[LangSmith Explained — DigitalOcean](https://www.digitalocean.com/community/tutorials/langsmith-debudding-evaluating-llm-agents)** — Practical tutorial on debugging and evaluating LLM agents
+- **[Anthropic Prompt Engineering Guide](https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/overview)** — You already use Claude extensively. Formalize that knowledge.
+
+### Hands-On Project
+> Build a validation pipeline: take an LLM (via Bedrock or Claude API), give it a clinical-style task (e.g., "summarize these patient notes"), evaluate the output using LangSmith for accuracy/safety/hallucination. Build automated tests that fail if the LLM output doesn't meet quality thresholds. This is exactly what Dialogue means by "Validation Frameworks."
+
+### Milestone
+> Can build an LLM integration pipeline with structured evaluation, automated quality gates, and observability. Can explain why "vibes-based testing" is insufficient and demonstrate data-driven validation.
+
+---
+
+## Phase 7: Healthcare Security & Compliance (Weeks 18-22)
+
+**Goal:** Understand PHI handling, HIPAA/PIPEDA requirements, data masking, secure transmission in a healthcare context.
+
+### Primary Path (Coursera)
+
+**1. [Healthcare Data Security, Privacy, and Compliance](https://www.coursera.org/learn/healthcare-data-security) — Johns Hopkins**
+- Types of healthcare data, security/privacy complexities, compliance and reporting
+- Directly relevant to Dialogue's regulated environment
+
+**2. [Privacy Law and HIPAA](https://www.coursera.org/learn/privacy-law-hipaa) — University of Pennsylvania**
+- Legal framework for health data privacy
+- HIPAA rules, enforcement, penalties
+
+**3. [Fundamental Privacy Acts and Laws](https://www.coursera.org/learn/fundamental-privacy-acts-and-laws) — Infosec**
+- HIPAA, HITECH, GINA, and broader privacy compliance
+
+### Supplementary (Free)
+
+- **[PIPEDA Overview — Office of the Privacy Commissioner of Canada](https://www.priv.gc.ca/en/privacy-topics/privacy-laws-in-canada/the-personal-information-protection-and-electronic-documents-act-pipeda/)** — Since Dialogue is Canadian, PIPEDA is more relevant than HIPAA day-to-day
+- **[SOC 2 Compliance Overview — AICPA](https://www.aicpa.org/topic/audit-assurance/audit-and-assurance-greater-than-soc-2)** — Understand the framework
+
+### Milestone
+> Can explain PHI handling requirements, implement data masking patterns, describe the difference between HIPAA and PIPEDA, and articulate how to build a secure data pipeline in a healthcare context.
+
+---
+
+## Phase 8: Integration Project (Weeks 20-26)
+
+**Goal:** Build a portfolio project that combines everything and mirrors the Dialogue role.
+
+### The Project: Clinical Automation Pipeline
+
+Build a simplified version of what the Dialogue role does:
+
+1. **FastAPI backend** with multiple endpoints
+2. **Celery + Redis** for async task processing
+3. **AWS Bedrock** (or Claude API) for LLM inference
+4. **Data masking** layer that strips mock PHI before sending to LLM
+5. **LangSmith evaluation** pipeline that validates LLM output quality
+6. **Dockerized** and deployable to **ECS** via **Terraform**
+7. **Monitoring/observability** with structured logging and tracing
+
+This single project demonstrates every skill in the job posting. It's your interview portfolio piece.
+
+### Milestone
+> A working, deployed system that you can demo and explain end-to-end. Can answer "how does data flow through this system?" and "how do you validate the LLM outputs?" and "how do you ensure PHI never reaches the LLM?"
+
+---
+
+## Resource Index
+
+### Coursera (Premium — Prioritized)
+
+| Course | Phase | Provider |
+|---|---|---|
+| [Python for Everybody Specialization](https://www.coursera.org/specializations/python) | 1 | U of Michigan |
+| [Python 3 Programming Specialization](https://www.coursera.org/specializations/python-3-programming) | 1 | U of Michigan |
+| [Docker for the Absolute Beginner](https://www.coursera.org/learn/packt-docker-for-the-absolute-beginner-hands-on) | 3 | Packt |
+| [Intro to Containers: Docker, K8s & OpenShift](https://www.coursera.org/learn/ibm-containers-docker-kubernetes-openshift) | 3 | IBM |
+| [Kubernetes for Beginners](https://www.coursera.org/learn/packt-kubernetes-for-beginners-pj7v5) | 3 | Packt |
+| [AWS Fundamentals Specialization](https://www.coursera.org/specializations/aws-fundamentals) | 4 | AWS |
+| [Terraform in AWS: Basics to Guru](https://www.coursera.org/specializations/pearson-terraform-in-aws-from-basics-to-guru) | 4 | Pearson |
+| [Generative AI with LLMs](https://www.coursera.org/learn/generative-ai-with-llms) | 6 | DeepLearning.AI + AWS |
+| [LLMOps Specialization](https://www.coursera.org/specializations/large-language-model-operations) | 6 | Duke University |
+| [LangChain & LangGraph Specialization](https://www.coursera.org/specializations/build-next-gen-llm-apps-with-langchain-langgraph) | 6 | Coursera |
+| [Generative AI Engineering with LLMs](https://www.coursera.org/specializations/generative-ai-engineering-with-llms) | 5-6 | IBM |
+| [Healthcare Data Security & Compliance](https://www.coursera.org/learn/healthcare-data-security) | 7 | Johns Hopkins |
+| [Privacy Law and HIPAA](https://www.coursera.org/learn/privacy-law-hipaa) | 7 | U of Penn |
+
+### Free Resources
+
+| Resource | Phase | Type |
+|---|---|---|
+| [py4e.com](https://www.py4e.com/) | 1 | Exercises |
+| [FastAPI Official Tutorial](https://fastapi.tiangolo.com/learn/) | 2 | Docs |
+| [FastAPI — Amigoscode](https://www.classcentral.com/course/youtube-fastapi-tutorial-building-restful-apis-with-python-92897) | 2 | YouTube |
+| [FastAPI — Tech with Tim](https://www.classcentral.com/course/youtube-python-fast-api-tutorial-117079) | 2 | YouTube (58 min) |
+| [FastAPI for Beginners — Telusko](https://www.classcentral.com/course/youtube-fastapi-for-beginners-python-web-framework-479965) | 2 | YouTube (2 hrs) |
+| [Real Python — FastAPI](https://realpython.com/get-started-with-fastapi/) | 2 | Blog |
+| [Docker Getting Started](https://docs.docker.com/get-started/) | 3 | Docs |
+| [Kubernetes Interactive Tutorial](https://kubernetes.io/docs/tutorials/) | 3 | Browser lab |
+| [AWS Skill Builder](https://skillbuilder.aws/) | 4 | Free courses |
+| [AWS Bedrock Docs](https://docs.aws.amazon.com/bedrock/latest/userguide/getting-started.html) | 4 | Docs |
+| [AWS Free Tier](https://aws.amazon.com/free/) | 4 | Hands-on |
+| [Celery Getting Started](https://docs.celeryq.dev/en/stable/getting-started/introduction.html) | 5 | Docs |
+| [Redis University](https://university.redis.io/) | 5 | Free courses |
+| [System Design Primer](https://github.com/donnemartin/system-design-primer) | 5 | GitHub |
+| [LangChain Academy — LangSmith](https://academy.langchain.com/courses/intro-to-langsmith) | 6 | Free course |
+| [LangSmith Eval Quickstart](https://docs.smith.langchain.com/evaluation/tutorials) | 6 | Docs |
+| [Anthropic Prompt Engineering](https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/overview) | 6 | Docs |
+| [PIPEDA Overview](https://www.priv.gc.ca/en/privacy-topics/privacy-laws-in-canada/the-personal-information-protection-and-electronic-documents-act-pipeda/) | 7 | Government |
+
+---
+
+## Weekly Habit (Start Immediately)
+
+Regardless of what phase you're in, do this every day:
+
+1. **Read one of your own iss-utils scripts** (15 min). Try to follow the logic before asking Claude to explain.
+2. **Write one small thing in Python by hand** (15 min). Even if it's just a for loop that prints numbers. Build muscle memory.
+3. **Keep a "things I learned" log.** One sentence per day. Compounds over time.
+
+---
+
+## Timeline Estimate
+
+| Phase | Duration | Can Overlap With |
+|---|---|---|
+| 1. Python Foundations | 6 weeks | — |
+| 2. FastAPI | 4-6 weeks | Phase 1 (start week 5) |
+| 3. Docker & K8s | 4-6 weeks | Phase 2 (start week 7) |
+| 4. AWS | 6-8 weeks | Phase 3 (start week 9) |
+| 5. Distributed Systems | 4-6 weeks | Phase 4 (start week 13) |
+| 6. LLM Integration | 6-8 weeks | Phase 5 (start week 15) |
+| 7. Healthcare Security | 4 weeks | Phase 6 (start week 18) |
+| 8. Integration Project | 6 weeks | After Phase 6 (start week 20) |
+
+**Total: ~6 months** with overlapping phases and flexible pacing.
+
+---
+
+## Your Advantages Going In
+
+Don't lose sight of what you already have that other candidates won't:
+
+- **25+ system integrations** — you've done the hard integration work. REST APIs, rate limiting, pagination, auth patterns, error handling. This is the backbone of "Systems Integration" in the job description.
+- **Production deployment experience** — Cloud Functions, CI/CD, Terraform. Not theoretical.
+- **AI-augmented development** — you've been building with AI for 2+ years. Most candidates are just starting.
+- **Claude Code plugin architecture** — you've designed agentic AI workflows. That's "Agentic workflows" in the job description.
+- **Bilingual** — required for the role, and you have it natively.
+- **15 years IT operations** — you understand the clinical operations side intuitively. Most backend developers won't.
+
+The gap is primarily **Python syntax** and **specific tooling** (AWS, K8s, Celery). The *thinking* — system design, integration patterns, automation architecture — you already have.

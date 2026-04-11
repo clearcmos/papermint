@@ -28,8 +28,8 @@ PROJECT = os.environ.get("PROJECT", "claude-code")
 _repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DOCS_DIR = os.environ.get("DOCS_DIR", os.path.join(_repo_root, PROJECT))
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
-EMBED_MODEL = os.environ.get("EMBED_MODEL", "bge-m3")
-CHAT_MODEL = os.environ.get("CHAT_MODEL", "qwen2.5:7b-instruct")
+EMBED_MODEL = os.environ.get("EMBED_MODEL", "qwen3-embedding:0.6b")
+CHAT_MODEL = os.environ.get("CHAT_MODEL", "qwen3.5:4b")
 PORT = int(os.environ.get("PORT", "3002"))
 
 # --- In-memory state ---
@@ -83,6 +83,7 @@ app.add_middleware(
 
 class QueryRequest(BaseModel):
     query: str
+    dedupe: bool = True  # Deduplicate by page (good for web UI, disable for RAG)
 
 
 def _slug_to_url(doc_path: str) -> str:
@@ -142,24 +143,29 @@ async def search(req: QueryRequest):
         for idx, score in kw_results:
             scores[idx] = score
 
-    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:8]
+    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
 
-    # Deduplicate by page
+    # Deduplicate by page when requested (web UI), return all chunks for RAG
     seen_pages = set()
     results = []
     for idx, score in ranked:
         chunk = chunks[idx]
         page = chunk["doc_path"]
-        if page in seen_pages:
-            continue
-        seen_pages.add(page)
+        if req.dedupe:
+            if page in seen_pages:
+                continue
+            seen_pages.add(page)
+        raw = chunk.get("raw", chunk["text"])
         results.append({
             "title": chunk["doc_title"],
             "heading": chunk["heading"],
             "url": _slug_to_url(page),
-            "snippet": _snippet(chunk["text"], query),
+            "snippet": _snippet(raw, query),
+            "content": raw,
             "score": round(score, 4),
         })
+        if len(results) >= 8:
+            break
 
     return {"results": results}
 
@@ -176,13 +182,13 @@ async def ask(req: QueryRequest):
     try:
         if chunk_embeddings.size > 0:
             q_emb = await embed_query(query, OLLAMA_URL, EMBED_MODEL)
-            top = search_semantic(q_emb, chunk_embeddings, top_k=5)
+            top = search_semantic(q_emb, chunk_embeddings, top_k=8)
             context_chunks = [chunks[i]["text"] for i, _ in top]
     except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError):
         pass
 
     if not context_chunks:
-        kw_top = search_keyword(query, chunks, top_k=5)
+        kw_top = search_keyword(query, chunks, top_k=8)
         context_chunks = [chunks[i]["text"] for i, _ in kw_top]
 
     context = "\n\n---\n\n".join(context_chunks)
@@ -193,6 +199,7 @@ async def ask(req: QueryRequest):
             "content": (
                 "You are a helpful documentation assistant. Answer the user's question "
                 "based on the provided documentation context. Be concise and accurate. "
+                "Extract and quote specific facts, numbers, and details from the context. "
                 "If the context doesn't contain enough information, say so.\n\n"
                 f"Documentation context:\n{context}"
             ),
@@ -206,7 +213,14 @@ async def ask(req: QueryRequest):
                 async with client.stream(
                     "POST",
                     f"{OLLAMA_URL}/api/chat",
-                    json={"model": CHAT_MODEL, "messages": messages, "stream": True},
+                    json={
+                        "model": CHAT_MODEL,
+                        "messages": messages,
+                        "stream": True,
+                        "think": False,
+                        "keep_alive": "30s",
+                        "options": {"num_ctx": 4096},
+                    },
                 ) as resp:
                     async for line in resp.aiter_lines():
                         if not line:

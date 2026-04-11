@@ -1,0 +1,203 @@
+---
+title: "️ Google Drive Integration"
+description: "*KDE Online Accounts with native Dolphin file manager integration*"
+---
+
+## 🎯 Overview
+
+Google Drive is integrated via **KDE Online Accounts** with the `kio-gdrive` KIO worker, providing native file manager access without local synchronization.
+
+**Key Characteristics**:
+- **Streaming Access**: Files fetched on-demand, not synced locally
+- **Native Integration**: Appears as `gdrive:/` in Dolphin
+- **No Local Storage**: Files remain in cloud until explicitly downloaded
+- **OAuth2 Authentication**: Secure sign-in via signond + signon-ui
+
+---
+
+## 🔧 Technical Stack
+
+### Required Packages (modules/desktop/packages.nix)
+
+| Package | Purpose |
+|---------|---------|
+| `kdePackages.kaccounts-integration` | KDE online accounts integration |
+| `kdePackages.kaccounts-providers` | Google provider configuration |
+| `kdePackages.kio-gdrive` | Google Drive KIO worker |
+| `signond-with-oauth2` | Authentication daemon with OAuth2 plugin |
+| `signon-ui` | OAuth login dialog UI |
+| `kdePackages.signon-kwallet-extension` | Secure credential storage |
+
+### Custom Packages
+
+**signon-plugin-oauth2** (`packages/signon-plugin-oauth2.nix`):
+- OAuth 1.0/2.0 plugin for signond
+- Built from nicolasfella's Qt6 fork
+
+**signon-ui** (`packages/signon-ui.nix`):
+- UI component displaying OAuth login dialogs
+- Required for Google authentication flow
+
+### D-Bus Services
+
+```bash
+# Signond - Single Sign-On daemon
+com.google.code.AccountsSSO.SingleSignOn
+
+# Signon UI - OAuth dialog handler
+com.nokia.singlesignonui
+```
+
+---
+
+## 🚀 Setup
+
+### Adding a Google Account
+
+1. Open **System Settings → Online Accounts**
+2. Click **Add New Account**
+3. Select **Google**
+4. Complete OAuth login in browser window
+5. Grant requested permissions
+
+### First-Time Configuration
+
+A local provider override is required for Google Drive access (Google blocks KDE's default OAuth client):
+
+**Location**: `~/.local/share/accounts/providers/google.provider`
+
+This file uses GNOME's OAuth credentials which Google trusts, and includes the Drive API scope.
+
+```xml
+<!-- Key differences from default KDE provider -->
+<setting name="ClientId">44438659992-7kgjeitenc16ssihbtdjbgguch7ju55s.apps.googleusercontent.com</setting>
+<setting name="ClientSecret">-gMLuQyDiI0XrQS_vx_mhuYF</setting>
+<setting type="as" name="Scope">[
+  'https://www.googleapis.com/auth/drive'
+  <!-- ... other scopes ... -->
+]</setting>
+```
+
+---
+
+## 📂 Usage
+
+### Accessing Google Drive
+
+**In Dolphin**:
+```
+gdrive:/                    # List all accounts
+gdrive:/google11/           # Specific account (ID varies)
+```
+
+**From Terminal**:
+```bash
+# Open in Dolphin
+dolphin gdrive:/
+
+# List files (via kioclient)
+kioclient5 ls gdrive:/
+```
+
+### File Operations
+
+All standard operations work:
+- **Browse**: Navigate folders normally
+- **Download**: Drag files to local folder
+- **Upload**: Drag files into gdrive:/
+- **Delete**: Right-click → Move to Trash
+- **Rename**: Right-click → Rename
+
+### Account Management
+
+```bash
+# Open account settings
+systemsettings kcm_kaccounts
+
+# Restart auth services (if issues)
+pkill -f signond
+pkill -f signon-ui
+```
+
+---
+
+## 🔍 Troubleshooting
+
+### "Authentication method is not known"
+
+**Cause**: OAuth2 plugin not found by signond
+
+**Fix**: Ensure `signond-with-oauth2` is installed and D-Bus services are registered:
+```bash
+# Check D-Bus service
+cat /run/current-system/sw/share/dbus-1/services/com.google.code.AccountsSSO.SingleSignOn.service
+
+# Should point to signond-with-oauth2, not plain signond
+```
+
+### "Access denied" / "Forbidden"
+
+**Cause**: KDE's OAuth client ID blocked by Google
+
+**Fix**: Create local provider override with GNOME credentials:
+```bash
+mkdir -p ~/.local/share/accounts/providers
+# Copy the google.provider file with GNOME credentials
+```
+
+### Login Dialog Doesn't Appear
+
+**Cause**: signon-ui missing or not registered
+
+**Fix**: Verify signon-ui package and D-Bus service:
+```bash
+# Check D-Bus service exists
+ls /run/current-system/sw/share/dbus-1/services/com.nokia.singlesignonui.service
+
+# Restart services
+pkill -f signond
+pkill -f signon-ui
+```
+
+### Check Logs
+
+```bash
+# User session logs
+journalctl --user -n 50 | grep -iE "signon|kaccounts|gdrive|google"
+
+# System logs
+journalctl -n 50 | grep -iE "signon|kaccounts"
+```
+
+---
+
+## ⚠️ Limitations
+
+1. **No Offline Access**: Files must be downloaded explicitly for offline use
+2. **No Background Sync**: Changes don't sync automatically in background
+3. **Streaming Only**: Large files may be slow to open
+4. **Single Account**: Each account gets a unique ID (google1, google2, etc.)
+
+### For Offline/Sync Needs
+
+Consider `rclone` for local synchronization:
+```bash
+# Manual sync example
+rclone sync gdrive: ~/GoogleDrive --progress
+```
+
+---
+
+## 📖 Related Documentation
+
+- **[Storage Overview](overview.md)** - Complete storage architecture
+- **[Desktop Overview](../desktop/overview.md)** - KDE Plasma configuration
+- **[CMOS Host](../infrastructure/hosts-cmos.md)** - Desktop host details
+
+---
+
+**Last Updated**: 2025-11-27
+**Maintained By**: Infrastructure Team
+
+---
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 💾 [Storage](overview.md)*

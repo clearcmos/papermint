@@ -1,0 +1,226 @@
+---
+title: "Home Manager Migration Plan"
+description: "This document outlines the plan to integrate home-manager and plasma-manager into the existing NixOS flake configuration, specifically targeting the cmos des..."
+---
+
+## Overview
+
+This document outlines the plan to integrate home-manager and plasma-manager into the existing NixOS flake configuration, specifically targeting the cmos desktop host for enhanced user-level configuration management.
+
+## Current State Analysis
+
+### System-Level Configuration (Current Approach)
+- All packages managed via `environment.systemPackages`
+- KDE configuration in system modules (`modules/desktop/kde.nix`)
+- User settings applied system-wide
+- Requires root privileges and full system rebuilds for any changes
+
+### Configuration Locations
+- **Desktop packages**: `modules/desktop/packages.nix` 
+- **KDE system config**: `modules/desktop/kde.nix`
+- **User accounts**: `modules/core/users.nix`
+- **Host-specific**: `hosts/cmos/default.nix`
+
+## Migration Strategy
+
+### Phase 1: Foundation Setup
+1. **Add home-manager to flake inputs**
+   - Add home-manager input to `flake.nix`
+   - Add plasma-manager input for KDE integration
+   - Configure home-manager as NixOS module
+
+2. **Create user configuration structure**
+   ```
+   home/
+   ├── users/
+   │   └── nicholas/
+   │       ├── default.nix          # Main user config
+   │       ├── desktop/
+   │       │   ├── kde-plasma.nix   # Plasma configuration
+   │       │   ├── applications.nix # App-specific settings
+   │       │   └── themes.nix       # Theming and appearance
+   │       ├── development/
+   │       │   ├── git.nix          # Git configuration
+   │       │   ├── shell.nix        # Shell customization
+   │       │   └── editors.nix      # Editor configurations
+   │       └── services/
+   │           └── user-services.nix # User systemd services
+   ```
+
+3. **Enable home-manager for cmos host**
+   - Import home-manager module in `hosts/cmos/default.nix`
+   - Configure nicholas user with home-manager
+
+### Phase 2: Configuration Migration
+
+#### High-Priority Migrations
+1. **KDE Plasma Configuration**
+   - Panel layout and widgets
+   - Keyboard shortcuts and hotkeys
+   - Window management rules
+   - Desktop effects and compositor settings
+   - Theme and appearance (colors, fonts, icons)
+
+2. **Application-Specific Configurations**
+   - Konsole profiles and color schemes
+   - Dolphin bookmarks and view preferences
+   - Firefox user.js preferences
+   - Git user configuration
+   - Shell aliases and functions
+
+3. **User Packages**
+   - Move user-specific packages from system to home-manager
+   - Keep system packages for shared/system services only
+
+#### Medium-Priority Migrations
+1. **Development Environment**
+   - Shell configuration (.bashrc, .zshrc)
+   - Development tools and utilities
+   - Editor configurations
+   - Environment variables
+
+2. **User Services**
+   - Personal backup scripts as user services
+   - Application autostart configurations
+   - Custom systemd user services
+
+#### Low-Priority Migrations
+1. **Dotfiles Management**
+   - Version control for configuration files
+   - Symlink management for legacy configs
+   - Migration of existing dotfiles
+
+### Phase 3: Advanced Features
+
+1. **Multi-User Support**
+   - Extend configuration to support additional users
+   - Shared vs. user-specific configurations
+
+2. **Host-Specific User Configs**
+   - Different configurations per host (cmos vs. t2)
+   - Conditional configurations based on host capabilities
+
+3. **Integration with Existing Services**
+   - Ensure home-manager configs work with existing system services
+   - Maintain compatibility with current backup scripts
+
+## Implementation Plan
+
+### Step 1: Flake Configuration
+```nix
+# flake.nix additions
+inputs = {
+  nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  home-manager = {
+    url = "github:nix-community/home-manager";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
+  plasma-manager = {
+    url = "github:pjones/plasma-manager";
+    inputs.nixpkgs.follows = "nixpkgs";
+    inputs.home-manager.follows = "home-manager";
+  };
+};
+```
+
+### Step 2: Host Integration
+```nix
+# hosts/cmos/default.nix additions
+imports = [
+  # ... existing imports
+  inputs.home-manager.nixosModules.home-manager
+];
+
+home-manager = {
+  useGlobalPkgs = true;
+  useUserPackages = true;
+  users.nicholas = import ../../home/users/nicholas;
+  extraSpecialArgs = { inherit inputs; };
+};
+```
+
+### Step 3: User Configuration Template
+```nix
+# home/users/nicholas/default.nix
+{ config, pkgs, inputs, ... }:
+{
+  imports = [
+    inputs.plasma-manager.homeManagerModules.plasma-manager
+    ./desktop/kde-plasma.nix
+    ./desktop/applications.nix
+    ./development/git.nix
+    ./development/shell.nix
+  ];
+
+  home = {
+    username = "nicholas";
+    homeDirectory = "/home/nicholas";
+    stateVersion = "24.11";
+  };
+
+  programs.home-manager.enable = true;
+}
+```
+
+## Benefits
+
+### For Users
+- **Faster iteration**: User-level changes without system rebuilds
+- **Personal customization**: Individual user preferences without affecting system
+- **Isolated environments**: User configs don't interfere with system stability
+- **Rollback capability**: Home-manager generations for easy rollbacks
+
+### For System Administration
+- **Reduced system complexity**: Fewer system-level configurations
+- **Better separation**: Clear boundary between system and user configs
+- **Easier maintenance**: User configs maintained independently
+- **Multi-user ready**: Easy to add additional users with custom configs
+
+### For Development
+- **Version-controlled dotfiles**: All user configs in git
+- **Reproducible environments**: Consistent setup across hosts
+- **Declarative configuration**: Everything as code
+- **Integration with existing flake**: Seamless with current architecture
+
+## Considerations and Risks
+
+### Potential Issues
+1. **Configuration conflicts**: System vs. user package conflicts
+2. **Service dependencies**: Ensuring user services work with system services
+3. **Migration complexity**: Moving existing configurations without breaking functionality
+4. **Learning curve**: New configuration syntax and patterns
+
+### Mitigation Strategies
+1. **Gradual migration**: Phase approach to minimize disruption
+2. **Backup configurations**: Keep current configs as backup during transition
+3. **Testing environment**: Test configurations before applying to main system
+4. **Documentation**: Maintain clear documentation of changes and rollback procedures
+
+## Success Metrics
+
+1. **Functional parity**: All current functionality preserved after migration
+2. **Improved workflow**: Faster user-level configuration changes
+3. **Enhanced customization**: More granular control over desktop environment
+4. **System stability**: No degradation in system reliability
+5. **Maintainability**: Easier to manage and update user configurations
+
+## Timeline Estimate
+
+- **Phase 1 (Foundation)**: 1-2 days
+- **Phase 2 (Migration)**: 3-5 days
+- **Phase 3 (Advanced)**: 2-3 days
+- **Testing and refinement**: 2-3 days
+
+**Total estimated time**: 8-13 days
+
+## Next Steps
+
+1. Review and approve this migration plan
+2. Create backup of current working configuration
+3. Begin Phase 1 implementation
+4. Test basic home-manager integration
+5. Proceed with gradual migration of configurations
+
+---
+
+*Last modified: 2025-09-14*

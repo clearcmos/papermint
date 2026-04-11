@@ -1,0 +1,440 @@
+---
+title: "AI Models Documentation"
+description: "Complete reference for AI models used in the Ollama-based infrastructure."
+---
+
+## Model Overview
+
+The system uses three specialized models, each optimized for specific tasks:
+
+| Model | Purpose | Size | Applications |
+|-------|---------|------|--------------|
+| **qwen2.5-coder:7b-instruct** | Coding assistance | 4.7GB | smart-commit |
+| **qwen2.5:7b-instruct** | General knowledge | 4.7GB | keeper, sage |
+| **bge-m3** | Text embeddings | 1.1GB | keeper |
+
+## Model Specifications
+
+### qwen2.5-coder:7b-instruct
+
+**Purpose**: Advanced coding assistance and code generation
+
+**Specifications**:
+- **Parameters**: 7.6B
+- **Quantization**: Q4_K_M
+- **Context Length**: 8192 tokens
+- **VRAM Usage**: ~4.7GB
+- **Specialization**: Code completion, debugging, documentation
+
+**API Usage**:
+```bash
+curl -X POST http://localhost:11434/api/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen2.5-coder:7b-instruct",
+    "prompt": "Write a Python function to calculate factorial",
+    "stream": false
+  }'
+```
+
+**Applications**:
+- **smart-commit**: Generates intelligent Git commit messages based on code changes
+- **Code analysis**: Understands programming patterns and best practices
+- **Documentation**: Generates code comments and documentation
+
+**Performance Characteristics**:
+- **Strengths**: Code understanding, multiple programming languages, efficient inference
+- **Context handling**: Excellent for large code files and complex logic
+- **Speed**: ~50-80 tokens/second on RX 6800 XT
+
+### qwen2.5:7b-instruct
+
+**Purpose**: General knowledge and conversational AI
+
+**Specifications**:
+- **Parameters**: 7.6B
+- **Quantization**: Q4_K_M
+- **Context Length**: 8192 tokens
+- **VRAM Usage**: ~4.7GB
+- **Specialization**: Natural language understanding, knowledge tasks
+
+**API Usage**:
+```bash
+curl -X POST http://localhost:11434/api/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen2.5:7b-instruct",
+    "prompt": "Categorize this note: Meeting about Q4 budget planning",
+    "stream": false
+  }'
+```
+
+**Applications**:
+- **keeper**: Note categorization and title generation
+- **sage**: Linux system administration assistance
+- **General queries**: Knowledge-based question answering
+
+**Performance Characteristics**:
+- **Strengths**: Broad knowledge base, multilingual support, instruction following
+- **Context handling**: Excellent for complex reasoning tasks
+- **Speed**: ~50-80 tokens/second on RX 6800 XT
+
+### bge-m3
+
+**Purpose**: Text embeddings for semantic similarity and search
+
+**Specifications**:
+- **Type**: Embedding model
+- **Quantization**: FP16
+- **Dimensions**: 1024-dimensional vectors
+- **VRAM Usage**: ~1.1GB
+- **Specialization**: Semantic understanding, text similarity
+
+**API Usage**:
+```bash
+curl -X POST http://localhost:11434/api/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "bge-m3",
+    "prompt": "Sample text for embedding generation"
+  }'
+```
+
+**Applications**:
+- **keeper**: Semantic search within notes
+- **Document similarity**: Finding related content
+- **Clustering**: Grouping similar text content
+
+**Performance Characteristics**:
+- **Strengths**: High-quality embeddings, multilingual support, efficient processing
+- **Processing speed**: ~100-200 embeddings/second
+- **Memory efficient**: Low VRAM usage compared to language models
+
+## Model Management
+
+### Automatic Download
+
+Models are automatically downloaded on first system startup:
+
+```bash
+# Check download status
+systemctl status ollama-model-preload.service
+
+# Manual model download
+ollama pull qwen2.5-coder:7b-instruct
+ollama pull qwen2.5:7b-instruct
+ollama pull bge-m3
+```
+
+### Model Storage
+
+```bash
+# Default model location
+/var/lib/ollama/models/
+
+# Check model storage usage
+du -sh /var/lib/ollama/models/
+
+# List installed models
+ollama list
+```
+
+### Model Loading Behavior
+
+The system uses intelligent model loading:
+
+1. **On-Demand Loading**: Models load when first requested
+2. **Memory Limit**: Maximum 2 models in VRAM simultaneously
+3. **LRU Eviction**: Least recently used models are unloaded
+4. **Keep-Alive**: Models stay loaded for 3 minutes after last use
+
+```bash
+# Check currently loaded models
+curl -s http://localhost:11434/api/ps | jq '.models[]'
+
+# Force model loading
+curl -X POST http://localhost:11434/api/generate \
+  -d '{"model": "qwen2.5-coder:7b-instruct", "prompt": "test", "keep_alive": "10m"}'
+```
+
+## Performance Optimization
+
+### VRAM Management
+
+**Current Configuration** (Gaming-Optimized):
+- **Maximum loaded**: 2 models (~9-10GB VRAM)
+- **Reserved for gaming**: 6-7GB VRAM
+- **Total VRAM**: 16GB (RX 6800 XT)
+
+**Alternative Configurations**:
+
+```bash
+# Maximum AI performance (all models loaded)
+# Edit /etc/nixos/modules/desktop/ollama.nix:
+OLLAMA_MAX_LOADED_MODELS = "3"  # Uses ~11GB VRAM
+
+# Maximum gaming compatibility (one model only)
+OLLAMA_MAX_LOADED_MODELS = "1"  # Uses ~5GB VRAM
+```
+
+### Context Length Optimization
+
+Current setting: 8192 tokens per model
+
+```bash
+# Check context usage for large requests
+curl -X POST http://localhost:11434/api/generate \
+  -d '{
+    "model": "qwen2.5-coder:7b-instruct",
+    "prompt": "very long code...",
+    "options": {"num_ctx": 8192}
+  }'
+```
+
+### Parallel Processing
+
+Current configuration: 6 parallel requests per model
+
+```bash
+# Test parallel processing
+for i in {1..6}; do
+  curl -X POST http://localhost:11434/api/generate \
+    -d '{"model": "qwen2.5:7b-instruct", "prompt": "Test '$i'"}' &
+done
+wait
+```
+
+## Model Quality and Quantization
+
+### Quantization Levels
+
+**Q4_K_M (Used by language models)**:
+- **Quality**: High (minimal loss from FP16)
+- **Size reduction**: ~4x smaller than FP16
+- **Performance**: Excellent balance of quality and speed
+- **Memory usage**: Optimal for GPU inference
+
+**FP16 (Used by bge-m3)**:
+- **Quality**: Maximum (no quantization loss)
+- **Size**: Larger than quantized versions
+- **Performance**: Fast embedding generation
+- **Use case**: Embeddings require high precision
+
+### Quality Comparison
+
+| Quantization | Model Size | Quality | Speed | VRAM Usage |
+|--------------|------------|---------|--------|------------|
+| **Q4_K_M** | 4.7GB | 98% of FP16 | Fast | Optimal |
+| **Q5_K_M** | 5.7GB | 99% of FP16 | Fast | Higher |
+| **Q8_0** | 7.2GB | 99.5% of FP16 | Medium | High |
+| **FP16** | 14GB | 100% | Slow | Maximum |
+
+Current choice (Q4_K_M) provides the best balance for gaming + AI workloads.
+
+## Model Updates and Versioning
+
+### Checking for Updates
+
+```bash
+# Check model versions
+ollama list
+
+# Check for newer versions online
+ollama show qwen2.5-coder:7b-instruct
+
+# Update a model
+ollama pull qwen2.5-coder:7b-instruct
+```
+
+### Version Management
+
+```bash
+# List all versions of a model
+ollama list | grep qwen2.5-coder
+
+# Use specific version
+curl -X POST http://localhost:11434/api/generate \
+  -d '{"model": "qwen2.5-coder:7b-instruct", "prompt": "test"}'
+
+# Remove old versions
+ollama rm old-model:version
+```
+
+## Custom Model Integration
+
+### Adding New Models
+
+1. **Download model**:
+```bash
+ollama pull new-model:version
+```
+
+2. **Update preload service** (`/etc/nixos/modules/desktop/ollama.nix`):
+```nix
+MODELS=(
+  "qwen2.5-coder:7b-instruct"
+  "qwen2.5:7b-instruct"
+  "bge-m3"
+  "new-model:version"  # Add here
+)
+```
+
+3. **Rebuild system**:
+```bash
+sudo nixos-rebuild switch --flake .#cmos
+```
+
+### Model Requirements
+
+**For Language Models**:
+- **Size**: &lt;8GB for gaming compatibility
+- **Format**: GGUF quantized (Q4_K_M or Q5_K_M)
+- **Context**: 8K+ tokens recommended
+- **Architecture**: Compatible with Ollama
+
+**For Embedding Models**:
+- **Size**: &lt;2GB recommended
+- **Dimensions**: 1024 or similar
+- **Format**: GGUF or native Ollama format
+- **Performance**: Fast inference required
+
+## Application-Specific Usage
+
+### smart-commit Integration
+
+**Model**: qwen2.5-coder:7b-instruct  
+**Purpose**: Code analysis and commit message generation
+
+```python
+# Example integration (from smart-commit)
+response = requests.post(
+    "http://localhost:11434/api/generate",
+    json={
+        "model": "qwen2.5-coder:7b-instruct",
+        "prompt": f"Generate commit message for: {diff}",
+        "stream": False,
+        "options": {"temperature": 0.3, "num_predict": 50}
+    }
+)
+```
+
+### keeper Integration
+
+**Models**: qwen2.5:7b-instruct (categorization) + bge-m3 (embeddings)  
+**Purpose**: Note management and semantic search
+
+```python
+# Categorization
+response = requests.post(
+    "http://localhost:11434/api/generate",
+    json={
+        "model": "qwen2.5:7b-instruct",
+        "prompt": f"Categorize this note: {content}",
+        "stream": False
+    }
+)
+
+# Embeddings
+response = requests.post(
+    "http://localhost:11434/api/embeddings",
+    json={
+        "model": "bge-m3",
+        "prompt": content
+    }
+)
+```
+
+### sage Integration
+
+**Model**: qwen2.5:7b-instruct  
+**Purpose**: Linux system administration assistance
+
+```rust
+// Example integration (from sage)
+let request = json!({
+    "model": "qwen2.5:7b-instruct",
+    "prompt": full_prompt,
+    "stream": true,
+    "options": {
+        "temperature": 0.1,
+        "num_predict": 500
+    }
+});
+```
+
+## Monitoring and Diagnostics
+
+### Model Performance Monitoring
+
+```bash
+# Check model response times
+time curl -X POST http://localhost:11434/api/generate \
+  -d '{"model": "qwen2.5-coder:7b-instruct", "prompt": "test", "stream": false}'
+
+# Monitor VRAM usage during inference
+watch -n 1 'rocm-smi --showmeminfo vram'
+
+# Check model loading/unloading
+journalctl -fu ollama.service | grep -E "(loading|unloading|model)"
+```
+
+### Performance Benchmarks
+
+**Typical Performance** (RX 6800 XT):
+- **qwen2.5-coder**: 50-80 tokens/second
+- **qwen2.5**: 50-80 tokens/second  
+- **bge-m3**: 100-200 embeddings/second
+
+**Load Times**:
+- **Cold load**: 5-10 seconds
+- **Warm load**: 1-2 seconds
+- **Model switch**: 3-5 seconds
+
+## Troubleshooting Models
+
+### Common Issues
+
+**Model not loading**:
+```bash
+# Check available VRAM
+rocm-smi --showmeminfo vram
+
+# Check model exists
+ollama list | grep model-name
+
+# Force reload
+curl -X POST http://localhost:11434/api/generate \
+  -d '{"model": "model-name", "keep_alive": 0}'
+```
+
+**Slow performance**:
+```bash
+# Check GPU utilization
+rocm-smi
+
+# Monitor system resources
+htop
+
+# Check model size vs available VRAM
+ollama show model-name
+```
+
+**Out of memory errors**:
+```bash
+# Reduce loaded models
+# Edit OLLAMA_MAX_LOADED_MODELS in configuration
+
+# Check for memory leaks
+systemctl restart ollama.service
+```
+
+## Related Documentation
+
+- [Configuration](configuration.md) - Service configuration
+- [Performance](performance.md) - Performance optimization
+- [CPU Mode](cpu.md) - Running models on CPU
+- [API Reference](api.md) - API documentation
+
+---
+
+*Last updated: September 21, 2025*

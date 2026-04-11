@@ -1,0 +1,531 @@
+---
+title: "Services & Applications"
+description: "*Comprehensive service management and application configuration*"
+---
+
+## 🎯 Services Overview
+
+This section covers all web services, monitoring systems, and applications running across the infrastructure, including their configuration, management, and integration.
+
+### 🏗️ Service Architecture
+
+```
+Internet
+    ↓
+[Cloudflare DNS]
+    ↓ (HTTPS)
+[Traefik Reverse Proxy]
+    ├─ Static Routes → Services
+    └─ Protected Routes
+           ↓
+    [OAuth2-Proxy]
+           ↓
+    [Keycloak OIDC]
+           ↓
+    [Google IDP + Group Check]
+           ↓ (Authorized)
+    [Upstream Service]
+
+Hosts:
+┌─────────────┬─────────────┬─────────────┐
+│    misc     │   jimmich   │    cmos     │
+│  (Primary)  │  (Storage)  │ (Desktop)   │
+│  - Traefik  │  - Backup   │  - Gaming   │
+│  - Keycloak │  - Files    │  - AI/GPU   │
+│  - Services │             │             │
+└─────────────┴─────────────┴─────────────┘
+```
+
+---
+
+## 📚 Services Documentation Index
+
+### 🌐 Web Services
+
+| Service | Host | Purpose | Status | Port | Auth |
+|---------|------|---------|--------|------|------|
+| **Memos** | misc | Personal note-taking | ✅ Active | 443 | OAuth2 (memos-access) |
+| **NixDocs** | misc | Infrastructure docs | ✅ Active | 443 | OAuth2 (docs-access) |
+| **Filebrowser** | misc | Web file management | ✅ Active | 443 | OAuth2 (filebrowser-access) |
+| **PrivateBin** | misc | Secure pastebin | ✅ Active | 443 | OAuth2 (privatebin-access) + Public read |
+| **Security Dashboard** | misc | Service protection status | ✅ Active | 443 | OAuth2 (security-dashboard-access) |
+| **[Firebase Cloud Messaging](firebase-cloud-messaging.md)** | misc | Push notification test app | 🔄 Disabled | 443 | Public |
+
+### ⏰ Notification Services
+
+| Service | Host | Purpose | Status | Documentation |
+|---------|------|---------|--------|---------------|
+| **[Timer Notifications](timer-notifications.md)** | cmos + GCP | Cross-device timer notifications with FCM + RTDB | ✅ Active | [Overview](timer-notifications.md), [Cloud Functions](timer-notifications-cloud-functions.md) |
+
+**Component Stack**:
+- **CLI Timer** (`t` command): Cloud-based timer scheduling with Google Cloud Tasks
+- **Cloud Functions**: `schedule_timer`, `send_notification`, `dismiss_timer` (Python, GCP)
+- **Firebase Realtime Database**: State storage with locked-down security (Admin SDK only)
+- **Phone Notifications**: FCM push (timer_complete + timer_dismissed types)
+- **Desktop Notifications**: KDE D-Bus notifications with looping alarm sound
+
+**Key Features**:
+- **Bidirectional sync**: Dismiss on phone → KDE auto-dismisses (RTDB listener), dismiss on KDE → phone auto-dismisses (FCM push)
+- **Looping alarm**: `message-new-instant.oga` plays until dismissed
+- **Click-to-dismiss**: Click anywhere on KDE notification (D-Bus default action)
+- **TUI Management**: `t list` shows all active timers with live countdown
+- **Cloud-based**: Timers survive terminal close and system reboots
+- **Secured RTDB**: `.read: false, .write: false` - Admin SDK only access
+- **Cost**: &lt; 1% of GCP free tier (virtually free)
+
+**Technical Implementation**:
+- **Scheduling**: Google Cloud Tasks with delayed HTTP execution
+- **State Management**: Firebase RTDB (`timers/{id}`) with Admin SDK access only
+- **Desktop Service**: systemd user service with D-Bus + dbus-monitor for signals
+- **Phone Sync**: FCM push with `type: timer_dismissed` when dismissed from desktop
+- **Desktop Sync**: RTDB listener detects phone dismissals via status change
+- **Authentication**: Firebase Admin SDK (bypasses RTDB security rules)
+- **Secrets**: Encrypted via agenix (`firebase-service-account.age`, `fcm-device-phone-token.age`)
+
+### 📸 Media Services
+
+| Service | Host | Purpose | Status | Port | Auth |
+|---------|------|---------|--------|------|------|
+| **[Immich](../services/immich.md)** | jimmich | Photo & video management | ✅ Active | 2283 | Google OAuth |
+| **[Jellyfin](../services/jellyfin.md)** | jimmich | Media streaming (movies/TV/music) | ✅ Active | 8096 | Password |
+| **[SABnzbd](../services/media.md)** | misc | Usenet downloader | ✅ Active | 8098 | OAuth2 (media-access) |
+| **[Radarr](../services/media.md)** | misc | Automated movie management | ✅ Active | 8100 | OAuth2 (media-access) |
+| **[Sonarr](../services/media.md)** | misc | Automated TV show management | ✅ Active | 8102 | OAuth2 (media-access) |
+
+### 📊 Monitoring Services
+
+| Service | Host | Purpose | Status | Port | Auth |
+|---------|------|---------|--------|------|------|
+| **Cockpit** | All | System management | ✅ Active | 9090 | System |
+| **Glances** | misc | System monitoring | ✅ Active | 443 | OAuth2 (glances-access) |
+| **radeontop-web** | cmos | GPU monitoring | ✅ Active | 8001 | None |
+
+### 🛡️ Security Services
+
+| Service | Host | Purpose | Status | Port | Auth |
+|---------|------|---------|--------|------|------|
+| **Clear NDR** | misc | Network detection & response (Suricata IDS/IPS) | ✅ Active | 443 | OAuth2 (suricata-access) + Scirius login |
+
+### 📁 File Services
+
+| Service | Host | Purpose | Status | Protocol |
+|---------|------|---------|--------|----------|
+| **Samba/CIFS** | All | File sharing | ✅ Active | SMB |
+| **Google Drive** | cmos | Cloud sync | ✅ Active | KDE KIO |
+| **Backup** | jimmich | Automated backup | ✅ Active | rsync |
+
+---
+
+## 🌐 Web Services Configuration
+
+### 📁 File Management
+
+**[Filebrowser](web-services-overview.md)**:
+- Web-based file management
+- Multi-user access control
+- Upload/download capabilities
+- Preview and editing features
+
+**Configuration**:
+- **Storage**: Network shares integration
+- **Authentication**: OAuth2 via Keycloak (filebrowser-access group)
+- **Permissions**: Role-based access control
+- **Security**: Sandboxed execution
+
+### 🏠 Service Dashboards
+
+**Security Dashboard** (security.bedrosn.com):
+- Service protection status overview
+- Authentication status for all services
+- Security posture scores
+- Quick access to all services
+
+**[Security Dashboard](security-dashboard.md)** (https://security.bedrosn.com):
+- Real-time service inventory and authentication status
+- **Security posture scores** - Mozilla Observatory-based header analysis (0-100)
+- User access control visibility for Keycloak-protected services
+- Background caching for sub-second response times (&lt;0.2s)
+- OAuth2 authentication via Keycloak with Google IDP
+
+**Features**:
+- **4-Column Layout**: Service, Authentication, Users, Security Posture
+- **Security Scoring**: Real-time HTTP header analysis with detailed breakdown
+  - HSTS, CSP, X-Frame-Options, X-Content-Type-Options compliance
+  - Visual indicators (🟢 Present, 🟡 Default, 🔴 Missing)
+  - Score deductions for missing critical headers
+- **Live API Queries**: Real-time data from Keycloak API and HTTP header fetching
+- **User Access Display**: Lists authorized users for each Keycloak-protected service
+- **Background Caching**: 5-minute refresh cycle (4.7s → 0.19s load time)
+
+**Technical Implementation**:
+- **Backend**: FastAPI (Python) on port 8091 with async header fetching
+- **Authentication**: OAuth2-Proxy (port 4182) with `security-dashboard-access` group
+- **Security**: Comprehensive systemd hardening (see [hardening guide](../security/security-dashboard-hardening.md))
+- **Performance**: Parallel HTTP requests with asyncio.gather(), global cache dictionary
+
+### 📝 Note-Taking & Documentation
+
+**[Memos](https://notes.bedrosn.com)**:
+- Personal note-taking and memo management
+- Markdown support with rich formatting
+- Tag-based organization
+- OAuth2 authentication via Keycloak
+
+**Configuration**:
+- **Storage**: SQLite database with persistent volumes
+- **Authentication**: OAuth2-Proxy with group-based access (`memos-access`)
+- **Deployment**: Podman container on port 5230, OAuth2-proxy on 5231
+- **Security**: TLS via Traefik, Keycloak OIDC integration
+
+**[NixDocs](https://nixdocs.bedrosn.com)**:
+- Comprehensive infrastructure documentation
+- MkDocs Material theme with dark/light mode toggle
+- Full-text search with suggestions and highlighting
+- Auto-generated from git repository
+
+**Features**:
+- **Live Documentation**: Built from `/etc/nixos/docs/` directory
+- **Organized Navigation**: Tabbed sections with expandable sidebar
+- **Responsive Design**: Material Design with mobile/tablet/desktop support
+- **Search**: Full-text search with instant suggestions
+- **Code Highlighting**: Syntax highlighting with copy button
+
+**Technical Implementation**:
+- **Build System**: [mkdocs-flake](https://github.com/applicative-systems/mkdocs-flake) Nix derivation
+- **Theme**: MkDocs Material with admonitions, tabs, and code annotations
+- **Authentication**: OAuth2-Proxy with Keycloak (`nixdocs-access` group)
+- **Deployment**: Nginx backend (port 3080) proxied through Traefik
+
+### 📋 Secure Sharing
+
+**[PrivateBin](https://privatebin.bedrosn.com)**:
+- Secure, ephemeral text sharing
+- Client-side encryption
+- Burn-after-reading functionality
+- Syntax highlighting support
+
+**Configuration**:
+- **Backend**: Docker container on port 8081
+- **Nginx Proxy**: Port 8090 for WAN/LAN detection
+- **Authentication**: OAuth2-Proxy (port 8092) with Keycloak `privatebin-access` group
+- **WAN Access**: Anonymous read-only for shared pastes (view but cannot create)
+- **LAN Access**: Full functionality after OAuth2 authentication
+- **Security**: TLS via Traefik, security headers middleware
+
+---
+
+## 📊 Monitoring & Management
+
+### 🖥️ System Management
+
+**Cockpit Dashboard**:
+- Web-based system administration
+- Real-time performance monitoring
+- Service management interface
+- Log viewing and analysis
+- Protected by OAuth2-proxy with per-host authentication (cockpit.bedrosn.com, cmos-pit.bedrosn.com, jimmich-pit.bedrosn.com, misc-pit.bedrosn.com)
+
+**Key Features**:
+- **Multi-host Management**: Monitor all hosts from one interface
+- **Performance Metrics**: CPU, memory, disk, network
+- **Service Control**: Start, stop, restart services
+- **Security**: OAuth2-proxy + Keycloak authentication
+
+### 📈 Performance Monitoring
+
+**[Glances](monitoring/README.md)**:
+- Comprehensive system monitoring
+- Web interface with real-time updates
+- Historical data collection
+- Alert configuration
+
+**Metrics Collected**:
+- **System**: CPU, memory, swap usage
+- **Network**: Interface statistics, connections
+- **Disk**: I/O statistics, space usage
+- **Processes**: Top processes, resource usage
+
+### 🎮 GPU Monitoring
+
+**[radeontop-web](monitoring/README.md)**:
+- AMD GPU performance monitoring
+- Real-time VRAM usage
+- Temperature and power monitoring
+- Gaming vs AI workload visualization
+
+---
+
+## 🔧 Service Management
+
+### 🚀 Service Deployment
+
+**Deployment Architecture**:
+```
+Development → Testing → Production
+     ↓           ↓         ↓
+   Local     Staging    Live Service
+```
+
+**Deployment Process**:
+1. **Configuration**: Update NixOS service module
+2. **Testing**: `nixos-rebuild test` for validation
+3. **Deployment**: `nixos-rebuild switch` for production
+4. **Verification**: Health checks and monitoring
+
+### 🔄 Service Discovery
+
+**Internal Service Discovery**:
+- **mDNS/Avahi**: Local service discovery
+- **DNS**: Internal domain resolution
+- **Service Mesh**: Traefik service discovery
+
+**External Access**:
+- **Cloudflare DNS**: Public domain management
+- **Traefik**: Automatic HTTPS certificates
+- **Load Balancing**: Service distribution
+
+### 📋 Configuration Management
+
+**Service Configuration**:
+- **Declarative**: All services defined in NixOS modules
+- **Version Controlled**: Configuration tracked in git
+- **Secrets**: Encrypted with agenix
+- **Environment**: Consistent across deployments
+
+---
+
+## 🛡️ Network Security
+
+### 🔍 Intrusion Detection & Prevention
+
+**[Clear NDR Community](../guides/suricata.md)** (suricata.bedrosn.com):
+- Suricata-based network detection and response platform
+- Real-time network traffic analysis and threat detection
+- Advanced packet capture and event correlation
+- Comprehensive rule management and threat hunting
+
+**Component Stack**:
+- **Suricata**: IDS/IPS engine monitoring network interface enp3s0f0
+- **Scirius**: Web-based ruleset management and hunting interface
+- **EveBox**: Modern event viewer for real-time alert browsing
+- **OpenSearch**: Log storage and analytics (2GB RAM allocation)
+- **Arkime**: Full packet capture and PCAP browsing
+- **PostgreSQL + RabbitMQ**: Backend services
+
+**Key Features**:
+- **Threat Detection**: ET Open ruleset with automatic daily updates
+- **Network Monitoring**: Full visibility into network traffic patterns
+- **Event Analysis**: Filterable alerts with detailed metadata
+- **Rule Management**: Enable/disable rulesets via web UI
+- **Packet Capture**: Full PCAP storage and analysis
+- **Dashboards**: OpenSearch visualizations for traffic analysis
+
+**Technical Implementation**:
+- **Deployment**: Docker Compose stack (13+ containers)
+- **Authentication**: OAuth2-proxy (port 8095) + Scirius login (clearndr/clearndr)
+- **Access Control**: Keycloak group `suricata-access` required
+- **Ports**: 8096 (HTTPS), 8097 (HTTP) - remapped to avoid Traefik conflict
+- **Management**: stamusctl binary at `/var/lib/clear-ndr/bin/`
+- **Helper Commands**: `clear-ndr-status`, `clear-ndr-logs`, `clear-ndr-restart`
+
+**Hardware Considerations**:
+- **Host**: misc (i5-4260U, 15GB RAM, 816GB disk)
+- **Resource Usage**: Borderline for Clear NDR (OpenSearch 2GB + 11 other containers)
+- **Network**: Monitoring enp3s0f0 interface
+
+---
+
+## 🔐 Service Security
+
+### 🛡️ Authentication Integration
+
+**Modern Stack (Keycloak + OAuth2-Proxy)**:
+- **Keycloak**: Centralized identity provider with Google IDP federation
+  - Whitelist-based user pre-creation
+  - First Broker Login flow (no auto-registration)
+  - Declarative group management via `keycloak-user-config.age`
+  - OIDC tokens with groups claim
+- **OAuth2-Proxy**: Service-level authorization proxy
+  - OIDC client for Keycloak
+  - Group-based access control (`--allowed-group`)
+  - Per-service authorization (e.g., `docs-access`, `glances-access`)
+  - Session management with secure cookies
+- **Services Using**: Glances, Memos, NixDocs, Security Dashboard, SABnzbd, Radarr, Sonarr, PrivateBin
+
+**Benefits of Keycloak Stack**:
+- ✅ **Declarative**: Groups auto-created from user config
+- ✅ **Scalable**: Add services by updating one config file
+- ✅ **Fine-grained**: Per-service group membership
+- ✅ **Auditable**: All access decisions in Keycloak logs
+
+### 🌐 Network Security
+
+**Traefik Security**:
+- TLS termination with Let's Encrypt
+- Security headers (HSTS, CSP, etc.)
+- Rate limiting and DDoS protection
+- Geographic access control
+
+**Service Isolation**:
+- **Systemd**: Service sandboxing
+- **Network**: Isolated service networks
+- **Storage**: Separate data directories
+- **Users**: Dedicated service users
+
+---
+
+## 📊 Service Monitoring
+
+### 🔍 Health Monitoring
+
+**Service Health Checks**:
+```bash
+# Check all services status
+systemctl status --all | grep -E "(failed|error)"
+
+# Monitor service logs
+journalctl -u <service-name> -f
+
+# Check service dependencies
+systemctl list-dependencies <service-name>
+```
+
+**Automated Monitoring**:
+- **Uptime**: Service availability monitoring
+- **Performance**: Response time and throughput
+- **Resources**: CPU, memory, disk usage
+- **Logs**: Error detection and alerting
+
+### 📈 Performance Metrics
+
+**Key Performance Indicators (KPIs)**:
+- **Response Time**: &lt; 200ms for local services
+- **Uptime**: > 99.9% availability
+- **Resource Usage**: &lt; 80% of allocated resources
+- **Error Rate**: &lt; 0.1% of requests
+
+### 🚨 Alerting Configuration
+
+**Alert Thresholds**:
+- **Service Down**: Immediate alert
+- **High Response Time**: > 1 second
+- **Resource Exhaustion**: > 90% usage
+- **Error Spike**: > 5% error rate
+
+---
+
+## 🛠️ Maintenance Procedures
+
+### 📅 Regular Maintenance
+
+**Daily**:
+- Check service health via Cockpit dashboard
+- Monitor resource usage and performance
+- Review error logs for anomalies
+
+**Weekly**:
+- Update service configurations
+- Performance optimization review
+- Security log analysis
+
+**Monthly**:
+- Service performance review
+- Resource allocation optimization
+- Documentation updates
+
+### 🔄 Service Updates
+
+**Update Process**:
+1. **Preparation**: Review update notes and dependencies
+2. **Testing**: Deploy to test environment
+3. **Backup**: Create service configuration backup
+4. **Deployment**: Apply updates with monitoring
+5. **Verification**: Confirm service functionality
+6. **Rollback**: Revert if issues detected
+
+---
+
+## 🚨 Troubleshooting Guide
+
+### 🔧 Common Issues
+
+**Service Won't Start**:
+```bash
+# Check service status
+systemctl status <service-name>
+
+# Check service logs
+journalctl -u <service-name> -n 50
+
+# Check dependencies
+systemctl list-dependencies <service-name> --failed
+```
+
+**Authentication Problems**:
+```bash
+# Check Keycloak status
+systemctl status keycloak
+
+# Check OAuth2 proxy services
+systemctl status oauth2-proxy-*
+
+# Test Keycloak health
+curl -I https://keycloak.bedrosn.com/realms/web
+```
+
+**Performance Issues**:
+```bash
+# Check resource usage
+htop
+iostat -x 1
+
+# Check network connectivity
+ping target-host
+curl -w "@curl-format.txt" https://service.bedrosn.com
+```
+
+### 🆘 Emergency Procedures
+
+**Service Outage**:
+1. **Immediate**: Check service status and logs
+2. **Assessment**: Determine scope and impact
+3. **Communication**: Notify users if needed
+4. **Resolution**: Restart or reconfigure service
+5. **Follow-up**: Document incident and prevention
+
+**Performance Degradation**:
+1. **Monitoring**: Identify performance bottlenecks
+2. **Resource Check**: Verify CPU, memory, disk usage
+3. **Network**: Check network connectivity and latency
+4. **Optimization**: Apply performance tuning
+5. **Verification**: Confirm performance restoration
+
+---
+
+## 📖 Related Documentation
+
+### 🏗️ Infrastructure
+- **[Infrastructure Overview](../infrastructure/overview.md)** - System architecture
+- **[Host Configuration](../infrastructure-overview.md#service-distribution)** - Service distribution
+
+### 🔐 Security
+- **[Authentication](../security/authentication/README.md)** - Service authentication
+- **[Network Security](../security/network-security-overview.md)** - Service security
+
+### 🖥️ Desktop
+- **[Desktop Services](../desktop/overview.md)** - Desktop-specific services
+- **[Applications](../desktop/applications/)** - Desktop applications
+
+### 🚨 Troubleshooting
+- **[Service Issues](../troubleshooting/overview.md)** - Service troubleshooting
+- **[Performance](../troubleshooting-overview.md#performance-issues)** - Performance optimization
+
+---
+
+**Last Updated**: 2026-01-10
+**Service Architecture**: Traefik + Keycloak/OAuth2-Proxy + NixOS + GCP Cloud Functions
+**Next Review**: December 25, 2025
+**Service Availability**: 99.9% uptime target
+
+---
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🏗️ [Infrastructure](../infrastructure/overview.md) | 🔐 [Security](../security/overview.md)*

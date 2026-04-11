@@ -1,0 +1,198 @@
+---
+title: "Brave Secure Preferences Reset - Extensions Disabled"
+description: "Date: 2026-01-14"
+---
+
+**Issue:** All Brave extensions disabled, login sessions lost after Secure Preferences file reset
+**Severity:** Medium (recoverable, no data loss)
+
+## Problem Description
+
+Brave browser suddenly loses all extensions and some login sessions. Extensions appear in `brave://extensions` but are all disabled. Some websites require re-authentication.
+
+User notices:
+- Extensions toolbar is empty
+- Websites that were previously logged in now require login
+- Extension settings/data may be preserved but extensions are non-functional
+
+## Error Signature
+
+The `Secure Preferences` file is reset to just a MAC hash:
+
+```bash
+cat ~/.config/BraveSoftware/Brave-Browser/Default/"Secure Preferences"
+```
+
+**Corrupted state (problem):**
+```json
+{"protection":{"super_mac":"B613679A0814D9EC772F95D778C35FC5FF1697C493715653C6C712144292C5AD"}}
+```
+
+**Healthy state (normal):**
+```json
+{
+  "extensions": {
+    "settings": {
+      "extension_id_here": { ... extension data ... }
+    }
+  },
+  "protection": {
+    "macs": { ... },
+    "super_mac": "..."
+  }
+}
+```
+
+Additionally, extension states in `Preferences` file show `state: null`:
+
+```bash
+cat ~/.config/BraveSoftware/Brave-Browser/Default/Preferences | \
+  jq '.extensions.settings | to_entries[] | {id: .key, name: .value.manifest.name, state: .value.state}'
+```
+
+All extensions show `"state": null` instead of `"state": 1` (enabled).
+
+## Root Cause
+
+**Brave/Chromium uses Secure Preferences as a tamper-detection mechanism.** When Brave detects that preferences were corrupted or modified externally, it resets the Secure Preferences file to prevent potentially malicious modifications from taking effect.
+
+**Common triggers:**
+1. **Crash during write** - Brave was killed while writing preferences (power loss, OOM kill, force quit)
+2. **Filesystem corruption** - Disk errors during preference save
+3. **Interrupted shutdown** - System shutdown before Brave finished saving
+4. **Major version upgrade** - Rarely, Brave upgrades invalidate old preference formats
+
+**In this case:** System was rebooted on Jan 11, and Brave likely crashed or was killed during the previous session while preferences were being written.
+
+## Diagnosis Steps
+
+1. **Check Secure Preferences file:**
+   ```bash
+   cat ~/.config/BraveSoftware/Brave-Browser/Default/"Secure Preferences" | head -c 200
+   ```
+   If it only contains `protection.super_mac`, it's been reset.
+
+2. **Check extension states:**
+   ```bash
+   cat ~/.config/BraveSoftware/Brave-Browser/Default/Preferences | \
+     jq '.extensions.settings | to_entries[] | {name: .value.manifest.name, state: .value.state}' | head -30
+   ```
+   All showing `state: null` confirms the issue.
+
+3. **Verify extensions still installed:**
+   ```bash
+   ls ~/.config/BraveSoftware/Brave-Browser/Default/Extensions/
+   ```
+   Extension directories should still exist (data not lost).
+
+4. **Check cookies are intact:**
+   ```bash
+   sqlite3 ~/.config/BraveSoftware/Brave-Browser/Default/Cookies "SELECT COUNT(*) FROM cookies;"
+   ```
+   Should return a number > 0 (cookies preserved).
+
+## Recovery
+
+### Step 1: Re-enable Extensions
+
+Extensions are still installed, just disabled. Re-enable them manually:
+
+1. Open `brave://extensions`
+2. Toggle ON each extension you want to enable
+3. Extensions should activate immediately with their previous settings
+
+### Step 2: Policy-Enforced Extensions
+
+Extensions installed via NixOS policy (`/etc/brave/policies/managed/policies.json`) should auto-reinstall on Brave restart:
+
+```bash
+# Check which extensions are policy-enforced
+cat /etc/brave/policies/managed/policies.json | jq '.ExtensionSettings | keys'
+```
+
+**To trigger policy reload:**
+1. Completely quit Brave (check with `pkill brave`)
+2. Reopen Brave
+3. Policy-enforced extensions should auto-install and enable
+
+### Step 3: Re-authenticate Websites
+
+Some login sessions may be invalidated. Log back into affected sites. Cookies themselves are usually preserved, but some sites validate against Secure Preferences data.
+
+## Prevention
+
+### Graceful Shutdown
+Ensure Brave is closed properly before system shutdown/reboot:
+
+```bash
+# Before rebooting
+pkill brave
+sleep 2
+sudo reboot
+```
+
+### Avoid Force-Killing Brave
+Don't use `kill -9` or force-quit on Brave. Use normal close or `pkill brave` (sends SIGTERM).
+
+### Backup Preferences (Optional)
+Create periodic backups of Brave preferences:
+
+```bash
+# Add to cron or systemd timer
+cp ~/.config/BraveSoftware/Brave-Browser/Default/Preferences \
+   ~/.config/BraveSoftware/Brave-Browser/Default/Preferences.backup
+cp ~/.config/BraveSoftware/Brave-Browser/Default/"Secure Preferences" \
+   ~/.config/BraveSoftware/Brave-Browser/Default/"Secure Preferences.backup"
+```
+
+## NixOS-Specific Notes
+
+### Policy-Managed Extensions
+
+This NixOS configuration enforces certain extensions via policy (`modules/desktop/brave.nix`):
+
+| Extension ID | Name |
+|--------------|------|
+| `aeblfdkhhhdcdjpifhhbdiojplfjncoa` | 1Password |
+| `cjpalhdlnbpafiamejdnhcphjbkeiagm` | uBlock Origin |
+| `jcokdfogijmigonkhckmhldgofjmfdak` | 1Password (legacy) |
+| `mmioliijnhnoblpgimnlajmefafdfilb` | MetaMask |
+| `mmpokgfcmbkfdeibafoafkiijdbfblfg` | Vimium |
+
+These should auto-reinstall after Brave restart regardless of Secure Preferences state.
+
+### Browser Signin Disabled
+
+The policy `BrowserSignin = 0` disables Brave Sync. This is intentional and unrelated to website logins.
+
+## What Data Is Preserved
+
+Even with Secure Preferences reset:
+
+| Data | Status | Notes |
+|------|--------|-------|
+| Bookmarks | Preserved | Stored in `Bookmarks` file |
+| History | Preserved | Stored in `History` SQLite DB |
+| Cookies | Preserved | Stored in `Cookies` SQLite DB |
+| Saved Passwords | Preserved | Stored in `Login Data` (encrypted) |
+| Extension Data | Preserved | Stored in `Extensions/` subdirectories |
+| Extension Enabled State | **LOST** | Must re-enable manually |
+| Some Site Logins | May need re-auth | Sites may check secure cookie flags |
+
+## Related Issues
+
+- This is unrelated to Brave updates breaking extensions
+- This is unrelated to extension conflicts or corruption
+- Similar issues can occur in Chrome/Chromium (same codebase)
+
+## References
+
+- [Chromium Secure Preferences Documentation](https://chromium.googlesource.com/chromium/src/+/HEAD/docs/user_data_dir.md)
+- [Brave Browser Source](https://github.com/nicholasbedrosn/brave-browser)
+
+---
+
+**Last Updated**: 2026-01-14
+
+---
+*[Home](../README.md) | [Navigation](../NAVIGATION.md) | [Troubleshooting Overview](overview.md)*

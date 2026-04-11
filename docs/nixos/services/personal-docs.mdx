@@ -1,0 +1,73 @@
+---
+title: "Personal Docs"
+description: "*Mintlify documentation site for personal documents with search API*"
+---
+
+## Overview
+
+A Mintlify-based documentation site serving personal documents from the NAS, with an AI-powered search API. Mirrors the NixDocs architecture but for private documents.
+
+## Architecture
+
+```
+LAN → cmos:3081 (Nginx proxy)
+         ├── /api/* → FastAPI search (cmos:3003)
+         └── /*     → Mintlify dev server (cmos:3010)
+
+WAN → Traefik (mydocs.bedrosn.com) → OAuth2-proxy (misc:4190) → cmos:3081
+```
+
+**Components:**
+- **Mintlify dev server**: Port 3010 (localhost), serves rendered docs
+- **FastAPI search API**: Port 3003 (localhost), AI-powered search via Ollama embeddings
+- **Nginx proxy**: Port 3081 (LAN accessible), combines Mintlify + search API
+- **OAuth2-proxy**: Port 4190 (misc), WAN access via mydocs.bedrosn.com
+- **Module**: `modules/desktop/personal-docs.nix`
+- **OAuth2 module**: `modules/services/oauth2-proxy-personal-docs.nix`
+
+## Document Sync
+
+Documents are synced from NAS on every `nixos-rebuild`:
+- **Source**: `/mnt/syno/nextcloud/documents/personal`
+- **Destination**: `/home/nicholas/git/mine/papermint/personal/`
+- Script: `papermint/search/sync-docs.py`
+- Search re-indexes automatically after sync
+
+## Ports
+
+| Port | Service | Access |
+|------|---------|--------|
+| 3010 | Mintlify dev server | localhost only |
+| 3003 | FastAPI search API | localhost only |
+| 3081 | Nginx proxy | LAN + WAN (via OAuth2) |
+| 4190 | OAuth2-proxy | misc host, WAN |
+
+## Authentication
+
+- **LAN**: Direct access via `cmos.home.arpa:3081` (no auth)
+- **WAN**: OAuth2-proxy + Keycloak at `mydocs.bedrosn.com`
+- Keycloak group: `personal-docs-access`
+
+## Service Management
+
+```bash
+# Check Mintlify status
+systemctl status personal-docs-mintlify
+
+# Check search API
+systemctl status personal-docs-search
+
+# View logs
+journalctl -u personal-docs-mintlify -n 20
+journalctl -u personal-docs-search -n 20
+
+# Force re-index search
+curl -X POST http://127.0.0.1:3003/api/reindex
+```
+
+---
+
+**Last Updated**: 2026-03-10
+
+---
+*[Home](../README.md) | [Services](overview.md)*

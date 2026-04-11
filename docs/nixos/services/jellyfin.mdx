@@ -1,0 +1,538 @@
+---
+title: "Jellyfin Media Server"
+description: "*Self-hosted media streaming with declarative library configuration*"
+---
+
+## 🎯 Overview
+
+Jellyfin is a free and open-source media server running on the **jimmich** host. It provides Netflix-like streaming functionality for your personal media collection with support for movies, TV shows, music, and home videos.
+
+**Key Features**:
+- 🎥 **Multi-Library Support**: Movies, TV shows, documentaries, music, and more
+- 📱 **Cross-Platform Apps**: Web, mobile (iOS/Android), desktop, and smart TV apps
+- 🎭 **Rich Metadata**: Automatic metadata fetching with posters and descriptions
+- 👥 **User Management**: Declarative user configuration with hashed passwords
+- 💾 **Network Storage**: Media stored on CIFS mount for centralized access
+- 🔧 **Declarative Config**: Libraries and users managed via NixOS modules
+- 🎮 **Hardware Transcoding**: Intel VA-API (i965 driver) for Haswell CPU
+
+---
+
+## 🏗️ Architecture
+
+### 📊 **Component Stack**
+```
+[Client Apps] (Web/Mobile/TV)
+        ↓
+[Traefik] (jellyfin.bedrosn.com:443)
+        ↓
+[Jellyfin Server] (192.168.1.10:8096)
+        └─ [Media Storage] (/mnt/syno/videos/ → NAS)
+```
+
+### 🖥️ **Host Information**
+- **Host**: jimmich (192.168.1.10)
+- **Port**: 8096 (backend), 443 (Traefik frontend)
+- **Domain**: https://jellyfin.bedrosn.com
+- **Storage**: `/mnt/syno/videos/` (CIFS mount to NAS)
+- **Config**: `/var/lib/jellyfin/` (local state)
+
+---
+
+## 🔧 Configuration
+
+### 📚 **Media Libraries**
+
+Jellyfin is configured with **six declarative media libraries**:
+
+| Library | Type | Path | Content |
+|---------|------|------|---------|
+| **Documentaries** | Movies | `/mnt/syno/videos/documentaries` | Documentary films |
+| **Movies** | Movies | `/mnt/syno/videos/movies` | Feature films |
+| **TV** | TV Shows | `/mnt/syno/videos/tv` | TV series and episodes |
+| **Music** | Music | `/mnt/syno/videos/music` | Music albums and tracks |
+| **Scenery** | Home Videos | `/mnt/syno/videos/scenery` | Scenic videos |
+| **Workout** | Home Videos | `/mnt/syno/videos/workout` | Workout videos |
+
+**Declarative Configuration**:
+```nix
+# modules/services/jellyfin.nix
+services.declarative-jellyfin.libraries = {
+  Movies = {
+    enabled = true;
+    contentType = "movies";
+    pathInfos = [ "/mnt/syno/videos/movies" ];
+  };
+  # ... (other libraries)
+};
+```
+
+### 👤 **User Management**
+
+**Admin User** (declarative):
+```nix
+# modules/services/jellyfin.nix
+services.declarative-jellyfin.users = {
+  nicholas = {
+    mutable = false;
+    permissions.isAdministrator = true;
+    hashedPasswordFile = config.age.secrets.jellyfin-nicholas-password-hash.path;
+  };
+};
+```
+
+**Password Management**:
+```bash
+# 1. Generate password hash using Jellyfin's format
+# (Use the web UI on first login to set password, then extract hash from database)
+
+# 2. Store in agenix secret
+echo "HASHED_PASSWORD" | \
+  ( cd /etc/nixos/secrets && nix run github:ryantm/agenix -- -e jellyfin-nicholas-password-hash.age -i ../keys/cmos-agenix.key )
+
+# 3. Backup to 1Password
+python3 /etc/nixos/scripts/backup-secrets.py
+```
+
+### 🔑 **Secrets Management**
+
+Jellyfin uses one agenix-encrypted secret:
+
+```nix
+# modules/core/agenix-secrets.nix
+age.secrets.jellyfin-nicholas-password-hash = {
+  file = ../secrets/jellyfin-nicholas-password-hash.age;
+  owner = "jellyfin";
+};
+```
+
+### 🎮 **Hardware Transcoding**
+
+Jellyfin is configured with Intel VA-API hardware acceleration for the Haswell CPU (4th gen):
+
+```nix
+# modules/services/jellyfin.nix
+
+# Add jellyfin user to GPU groups
+users.users.jellyfin.extraGroups = [ "users" "video" "render" ];
+
+# Intel VA-API driver (i965 for Haswell, not intel-media-driver which is 8th gen+)
+hardware.graphics = {
+  enable = true;
+  extraPackages = with pkgs; [
+    intel-vaapi-driver  # i965 driver for Haswell
+    libvdpau-va-gl      # VDPAU backend for VA-API
+  ];
+};
+```
+
+**Verify Hardware Acceleration**:
+```bash
+# Check VA-API is working
+ssh root@jimmich.home.arpa vainfo
+
+# Expected output shows "i965" driver and supported profiles
+# vainfo: VA-API version: 1.x
+# vainfo: Driver version: Intel i965 driver
+```
+
+**Enable in Jellyfin**:
+1. Dashboard → Playback → Transcoding
+2. Hardware acceleration: **VAAPI**
+3. VA-API Device: `/dev/dri/renderD128`
+4. Enable hardware decoding for: H.264, HEVC, VP9, etc.
+
+---
+
+## 🚀 Deployment
+
+### 📋 **Installation Steps**
+
+1. **Organize Media Files**:
+   ```bash
+   # Ensure media is organized in correct folders on NAS
+   ssh root@jimmich.home.arpa ls -la /mnt/syno/videos/
+   ```
+
+2. **Configure Libraries**:
+   ```nix
+   # modules/services/jellyfin.nix
+   # Libraries are already configured declaratively
+   ```
+
+3. **Create User Password Secret**:
+   ```bash
+   # On first deployment, use temporary password, then extract hash
+   # See Password Management section above
+   ```
+
+4. **Add DNS Record**:
+   ```nix
+   # modules/services/domains.nix
+   domains = [
+     # ...
+     "jellyfin.bedrosn.com"
+   ];
+   ```
+
+5. **Configure Traefik**:
+   ```nix
+   # modules/services/traefik.nix
+   routers.jellyfin = {
+     rule = "Host(`jellyfin.bedrosn.com`)";
+     service = "jellyfin";
+     tls.certResolver = "le";
+   };
+
+   services.jellyfin = {
+     loadBalancer.servers = [
+       { url = "http://192.168.1.10:8096"; }
+     ];
+   };
+   ```
+
+6. **Deploy**:
+   ```bash
+   nixos-rebuild switch --flake .#jimmich --target-host jimmich.home.arpa
+   ```
+
+### ✅ **Verification**
+
+```bash
+# Check service status
+ssh root@jimmich.home.arpa systemctl status jellyfin
+
+# Check logs
+ssh root@jimmich.home.arpa journalctl -u jellyfin -n 50
+
+# Test web access
+curl -I https://jellyfin.bedrosn.com
+
+# Verify media access
+ssh root@jimmich.home.arpa ls -la /mnt/syno/videos/
+```
+
+---
+
+## 🛠️ Management
+
+### 📊 **Service Control**
+
+```bash
+# Status
+ssh root@jimmich.home.arpa systemctl status jellyfin
+
+# Restart
+ssh root@jimmich.home.arpa systemctl restart jellyfin
+
+# Logs
+ssh root@jimmich.home.arpa journalctl -u jellyfin -f
+
+# Full logs with details
+ssh root@jimmich.home.arpa journalctl -u jellyfin -n 100 --no-pager
+```
+
+### 📚 **Library Management**
+
+**Scan for New Media**:
+```bash
+# Trigger library scan via web UI:
+# Settings → Dashboard → Libraries → Scan All Libraries
+
+# Or restart service (will auto-scan on startup)
+ssh root@jimmich.home.arpa systemctl restart jellyfin
+```
+
+**Add New Library**:
+```nix
+# modules/services/jellyfin.nix
+services.declarative-jellyfin.libraries = {
+  # ... existing libraries ...
+
+  NewLibrary = {
+    enabled = true;
+    contentType = "movies";  # or "tvshows", "music", "homevideos"
+    pathInfos = [ "/mnt/syno/videos/new-folder" ];
+  };
+};
+```
+
+### 🗂️ **Media Organization**
+
+**Recommended File Structure**:
+
+**Movies**:
+```
+/mnt/syno/videos/movies/
+├── Movie Title (2023)/
+│   └── Movie Title (2023).mkv
+└── Another Movie (2024)/
+    └── Another Movie (2024).mp4
+```
+
+**TV Shows**:
+```
+/mnt/syno/videos/tv/
+└── Show Name/
+    ├── Season 01/
+    │   ├── Show Name - S01E01.mkv
+    │   └── Show Name - S01E02.mkv
+    └── Season 02/
+        └── Show Name - S02E01.mkv
+```
+
+**Music**:
+```
+/mnt/syno/videos/music/
+└── Artist Name/
+    └── Album Name (2023)/
+        ├── 01 - Track Name.mp3
+        └── 02 - Another Track.mp3
+```
+
+---
+
+## 🚨 Troubleshooting
+
+### ❌ **Service Won't Start**
+
+```bash
+# Check service status
+ssh root@jimmich.home.arpa systemctl status jellyfin
+
+# Check for errors
+ssh root@jimmich.home.arpa journalctl -u jellyfin -n 50 --no-pager
+
+# Verify CIFS mount
+ssh root@jimmich.home.arpa mount | grep syno
+
+# Check permissions
+ssh root@jimmich.home.arpa ls -la /mnt/syno/videos/
+```
+
+### 📁 **Libraries Not Showing**
+
+**Problem**: Media libraries appear empty or not visible
+
+**Solutions**:
+1. Verify media paths exist:
+   ```bash
+   ssh root@jimmich.home.arpa ls -la /mnt/syno/videos/movies
+   ssh root@jimmich.home.arpa ls -la /mnt/syno/videos/tv
+   ```
+
+2. Check Jellyfin can access files:
+   ```bash
+   ssh root@jimmich.home.arpa sudo -u jellyfin ls /mnt/syno/videos/movies
+   ```
+
+3. Trigger library scan:
+   - Web UI → Dashboard → Libraries → Scan All Libraries
+
+4. Check declarative-jellyfin service:
+   ```bash
+   ssh root@jimmich.home.arpa systemctl status declarative-jellyfin
+   ssh root@jimmich.home.arpa journalctl -u declarative-jellyfin -n 50
+   ```
+
+### 🔐 **Login Issues**
+
+**Problem**: Can't log in with configured user
+
+**Solutions**:
+1. Verify user was created:
+   - Check web UI user list
+   - Or check logs for user creation
+
+2. Reset password:
+   ```bash
+   # Generate new password hash (use web UI or jellyfin-accounts)
+   # Update secret
+   echo "NEW_HASH" | \
+     ( cd /etc/nixos/secrets && nix run github:ryantm/agenix -- -e jellyfin-nicholas-password-hash.age -i ../keys/cmos-agenix.key )
+
+   # Redeploy
+   nixos-rebuild switch --flake .#jimmich --target-host jimmich.home.arpa
+   ```
+
+### 🎬 **Playback Issues**
+
+**Problem**: Videos won't play or buffer constantly
+
+**Solutions**:
+1. Check network connectivity:
+   ```bash
+   ping jimmich.home.arpa
+   ```
+
+2. Verify media file integrity:
+   ```bash
+   ssh root@jimmich.home.arpa file /mnt/syno/videos/movies/MovieName/MovieName.mkv
+   ```
+
+3. Check hardware transcoding is working:
+   ```bash
+   # Verify VA-API
+   ssh root@jimmich.home.arpa vainfo
+
+   # Check GPU device permissions
+   ssh root@jimmich.home.arpa ls -la /dev/dri/
+   ```
+
+4. Transcoding settings (Dashboard → Playback → Transcoding):
+   - Hardware acceleration: **VAAPI**
+   - VA-API Device: `/dev/dri/renderD128`
+   - If issues persist, try disabling hardware acceleration temporarily
+
+5. Use desktop client for HEVC/4K:
+   - Jellyfin Media Player on cmos supports direct play
+   - Avoids transcoding entirely for compatible formats
+
+6. Monitor resource usage:
+   ```bash
+   ssh root@jimmich.home.arpa htop
+   ```
+
+### 🗄️ **Storage Issues**
+
+**Problem**: Can't add new media
+
+**Solutions**:
+1. Check disk space:
+   ```bash
+   ssh root@jimmich.home.arpa df -h /mnt/syno
+   ```
+
+2. Verify CIFS mount is writable:
+   ```bash
+   ssh root@jimmich.home.arpa touch /mnt/syno/videos/test.txt
+   ssh root@jimmich.home.arpa rm /mnt/syno/videos/test.txt
+   ```
+
+3. Check mount service:
+   ```bash
+   ssh root@jimmich.home.arpa systemctl status mount-cifs-shares.service
+   ```
+
+---
+
+## 📱 Client Apps
+
+### 🌐 **Web Client**
+
+**URL**: https://jellyfin.bedrosn.com
+
+**Supported Browsers**:
+- Chrome/Chromium
+- Firefox
+- Safari
+- Edge
+
+### 📥 **Mobile Apps**
+
+**iOS**:
+- App Store: "Jellyfin"
+- Or use Swiftfin (native Swift client)
+
+**Android**:
+- Google Play Store: "Jellyfin"
+- Or F-Droid for FOSS version
+
+**Configuration**:
+1. **Server URL**: `https://jellyfin.bedrosn.com`
+2. **Username**: `nicholas`
+3. **Password**: (configured password)
+
+### 📺 **TV Apps**
+
+**Supported Platforms**:
+- Android TV
+- Apple TV
+- Roku
+- Fire TV
+- Samsung Tizen
+- LG webOS
+
+### 🖥️ **Desktop Apps**
+
+**Jellyfin Media Player** (installed on cmos):
+- Native desktop client with mpv backend for HEVC/4K direct play
+- Installed via: `modules/desktop/packages.nix` → `jellyfin-media-player`
+- Avoids browser transcoding limitations
+- Launch: Application menu → Jellyfin Media Player
+
+---
+
+## 🎨 Customization
+
+### 🖼️ **Themes & Skins**
+
+Jellyfin supports custom CSS themes via web UI:
+1. Dashboard → General → Custom CSS
+2. Add theme CSS URL or inline CSS
+
+**Popular Themes**:
+- JellySkin
+- Ultrachromic
+- Kaleidochromic
+
+### 🔌 **Plugins**
+
+**Useful Plugins**:
+- **Trakt**: Track watch history
+- **TMDb**: Enhanced metadata
+- **Fanart**: Additional artwork
+- **Intro Skipper**: Auto-skip intros
+
+**Installation**: Dashboard → Plugins → Catalog
+
+---
+
+## 🔒 Security
+
+### 🛡️ **Security Features**
+
+- ✅ **HTTPS encryption** - TLS 1.3 via Traefik
+- ✅ **Password protection** - Hashed passwords with agenix
+- ✅ **Network isolation** - Backend not exposed to internet
+- ✅ **Firewall protection** - Only port 8096 open on jimmich
+
+### 🔐 **Access Control**
+
+Currently **single-user** configuration:
+- Only the admin account (`nicholas`) is configured
+- To add users: Extend `declarative-jellyfin.users` in config
+
+**Adding Additional Users**:
+```nix
+# modules/services/jellyfin.nix
+services.declarative-jellyfin.users = {
+  nicholas = { /* ... */ };
+
+  newuser = {
+    mutable = false;
+    permissions.isAdministrator = false;  # Regular user
+    hashedPasswordFile = config.age.secrets.jellyfin-newuser-password-hash.path;
+  };
+};
+```
+
+---
+
+## 📖 Related Documentation
+
+- **[Services Overview](../services/overview.md)** - All infrastructure services
+- **[Traefik Configuration](../services/traefik.md)** - Reverse proxy setup
+- **[Secret Management](../security/secrets-agenix.md)** - Agenix workflow
+- **[Host: jimmich](../infrastructure/hosts-jimmich.md)** - Host configuration
+- **[CIFS Mounts](../modules/core/cifs-mounts.nix)** - Network storage setup
+
+---
+
+**Last Updated**: 2025-12-20
+**Service URL**: https://jellyfin.bedrosn.com
+**Documentation**: https://jellyfin.org/docs
+**GitHub**: https://github.com/jellyfin/jellyfin
+
+---
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🌐 [Services](../services/overview.md) | 💾 [Storage](../storage/overview.md)*

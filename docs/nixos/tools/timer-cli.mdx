@@ -1,0 +1,397 @@
+---
+title: "⏱️ CLI Timer with Push Notifications"
+description: "*Cloud-based command-line timer that sends push notifications to your phone when timers complete*"
+---
+
+## 🎯 Overview
+
+**timer-cli** is a CLI timer tool that schedules timers in Google Cloud and sends FCM push notifications to your phone when they complete. Timers survive terminal close, logout, and even computer shutdown.
+
+**Command**: `t`
+
+**Key Features**:
+- ☁️ **Cloud-Based**: Timers run in Google Cloud, not locally
+- 🔌 **Detached**: Close terminal, timers keep running
+- 📱 **Push Notifications**: FCM notifications to your Android phone
+- ⏱️ **Flexible Time Parsing**: Supports multiple time formats (60s, 3m, 2h, 1.5h)
+- 🔒 **Secure**: Uses agenix for encrypted credential storage
+- 🏷️ **Custom Labels**: Name your timers for clear notifications
+
+---
+
+## 📦 Installation
+
+**Module**: `modules/desktop/timer-cli.nix`
+
+**Status**: ✅ Active on cmos host
+
+**Enable in Configuration**:
+```nix
+# Already enabled on cmos via modules/desktop/packages.nix
+services.timer-cli.enable = true;  # Provides 't' command
+```
+
+**Dependencies**:
+- Python 3.x with `requests` library
+- Google Cloud infrastructure (Cloud Functions, Cloud Tasks)
+- FCM device token from Android app
+
+**Required Secrets** (agenix):
+- `fcm-device-token.age` - Target device FCM registration token
+
+---
+
+## 🚀 Usage
+
+### Cloud Mode (Default)
+
+Timers are scheduled in Google Cloud and survive terminal close:
+
+```bash
+# Basic timers
+t 5m              # 5 minute timer
+t 2h              # 2 hour timer
+t 30s             # 30 second timer
+
+# With custom label
+t 25m -L "Pomodoro"     # Shows "Pomodoro" in notification
+t 15m --label "Tea"     # Shows "Tea" in notification
+
+# Decimal formats
+t 1.5h            # 1 hour 30 minutes
+t 2.5m            # 2 minutes 30 seconds
+```
+
+**Output**:
+```
+$ t 5m
+Scheduling 5m timer in cloud...
+Timer scheduled for 5m
+Will notify at 03:45:30 PM
+You can close this terminal - timer runs in the cloud!
+```
+
+### Local Mode (Legacy)
+
+For timers that run locally (stops if terminal closes):
+
+```bash
+t 5m --local      # Runs locally with sleep()
+t 5m -l           # Short flag
+```
+
+**Output**:
+```
+$ t 5m --local
+Timer set for 5m (local mode)
+Will notify at 03:45:30 PM
+Note: Timer will stop if you close this terminal
+```
+
+Press `Ctrl+C` to cancel local timers.
+
+### Time Format Reference
+
+| Format | Duration | Notes |
+|--------|----------|-------|
+| `60s` | 60 seconds | Also: `60 s`, `60sec`, `60 seconds` |
+| `3m` | 3 minutes | Also: `3 min`, `3 mins`, `3 minutes` |
+| `2h` | 2 hours | Also: `2 hr`, `2hrs`, `2 hours` |
+| `1.5h` | 1h 30m | Decimal hours |
+| `2.25m` | 2m 15s | Decimal minutes |
+
+**Maximum duration**: 24 hours
+
+---
+
+## 🏗️ Architecture
+
+### Cloud Infrastructure
+
+```
+┌─────────────┐     HTTPS      ┌──────────────────┐
+│   t 5m      │ ──────────────→│ schedule_timer   │
+│   (CLI)     │                │ (Cloud Function) │
+└─────────────┘                └────────┬─────────┘
+                                        │
+                                        │ Creates task
+                                        ↓
+                               ┌──────────────────┐
+                               │   Cloud Tasks    │
+                               │   timer-queue    │
+                               └────────┬─────────┘
+                                        │
+                                        │ After delay
+                                        ↓
+                               ┌──────────────────┐     FCM      ┌─────────┐
+                               │ send_notification│ ───────────→ │  Phone  │
+                               │ (Cloud Function) │              └─────────┘
+                               └──────────────────┘
+```
+
+### Components
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| CLI (`t`) | Local (cmos) | Parses time, calls Cloud Function |
+| `schedule_timer` | Cloud Functions (us-central1) | Receives request, schedules Cloud Task |
+| `timer-queue` | Cloud Tasks | Holds scheduled tasks, dispatches at time |
+| `send_notification` | Cloud Functions | Sends FCM push notification |
+
+### Google Cloud Project
+
+- **Project**: `notifications-35dd5`
+- **Region**: `us-central1`
+- **APIs Used**: Cloud Functions, Cloud Tasks, FCM
+
+---
+
+## 🔧 Technical Flow
+
+### Cloud Timer Flow
+
+1. **CLI parses time** and reads device token from agenix
+2. **HTTP POST** to `schedule_timer` Cloud Function with:
+   - `seconds`: Timer duration
+   - `device_token`: FCM registration token
+   - `label`: Optional timer name
+3. **Cloud Function creates Cloud Task** scheduled for future execution
+4. **CLI returns immediately** - timer is in the cloud
+5. **Cloud Tasks dispatches** `send_notification` when time expires
+6. **FCM sends push** to registered device
+
+### Local Timer Flow (Legacy)
+
+1. CLI parses time argument
+2. Displays timer info
+3. `time.sleep(seconds)` - waits locally
+4. Generates OAuth2 token using service account
+5. Sends FCM notification directly
+
+---
+
+## 🔒 Security Configuration
+
+### Device Token
+
+**Location**: `/run/agenix/fcm-device-token` (encrypted: `secrets/fcm-device-token.age`)
+
+**Format**: Plain text FCM registration token
+
+**How to Obtain**:
+1. Install Android app with FCM integration
+2. App obtains token via `FirebaseMessaging.getInstance().getToken()`
+3. Encrypt token:
+   ```bash
+   ( cd /etc/nixos/secrets && echo "YOUR_DEVICE_TOKEN" | \
+     nix run github:ryantm/agenix -- -e fcm-device-token.age -i ../keys/cmos-agenix.key )
+   ```
+
+### Cloud Function Authentication
+
+The Cloud Functions are deployed with `--allow-unauthenticated` for simplicity. Security is maintained because:
+
+1. **Device token required**: Without valid FCM token, notifications go nowhere
+2. **No sensitive data stored**: Functions are stateless
+3. **Rate limiting**: Cloud Tasks has built-in rate limits
+4. **Monitoring**: All invocations logged in Cloud Console
+
+For additional security, you can restrict to authenticated calls and use service account credentials.
+
+### Service Account (Local Mode Only)
+
+Local mode requires the Firebase service account for direct FCM calls:
+
+**Location**: `/run/agenix/firebase-service-account` (encrypted)
+
+Cloud mode doesn't need this locally - the Cloud Functions use their own service account.
+
+---
+
+## 📱 Android App Integration
+
+For notifications to work, you need an Android app that:
+
+1. **Registers for FCM** (obtains device token)
+2. **Listens for data messages** (background service)
+3. **Shows full-screen alarm** when data message received
+
+**Example FCM Service** (Kotlin):
+```kotlin
+class TimerFCMService : FirebaseMessagingService() {
+    override fun onMessageReceived(remoteMessage: RemoteMessage) {
+        val title = remoteMessage.data["title"] ?: "Timer Complete"
+        val body = remoteMessage.data["body"] ?: "Timer finished"
+        showFullScreenNotification(title, body)
+    }
+}
+```
+
+**FCM Payload Format**:
+```json
+{
+  "message": {
+    "token": "<device-token>",
+    "data": {
+      "title": "⏰ Timer",
+      "body": "5m timer complete!"
+    },
+    "android": {
+      "priority": "high"
+    }
+  }
+}
+```
+
+---
+
+## 💡 Use Cases
+
+### 🍅 Pomodoro Technique
+```bash
+t 25m -L "Work"      # Work session
+t 5m -L "Break"      # Short break
+t 15m -L "Long Break" # Long break
+```
+
+### ⏲️ Cooking
+```bash
+t 12m -L "Eggs"      # Boil eggs
+t 15m -L "Cookies"   # Bake cookies
+t 1.5h -L "Roast"    # Roast chicken
+```
+
+### 💪 Workout
+```bash
+t 30s -L "HIIT"      # Interval
+t 90s -L "Rest"      # Rest period
+t 60s -L "Plank"     # Hold
+```
+
+---
+
+## 🐛 Troubleshooting
+
+### Timer Not Scheduling
+
+**Check device token**:
+```bash
+sudo cat /run/agenix/fcm-device-token | head -c 50
+# Should show FCM token (long alphanumeric string)
+```
+
+**Test Cloud Function manually**:
+```bash
+curl -X POST https://us-central1-notifications-35dd5.cloudfunctions.net/schedule_timer \
+  -H "Content-Type: application/json" \
+  -d '{"seconds": 10, "device_token": "YOUR_TOKEN", "label": "Test"}'
+```
+
+**Check Cloud Function logs**:
+```bash
+gcloud functions logs read schedule_timer --region=us-central1 --limit=20
+gcloud functions logs read send_notification --region=us-central1 --limit=20
+```
+
+### Notification Not Arriving
+
+**Common issues**:
+- Device token expired (regenerate from app)
+- App not running in background
+- Battery saver blocking FCM
+- App permissions not granted (Android 13+)
+
+**Test FCM from Firebase Console**:
+1. Firebase Console → Cloud Messaging → Send Test Message
+2. Enter device token manually
+3. Send notification (should appear on phone)
+
+### Local Mode Issues
+
+**Check service account**:
+```bash
+sudo cat /run/agenix/firebase-service-account | jq .project_id
+# Should output: "notifications-35dd5"
+```
+
+---
+
+## 🔧 Cloud Infrastructure Management
+
+### View Cloud Tasks Queue
+
+```bash
+gcloud tasks queues describe timer-queue --location=us-central1
+```
+
+### List Pending Tasks
+
+```bash
+gcloud tasks list --queue=timer-queue --location=us-central1
+```
+
+### View Cloud Functions
+
+```bash
+gcloud functions list --region=us-central1
+```
+
+### Redeploy Cloud Functions
+
+If you need to update the Cloud Functions:
+
+```bash
+# Deploy schedule_timer
+gcloud functions deploy schedule_timer \
+  --gen2 --runtime=python311 --region=us-central1 \
+  --source=/etc/nixos/apps/timer-cloud-function \
+  --entry-point=schedule_timer --trigger-http \
+  --allow-unauthenticated --project=notifications-35dd5
+
+# Deploy send_notification
+gcloud functions deploy send_notification \
+  --gen2 --runtime=python311 --region=us-central1 \
+  --source=/etc/nixos/apps/timer-cloud-function \
+  --entry-point=send_notification --trigger-http \
+  --allow-unauthenticated --project=notifications-35dd5
+```
+
+---
+
+## 💰 Cost
+
+**Free tier covers**:
+- Cloud Functions: 2 million invocations/month
+- Cloud Tasks: 1 million tasks/month
+
+**Expected usage**: ~100 timers/month = **$0/month**
+
+Billing account required but won't be charged within free tier limits.
+
+---
+
+## 📁 Source Files
+
+| File | Purpose |
+|------|---------|
+| `apps/timer-cli/timer.py` | CLI implementation |
+| `apps/timer-cloud-function/main.py` | Cloud Functions code |
+| `apps/timer-cloud-function/requirements.txt` | Python dependencies |
+| `modules/desktop/timer-cli.nix` | NixOS module |
+
+---
+
+## 📖 Related Documentation
+
+- **[Secrets Management](../security/secrets.md)** - Agenix secret encryption
+- **[Tools Overview](overview.md)** - All CLI tools reference
+
+---
+
+**Last Updated**: 2025-11-23
+**Module**: `modules/desktop/timer-cli.nix`
+**Command**: `t &lt;duration>`
+**Hosts**: cmos (desktop)
+
+---
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🛠️ [Tools](overview.md) | 🔐 [Security](../security/overview.md)*

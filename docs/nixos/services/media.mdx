@@ -1,0 +1,648 @@
+---
+title: "Media Management Stack"
+description: "*Automated media acquisition and management with SABnzbd, Radarr, and Sonarr*"
+---
+
+## 🎯 Overview
+
+The media management stack provides automated Usenet-based media downloading and organization running on the **misc** host. This integrated system handles movie and TV show acquisition, downloading, and organization with centralized authentication via Keycloak.
+
+**Key Features**:
+- 📥 **SABnzbd**: High-performance Usenet downloader with SSL support
+- 🎬 **Radarr**: Automated movie management and acquisition
+- 📺 **Sonarr**: Automated TV show management and episode tracking
+- 🔐 **OAuth2 Authentication**: Keycloak integration with group-based access control
+- 🗂️ **Automated Organization**: Intelligent file naming and folder structure
+- 🔍 **Indexer Integration**: NZBGeek for search and discovery
+
+**Component Stack**:
+```
+[User] → [Keycloak OAuth] → [OAuth2-Proxy] → [Service]
+                                   ↓
+┌─────────────┬──────────────┬──────────────┐
+│  SABnzbd    │   Radarr     │   Sonarr     │
+│  (8098)     │   (8100)     │   (8102)     │
+│  OAuth:8099 │   OAuth:8101 │   OAuth:8103 │
+└─────────────┴──────────────┴──────────────┘
+         ↓            ↓             ↓
+    [Newshosting] [API Comm]  [API Comm]
+         ↓            ↓             ↓
+    [/mnt/downloads/] [/mnt/media/movies/] [/mnt/media/tv/]
+```
+
+---
+
+## 🏗️ Architecture
+
+### 📊 **Service Endpoints**
+
+| Service | Backend Port | OAuth2-Proxy Port | Domain | Purpose |
+|---------|--------------|-------------------|--------|---------|
+| **SABnzbd** | 8098 | 8099 | sabnzbd.bedrosn.com | Usenet downloader |
+| **Radarr** | 8100 | 8101 | radarr.bedrosn.com | Movie manager |
+| **Sonarr** | 8102 | 8103 | sonarr.bedrosn.com | TV show manager |
+
+### 🔐 **Authentication Flow**
+
+```
+User → https://radarr.bedrosn.com
+         ↓
+    OAuth2-Proxy (8101)
+         ↓ (checks auth cookie)
+    No cookie? → Redirect to Keycloak
+                      ↓
+                 Keycloak Login (Google IDP)
+                      ↓
+                 Group Check: "media-access"
+                      ↓ (authorized)
+                 Redirect back with session cookie
+         ↓
+    OAuth2-Proxy (8101)
+         ↓ (auth OK)
+    Radarr Backend (8100)
+```
+
+### 🖥️ **Host Information**
+- **Host**: misc (192.168.1.5)
+- **Storage**: `/mnt/downloads/` (complete), `/mnt/media/` (movies/tv)
+- **Authentication**: Keycloak group `media-access` required
+- **Network**: LAN bypass for 192.168.1.1/32 (router NAT)
+
+---
+
+## 📥 SABnzbd Configuration
+
+### 🎯 **Service Details**
+
+**SABnzbd** is a high-performance Usenet downloader with SSL support and advanced automation features.
+
+**Configuration**:
+- **Port**: 8098 (localhost-only backend)
+- **OAuth2-Proxy**: 8099 (public-facing with authentication)
+- **Domain**: https://sabnzbd.bedrosn.com
+- **Storage**: `/mnt/downloads/incomplete/` → `/mnt/downloads/complete/`
+- **Usenet Provider**: Newshosting (SSL, 50 connections)
+
+### 🔧 **Features**
+
+- ✅ **SSL Usenet Connection** - Encrypted downloads from news.newshosting.com (563)
+- ✅ **Automated Categories** - Pre-configured categories for movies, TV, and general downloads
+- ✅ **API Integration** - Radarr/Sonarr can trigger downloads and monitor progress
+- ✅ **OAuth2 Protection** - Keycloak authentication with `media-access` group requirement
+- ✅ **Auto-redirect Login** - Custom sign-in template auto-redirects to Keycloak
+- ✅ **API Bypass** - `/api` endpoints skip OAuth for inter-service communication
+
+### 🗂️ **Download Categories**
+
+```
+/mnt/downloads/
+├── incomplete/        # Active downloads
+├── complete/          # Completed downloads
+│   ├── movies/       # Radarr category
+│   ├── tv/           # Sonarr category
+│   └── general/      # Default category
+└── nzb-backup/       # NZB file archive
+```
+
+### 🔑 **Secrets Management**
+
+SABnzbd uses agenix-encrypted secrets:
+```nix
+age.secrets = {
+  sabnzbd-api-key = {
+    file = ../secrets/sabnzbd-api-key.age;
+    owner = "sabnzbd";
+  };
+  sabnzbd-nzb-key = {
+    file = ../secrets/sabnzbd-nzb-key.age;
+    owner = "sabnzbd";
+  };
+  newshosting-username = {
+    file = ../secrets/newshosting-username.age;
+    owner = "sabnzbd";
+  };
+  newshosting-password = {
+    file = ../secrets/newshosting-password.age;
+    owner = "sabnzbd";
+  };
+  oauth2-proxy-sabnzbd-client-secret = {
+    file = ../secrets/oauth2-proxy-sabnzbd-client-secret.age;
+    owner = "oauth2-proxy-sabnzbd";
+  };
+  oauth2-proxy-sabnzbd-cookie-secret = {
+    file = ../secrets/oauth2-proxy-sabnzbd-cookie-secret.age;
+    owner = "oauth2-proxy-sabnzbd";
+  };
+};
+```
+
+---
+
+## 🎬 Radarr Configuration
+
+### 🎯 **Service Details**
+
+**Radarr** is an automated movie management system that monitors multiple indexers for new releases and integrates with SABnzbd for downloading.
+
+**Configuration**:
+- **Port**: 8100 (localhost-only backend)
+- **OAuth2-Proxy**: 8101 (public-facing with authentication)
+- **Domain**: https://radarr.bedrosn.com
+- **Storage**: `/mnt/media/movies/` (organized by movie name + year)
+- **Download Client**: SABnzbd (movies category)
+
+### 🔧 **Features**
+
+- ✅ **Automated Monitoring** - Track movie releases and automatically download when available
+- ✅ **Quality Profiles** - Configurable quality preferences (1080p, 2160p, etc.)
+- ✅ **Indexer Integration** - NZBGeek API for movie search
+- ✅ **SABnzbd Integration** - Automatic download triggering and progress monitoring
+- ✅ **Metadata Management** - Automatic poster/fanart download and organization
+- ✅ **OAuth2 Protection** - Keycloak authentication with `media-access` group requirement
+- ✅ **API Bypass** - `/api` endpoints skip OAuth for Radarr mobile apps
+
+### 🗂️ **File Organization**
+
+```
+/mnt/media/movies/
+├── Movie Name (2024)/
+│   ├── Movie Name (2024).mkv
+│   ├── poster.jpg
+│   └── fanart.jpg
+└── Another Movie (2023)/
+    ├── Another Movie (2023).mkv
+    ├── poster.jpg
+    └── fanart.jpg
+```
+
+### 🔑 **Secrets Management**
+
+Radarr uses agenix-encrypted secrets:
+```nix
+age.secrets = {
+  radarr-api-key = {
+    file = ../secrets/radarr-api-key.age;
+    owner = "radarr";
+  };
+  nzbgeek-api-key = {
+    file = ../secrets/nzbgeek-api-key.age;
+    owner = "root";  # Shared across services
+  };
+  oauth2-proxy-radarr-client-secret = {
+    file = ../secrets/oauth2-proxy-radarr-client-secret.age;
+    owner = "oauth2-proxy-radarr";
+  };
+  oauth2-proxy-radarr-cookie-secret = {
+    file = ../secrets/oauth2-proxy-radarr-cookie-secret.age;
+    owner = "oauth2-proxy-radarr";
+  };
+};
+```
+
+---
+
+## 📺 Sonarr Configuration
+
+### 🎯 **Service Details**
+
+**Sonarr** is an automated TV show management system that monitors episode releases and integrates with SABnzbd for downloading.
+
+**Configuration**:
+- **Port**: 8102 (localhost-only backend)
+- **OAuth2-Proxy**: 8103 (public-facing with authentication)
+- **Domain**: https://sonarr.bedrosn.com
+- **Storage**: `/mnt/media/tv/` (organized by show name)
+- **Download Client**: SABnzbd (tv category)
+
+### 🔧 **Features**
+
+- ✅ **Automated Episode Tracking** - Monitor TV shows and download new episodes automatically
+- ✅ **Season Management** - Track seasons and episodes with metadata
+- ✅ **Quality Profiles** - Configurable quality preferences per show
+- ✅ **Indexer Integration** - NZBGeek API for TV episode search
+- ✅ **SABnzbd Integration** - Automatic download triggering and progress monitoring
+- ✅ **Renaming** - Intelligent episode file naming with S##E## format
+- ✅ **OAuth2 Protection** - Keycloak authentication with `media-access` group requirement
+- ✅ **API Bypass** - `/api` endpoints skip OAuth for Sonarr mobile apps
+
+### 🗂️ **File Organization**
+
+```
+/mnt/media/tv/
+├── Show Name/
+│   ├── Season 01/
+│   │   ├── Show Name - S01E01 - Episode Title.mkv
+│   │   ├── Show Name - S01E02 - Episode Title.mkv
+│   │   └── ...
+│   ├── Season 02/
+│   │   └── ...
+│   ├── poster.jpg
+│   └── fanart.jpg
+└── Another Show/
+    └── ...
+```
+
+### 🔑 **Secrets Management**
+
+Sonarr uses agenix-encrypted secrets:
+```nix
+age.secrets = {
+  sonarr-api-key = {
+    file = ../secrets/sonarr-api-key.age;
+    owner = "sonarr";
+  };
+  nzbgeek-api-key = {
+    file = ../secrets/nzbgeek-api-key.age;
+    owner = "root";  # Shared across services
+  };
+  oauth2-proxy-sonarr-client-secret = {
+    file = ../secrets/oauth2-proxy-sonarr-client-secret.age;
+    owner = "oauth2-proxy-sonarr";
+  };
+  oauth2-proxy-sonarr-cookie-secret = {
+    file = ../secrets/oauth2-proxy-sonarr-cookie-secret.age;
+    owner = "oauth2-proxy-sonarr";
+  };
+};
+```
+
+---
+
+## 🚀 Deployment
+
+### 📋 **Initial Setup Checklist**
+
+**Prerequisites**:
+1. ✅ **Usenet Provider Account** - Newshosting subscription with SSL access
+2. ✅ **Indexer Account** - NZBGeek API key for search
+3. ✅ **Storage Directories** - `/mnt/downloads/` and `/mnt/media/` available
+4. ✅ **Keycloak Group** - `media-access` group configured with authorized users
+
+### 🔐 **1. Create Secrets**
+
+```bash
+# SABnzbd secrets
+echo "RANDOM_API_KEY_32_CHARS" | \
+  ( cd /etc/nixos/secrets && nix run github:ryantm/agenix -- -e sabnzbd-api-key.age -i ../keys/cmos-agenix.key )
+
+echo "RANDOM_NZB_KEY_32_CHARS" | \
+  ( cd /etc/nixos/secrets && nix run github:ryantm/agenix -- -e sabnzbd-nzb-key.age -i ../keys/cmos-agenix.key )
+
+echo "your-newshosting-username" | \
+  ( cd /etc/nixos/secrets && nix run github:ryantm/agenix -- -e newshosting-username.age -i ../keys/cmos-agenix.key )
+
+echo "your-newshosting-password" | \
+  ( cd /etc/nixos/secrets && nix run github:ryantm/agenix -- -e newshosting-password.age -i ../keys/cmos-agenix.key )
+
+# Radarr/Sonarr secrets
+echo "RANDOM_RADARR_API_KEY" | \
+  ( cd /etc/nixos/secrets && nix run github:ryantm/agenix -- -e radarr-api-key.age -i ../keys/cmos-agenix.key )
+
+echo "RANDOM_SONARR_API_KEY" | \
+  ( cd /etc/nixos/secrets && nix run github:ryantm/agenix -- -e sonarr-api-key.age -i ../keys/cmos-agenix.key )
+
+echo "your-nzbgeek-api-key" | \
+  ( cd /etc/nixos/secrets && nix run github:ryantm/agenix -- -e nzbgeek-api-key.age -i ../keys/cmos-agenix.key )
+
+# OAuth2-proxy secrets (32 bytes base64)
+openssl rand -base64 32 | \
+  ( cd /etc/nixos/secrets && nix run github:ryantm/agenix -- -e oauth2-proxy-sabnzbd-client-secret.age -i ../keys/cmos-agenix.key )
+
+openssl rand -base64 32 | \
+  ( cd /etc/nixos/secrets && nix run github:ryantm/agenix -- -e oauth2-proxy-sabnzbd-cookie-secret.age -i ../keys/cmos-agenix.key )
+
+openssl rand -base64 32 | \
+  ( cd /etc/nixos/secrets && nix run github:ryantm/agenix -- -e oauth2-proxy-radarr-client-secret.age -i ../keys/cmos-agenix.key )
+
+openssl rand -base64 32 | \
+  ( cd /etc/nixos/secrets && nix run github:ryantm/agenix -- -e oauth2-proxy-radarr-cookie-secret.age -i ../keys/cmos-agenix.key )
+
+openssl rand -base64 32 | \
+  ( cd /etc/nixos/secrets && nix run github:ryantm/agenix -- -e oauth2-proxy-sonarr-client-secret.age -i ../keys/cmos-agenix.key )
+
+openssl rand -base64 32 | \
+  ( cd /etc/nixos/secrets && nix run github:ryantm/agenix -- -e oauth2-proxy-sonarr-cookie-secret.age -i ../keys/cmos-agenix.key )
+
+# Backup all secrets to 1Password
+python3 /etc/nixos/scripts/backup-secrets.py
+```
+
+### 🔧 **2. Configure Keycloak Group**
+
+Update `secrets/keycloak-user-config.age` to include media-access group:
+```json
+{
+  "users": {
+    "your-email@gmail.com": {
+      "username": "your-username",
+      "groups": [
+        "glances-access",
+        "memos-access",
+        "docs-access",
+        "security-dashboard-access",
+        "media-access"
+      ]
+    }
+  }
+}
+```
+
+Re-encrypt after editing:
+```bash
+( cd /etc/nixos/secrets && nix run github:ryantm/agenix -- -e keycloak-user-config.age -i ../keys/cmos-agenix.key )
+```
+
+### 🌐 **3. DNS Configuration**
+
+DNS is automatically configured via `modules/services/domains.nix`:
+```nix
+domains = [
+  { name = "sabnzbd"; type = "CNAME"; value = "bedrosn.com."; proxied = false; }
+  { name = "radarr";  type = "CNAME"; value = "bedrosn.com."; proxied = false; }
+  { name = "sonarr";  type = "CNAME"; value = "bedrosn.com."; proxied = false; }
+];
+```
+
+### 🚢 **4. Deploy Services**
+
+```bash
+# Enable services in hosts/misc/default.nix (already configured)
+# Deploy to misc host
+nixos-rebuild switch --flake .#misc --target-host misc.home.arpa
+```
+
+### ✅ **5. Verification**
+
+```bash
+# Check service status
+ssh root@misc.home.arpa systemctl status sabnzbd
+ssh root@misc.home.arpa systemctl status radarr
+ssh root@misc.home.arpa systemctl status sonarr
+ssh root@misc.home.arpa systemctl status oauth2-proxy-sabnzbd
+ssh root@misc.home.arpa systemctl status oauth2-proxy-radarr
+ssh root@misc.home.arpa systemctl status oauth2-proxy-sonarr
+
+# Test web access
+curl -I https://sabnzbd.bedrosn.com
+curl -I https://radarr.bedrosn.com
+curl -I https://sonarr.bedrosn.com
+
+# Check Keycloak clients
+# Login to https://keycloak.bedrosn.com/admin → Clients
+# Verify: oauth2-proxy-sabnzbd, oauth2-proxy-radarr, oauth2-proxy-sonarr
+```
+
+---
+
+## 🛠️ Management
+
+### 📊 **Service Control**
+
+```bash
+# SABnzbd
+ssh root@misc.home.arpa systemctl status sabnzbd
+ssh root@misc.home.arpa systemctl restart sabnzbd
+ssh root@misc.home.arpa journalctl -u sabnzbd -n 50
+
+# Radarr
+ssh root@misc.home.arpa systemctl status radarr
+ssh root@misc.home.arpa systemctl restart radarr
+ssh root@misc.home.arpa journalctl -u radarr -n 50
+
+# Sonarr
+ssh root@misc.home.arpa systemctl status sonarr
+ssh root@misc.home.arpa systemctl restart sonarr
+ssh root@misc.home.arpa journalctl -u sonarr -n 50
+
+# OAuth2-proxies
+ssh root@misc.home.arpa systemctl status oauth2-proxy-sabnzbd
+ssh root@misc.home.arpa systemctl status oauth2-proxy-radarr
+ssh root@misc.home.arpa systemctl status oauth2-proxy-sonarr
+```
+
+### 🗂️ **Storage Management**
+
+```bash
+# Check download space
+ssh root@misc.home.arpa df -h /mnt/downloads
+
+# Check media space
+ssh root@misc.home.arpa df -h /mnt/media
+
+# View download queue
+ssh root@misc.home.arpa du -sh /mnt/downloads/incomplete/*
+
+# View completed downloads
+ssh root@misc.home.arpa ls -lh /mnt/downloads/complete/
+```
+
+### 🔑 **Configuration Files**
+
+```bash
+# SABnzbd config
+ssh root@misc.home.arpa cat /var/lib/sabnzbd/sabnzbd.ini
+
+# Radarr config
+ssh root@misc.home.arpa cat /var/lib/radarr/config.xml
+
+# Sonarr config
+ssh root@misc.home.arpa cat /var/lib/sonarr/config.xml
+```
+
+---
+
+## 🔐 OAuth2 Integration
+
+### 🎯 **Auto-Redirect Login**
+
+All three services use custom sign-in templates that automatically redirect to Keycloak for a seamless login experience.
+
+**Custom Template** (`/var/lib/oauth2-proxy-{service}/sign_in.html`):
+```html
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Redirecting to Sign In...</title>
+  <script>
+    window.location = "{{.ProxyPrefix}}/start?rd=" + encodeURIComponent(window.location.protocol + "//" + window.location.host + "{{.Redirect}}");
+  </script>
+</head>
+<body>
+  <p>Redirecting to sign in...</p>
+</body>
+</html>
+```
+
+### 🛡️ **API Bypass**
+
+API endpoints skip OAuth2 authentication to allow:
+- ✅ **Mobile Apps** - Radarr/Sonarr mobile apps can authenticate directly
+- ✅ **Service Integration** - SABnzbd API calls from Radarr/Sonarr
+- ✅ **Automation** - External tools can use API keys
+
+**Regex**: `--skip-auth-regex="^/api"`
+
+### 🔑 **Group-Based Access**
+
+All services require the `media-access` Keycloak group:
+- Configured in Keycloak user management
+- Enforced by OAuth2-proxy: `--allowed-group="media-access"`
+- Admin can add/remove users from group without service restart
+
+---
+
+## 🚨 Troubleshooting
+
+### ❌ **OAuth Login Issues**
+
+**Problem**: Redirect loop or "Forbidden" error
+
+**Solutions**:
+1. Verify Keycloak client exists:
+   ```bash
+   # Check Keycloak admin console
+   # https://keycloak.bedrosn.com/admin → Clients
+   # Should see: oauth2-proxy-sabnzbd, oauth2-proxy-radarr, oauth2-proxy-sonarr
+   ```
+
+2. Verify user has `media-access` group:
+   ```bash
+   # Check in Keycloak admin console
+   # Users → Select user → Groups tab
+   # Should see "media-access" in joined groups
+   ```
+
+3. Check OAuth2-proxy logs:
+   ```bash
+   ssh root@misc.home.arpa journalctl -u oauth2-proxy-sabnzbd -n 50
+   ```
+
+### 📥 **SABnzbd Download Issues**
+
+**Problem**: Downloads not starting or failing
+
+**Solutions**:
+1. Check Newshosting credentials:
+   ```bash
+   ssh root@misc.home.arpa journalctl -u sabnzbd -n 50 | grep -i "auth\|login\|fail"
+   ```
+
+2. Verify Newshosting server:
+   ```bash
+   ssh root@misc.home.arpa openssl s_client -connect news.newshosting.com:563
+   ```
+
+3. Check disk space:
+   ```bash
+   ssh root@misc.home.arpa df -h /mnt/downloads
+   ```
+
+### 🎬 **Radarr/Sonarr Not Finding Releases**
+
+**Problem**: No search results or indexer errors
+
+**Solutions**:
+1. Verify NZBGeek API key:
+   ```bash
+   # Test indexer in Radarr/Sonarr web UI
+   # Settings → Indexers → Test
+   ```
+
+2. Check indexer status:
+   ```bash
+   ssh root@misc.home.arpa journalctl -u radarr -n 50 | grep -i "indexer"
+   ```
+
+3. Verify SABnzbd connection:
+   ```bash
+   # In Radarr/Sonarr: Settings → Download Clients → Test
+   # Should connect to http://127.0.0.1:8098
+   ```
+
+### 🔌 **Inter-Service Communication Issues**
+
+**Problem**: Radarr/Sonarr can't communicate with SABnzbd
+
+**Solution**: Radarr/Sonarr communicate with SABnzbd backend on `127.0.0.1:8098` (not via OAuth2-proxy):
+```bash
+# Verify SABnzbd is listening on localhost
+ssh root@misc.home.arpa ss -tlnp | grep 8098
+
+# Test connection
+ssh root@misc.home.arpa curl -I http://127.0.0.1:8098
+```
+
+---
+
+## 🔒 Security
+
+### 🛡️ **Security Features**
+
+- ✅ **OAuth2 Authentication** - Keycloak with Google IDP
+- ✅ **Group-Based Authorization** - `media-access` group required
+- ✅ **HTTPS Encryption** - TLS 1.3 via Traefik
+- ✅ **Localhost Backend** - Services only listen on 127.0.0.1
+- ✅ **Encrypted Secrets** - Agenix for all API keys and passwords
+- ✅ **API Bypass** - API endpoints accessible for mobile apps
+- ✅ **SSL Usenet** - Encrypted connection to news provider
+
+### 🌐 **Network Security**
+
+**LAN Bypass**:
+- Router NAT makes all LAN traffic appear as 192.168.1.1
+- LAN access direct without OAuth (via Traefik IP whitelist where configured)
+- WAN access requires Keycloak authentication
+
+**Service Isolation**:
+- Each service runs as dedicated system user
+- Systemd security hardening enabled
+- No direct internet exposure (reverse proxy only)
+
+---
+
+## 📱 Mobile Apps
+
+### 📥 **Radarr Mobile**
+
+- **iOS**: Radarr (App Store)
+- **Android**: nzb360 (Play Store - paid, supports Radarr/Sonarr/SABnzbd)
+
+**Configuration**:
+- **Server URL**: `https://radarr.bedrosn.com`
+- **API Key**: Copy from Radarr Settings → General → API Key
+- **Authentication**: API calls bypass OAuth2-proxy (`/api` regex)
+
+### 📥 **Sonarr Mobile**
+
+- **iOS**: Sonarr (App Store)
+- **Android**: nzb360 (Play Store - paid, supports Radarr/Sonarr/SABnzbd)
+
+**Configuration**:
+- **Server URL**: `https://sonarr.bedrosn.com`
+- **API Key**: Copy from Sonarr Settings → General → API Key
+- **Authentication**: API calls bypass OAuth2-proxy (`/api` regex)
+
+---
+
+## 📖 Related Documentation
+
+- **[Services Overview](../services/overview.md)** - All infrastructure services
+- **[Keycloak Configuration](../services/keycloak.md)** - Identity provider setup
+- **[Traefik Configuration](../services/traefik.md)** - Reverse proxy configuration
+- **[Secret Management](../security/secrets-agenix.md)** - Agenix workflow
+- **[Deploy Web Service Guide](../guides/deploy-web-service.md)** - OAuth2-proxy deployment pattern
+- **[Host: misc](../infrastructure/hosts-misc.md)** - Server configuration
+
+---
+
+**Last Updated**: 2025-10-27
+**Service URLs**:
+- https://sabnzbd.bedrosn.com
+- https://radarr.bedrosn.com
+- https://sonarr.bedrosn.com
+
+**Stack Version**: SABnzbd 4.x, Radarr 5.x, Sonarr 4.x
+**Authentication**: Keycloak OAuth2 with `media-access` group
+
+---
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🌐 [Services](../services/overview.md) | 🔐 [Security](../security/overview.md)*

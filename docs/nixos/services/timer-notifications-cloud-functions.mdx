@@ -1,0 +1,455 @@
+---
+title: "️ Timer Notifications - Cloud Functions Source Code"
+description: "Complete source code for Google Cloud Functions deployment. Includes bidirectional cross-device sync via FCM push notifications."
+---
+
+**Last Updated**: 2025-11-26
+
+Complete source code for Google Cloud Functions deployment. Includes bidirectional cross-device sync via FCM push notifications.
+
+---
+
+## 📋 File Structure
+
+```
+timer-cloud-functions/
+├── main.py              # All three Cloud Functions
+└── requirements.txt     # Python dependencies
+```
+
+---
+
+## 📄 main.py
+
+**Complete source code** for all three Cloud Functions:
+
+```python
+"""
+Cloud Timer Function with Realtime Database Integration
+Schedules FCM notifications using Cloud Tasks + RTDB state management
+"""
+
+import os
+import json
+import datetime
+import functions_framework
+from google.cloud import tasks_v2
+from google.protobuf import timestamp_pb2
+import google.auth
+from google.auth.transport.requests import Request
+import requests
+import firebase_admin
+from firebase_admin import credentials, db
+
+# Initialize Firebase Admin SDK
+if not firebase_admin._apps:
+    cred = credentials.ApplicationDefault()
+    firebase_admin.initialize_app(cred, {
+        'databaseURL': 'https://notifications-35dd5-default-rtdb.firebaseio.com'
+    })
+
+# Configuration
+PROJECT_ID = "notifications-35dd5"
+LOCATION = "us-central1"
+QUEUE_NAME = "timer-queue"
+
+
+def get_fcm_access_token():
+    """Get OAuth2 access token for FCM using default credentials."""
+    credentials, _ = google.auth.default(
+        scopes=['https://www.googleapis.com/auth/firebase.messaging']
+    )
+    credentials.refresh(Request())
+    return credentials.token
+
+
+def send_fcm_notification(device_token: str, title: str, body: str, timer_id: str, notification_type: str = 'timer_complete') -> bool:
+    """Send FCM notification using HTTP v1 API.
+
+    Args:
+        device_token: FCM device token
+        title: Notification title
+        body: Notification body text
+        timer_id: Timer ID for cross-device sync
+        notification_type: 'timer_complete' or 'timer_dismissed'
+    """
+    try:
+        access_token = get_fcm_access_token()
+
+        url = f'https://fcm.googleapis.com/v1/projects/{PROJECT_ID}/messages:send'
+
+        payload = {
+            'message': {
+                'token': device_token,
+                'data': {
+                    'title': title,
+                    'body': body,
+                    'timer_id': timer_id,
+                    'type': notification_type  # 'timer_complete' or 'timer_dismissed'
+                },
+                'android': {
+                    'priority': 'high'
+                }
+            }
+        }
+
+        headers = {
+            'Authorization': f'Bearer {access_token}',
+            'Content-Type': 'application/json'
+        }
+
+        response = requests.post(url, json=payload, headers=headers)
+        response.raise_for_status()
+        return True
+    except Exception as e:
+        print(f"FCM error: {e}")
+        return False
+
+
+@functions_framework.http
+def schedule_timer(request):
+    """
+    HTTP endpoint to schedule a timer with RTDB state tracking.
+
+    POST /schedule_timer
+    {
+        "seconds": 300,
+        "device_tokens": ["phone_token"],  # Can be single or multiple
+        "label": "optional timer label"
+    }
+    """
+    # Handle CORS preflight
+    if request.method == 'OPTIONS':
+        headers = {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'POST',
+            'Access-Control-Allow-Headers': 'Content-Type',
+            'Access-Control-Max-Age': '3600'
+        }
+        return ('', 204, headers)
+
+    headers = {'Access-Control-Allow-Origin': '*'}
+
+    try:
+        data = request.get_json()
+
+        if not data:
+            return ({'error': 'JSON body required'}, 400, headers)
+
+        seconds = data.get('seconds')
+        # Support both single token (legacy) and multiple tokens
+        device_token = data.get('device_token')
+        device_tokens = data.get('device_tokens', [device_token] if device_token else [])
+        label = data.get('label', 'Timer')
+
+        if not seconds or not isinstance(seconds, (int, float)):
+            return ({'error': 'seconds required (integer)'}, 400, headers)
+
+        if not device_tokens or not isinstance(device_tokens, list):
+            return ({'error': 'device_tokens required (list)'}, 400, headers)
+
+        if seconds <= 0:
+            return ({'error': 'seconds must be positive'}, 400, headers)
+
+        if seconds > 86400:  # Max 24 hours
+            return ({'error': 'max timer is 24 hours'}, 400, headers)
+
+        # Calculate scheduled time
+        now = datetime.datetime.utcnow()
+        scheduled_time = now + datetime.timedelta(seconds=int(seconds))
+
+        # Create Cloud Tasks client
+        client = tasks_v2.CloudTasksClient()
+        parent = client.queue_path(PROJECT_ID, LOCATION, QUEUE_NAME)
+
+        # Get the URL of the send_notification function
+        function_url = os.environ.get('FUNCTION_URL', '')
+        if not function_url:
+            function_url = f"https://{LOCATION}-{PROJECT_ID}.cloudfunctions.net/send_notification"
+        else:
+            function_url = function_url.replace('schedule_timer', 'send_notification')
+
+        # Create task payload
+        task_payload = {
+            'device_tokens': device_tokens,
+            'title': f'⏰ {label}',
+            'body': f'{format_duration(int(seconds))} timer complete!',
+            'label': label
+        }
+
+        # Create the task
+        task = {
+            'http_request': {
+                'http_method': tasks_v2.HttpMethod.POST,
+                'url': function_url,
+                'headers': {'Content-Type': 'application/json'},
+                'body': json.dumps(task_payload).encode()
+            },
+            'schedule_time': timestamp_pb2.Timestamp(
+                seconds=int(scheduled_time.timestamp())
+            )
+        }
+
+        # Create the task in the queue
+        response = client.create_task(parent=parent, task=task)
+        task_id = response.name.split('/')[-1]
+
+        # Store timer state in Realtime Database
+        timer_ref = db.reference(f'timers/{task_id}')
+        timer_ref.set({
+            'id': task_id,
+            'created': int(now.timestamp() * 1000),  # milliseconds
+            'scheduled_for': int(scheduled_time.timestamp() * 1000),
+            'duration_seconds': int(seconds),
+            'label': label,
+            'device_tokens': device_tokens,
+            'status': 'pending',
+            'dismissed_by': None,
+            'dismissed_at': None
+        })
+
+        return ({
+            'success': True,
+            'timer_id': task_id,
+            'scheduled_for': scheduled_time.isoformat() + 'Z',
+            'task_name': response.name,
+            'duration': format_duration(int(seconds))
+        }, 200, headers)
+
+    except Exception as e:
+        print(f"Error scheduling timer: {e}")
+        return ({'error': str(e)}, 500, headers)
+
+
+@functions_framework.http
+def send_notification(request):
+    """
+    HTTP endpoint called by Cloud Tasks to send FCM notifications.
+    Updates RTDB with delivery status.
+
+    POST /send_notification
+    {
+        "device_tokens": ["token1", "token2"],
+        "title": "Timer Complete",
+        "body": "5m timer finished",
+        "label": "Pomodoro"
+    }
+    """
+    try:
+        data = request.get_json()
+
+        if not data:
+            return ('JSON body required', 400)
+
+        device_tokens = data.get('device_tokens', [])
+        title = data.get('title', '⏰ Timer Complete')
+        body = data.get('body', 'Timer finished!')
+        label = data.get('label', 'Timer')
+
+        if not device_tokens:
+            return ('device_tokens required', 400)
+
+        # Extract timer ID from Cloud Tasks headers
+        task_name = request.headers.get('X-CloudTasks-TaskName', '')
+        timer_id = task_name.split('/')[-1] if task_name else None
+
+        # Send FCM to all device tokens (phone only for now)
+        success_count = 0
+        for token in device_tokens:
+            if send_fcm_notification(token, title, body, timer_id or 'unknown'):
+                success_count += 1
+
+        # Update RTDB status to delivered
+        if timer_id:
+            timer_ref = db.reference(f'timers/{timer_id}')
+            timer_ref.update({
+                'status': 'delivered',
+                'delivered_at': int(datetime.datetime.utcnow().timestamp() * 1000)
+            })
+
+        if success_count > 0:
+            return (f'Notification sent to {success_count}/{len(device_tokens)} devices', 200)
+        else:
+            return ('Failed to send notification to any device', 500)
+
+    except Exception as e:
+        print(f"Error sending notification: {e}")
+        return (str(e), 500)
+
+
+@functions_framework.http
+def dismiss_timer(request):
+    """
+    HTTP endpoint to dismiss a timer (called by clients).
+    Updates RTDB so all devices can sync dismissal.
+    If dismissed by desktop, sends FCM push to phone for instant sync.
+
+    POST /dismiss_timer
+    {
+        "timer_id": "...",
+        "dismissed_by": "phone|desktop"
+    }
+    """
+    # Handle CORS preflight
+    if request.method == 'OPTIONS':
+        headers = {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'POST',
+            'Access-Control-Allow-Headers': 'Content-Type',
+            'Access-Control-Max-Age': '3600'
+        }
+        return ('', 204, headers)
+
+    headers = {'Access-Control-Allow-Origin': '*'}
+
+    try:
+        data = request.get_json()
+
+        if not data:
+            return ({'error': 'JSON body required'}, 400, headers)
+
+        timer_id = data.get('timer_id')
+        dismissed_by = data.get('dismissed_by', 'unknown')
+
+        if not timer_id:
+            return ({'error': 'timer_id required'}, 400, headers)
+
+        # Update timer status in RTDB
+        timer_ref = db.reference(f'timers/{timer_id}')
+        timer_data = timer_ref.get()
+
+        if not timer_data:
+            return ({'error': 'Timer not found'}, 404, headers)
+
+        timer_ref.update({
+            'status': 'dismissed',
+            'dismissed_by': dismissed_by,
+            'dismissed_at': int(datetime.datetime.utcnow().timestamp() * 1000)
+        })
+
+        # If dismissed by desktop, send FCM push to phone to dismiss notification
+        # This enables instant cross-device sync without requiring RTDB listener on phone
+        if dismissed_by == 'desktop':
+            device_tokens = timer_data.get('device_tokens', [])
+            for token in device_tokens:
+                send_fcm_notification(
+                    device_token=token,
+                    title='Timer Dismissed',
+                    body=f'{timer_data.get("label", "Timer")} dismissed from desktop',
+                    timer_id=timer_id,
+                    notification_type='timer_dismissed'
+                )
+
+        return ({'success': True, 'timer_id': timer_id}, 200, headers)
+
+    except Exception as e:
+        print(f"Error dismissing timer: {e}")
+        return ({'error': str(e)}, 500, headers)
+
+
+def format_duration(seconds: int) -> str:
+    """Format seconds into human-readable duration."""
+    if seconds < 60:
+        return f"{seconds}s"
+    elif seconds < 3600:
+        minutes = seconds // 60
+        secs = seconds % 60
+        if secs:
+            return f"{minutes}m {secs}s"
+        return f"{minutes}m"
+    else:
+        hours = seconds // 3600
+        minutes = (seconds % 3600) // 60
+        if minutes:
+            return f"{hours}h {minutes}m"
+        return f"{hours}h"
+```
+
+---
+
+## 📄 requirements.txt
+
+```
+functions-framework==3.*
+google-cloud-tasks==2.*
+google-auth==2.*
+requests==2.*
+firebase-admin==6.*
+```
+
+---
+
+## 🚀 Deployment Commands
+
+```bash
+# Create deployment directory
+mkdir -p ~/timer-cloud-functions
+cd ~/timer-cloud-functions
+
+# Copy files (main.py and requirements.txt from above)
+
+# Deploy all functions
+gcloud functions deploy schedule_timer \
+  --gen2 --runtime=python311 --region=us-central1 --source=. \
+  --entry-point=schedule_timer --trigger-http --allow-unauthenticated \
+  --project=YOUR_PROJECT_ID
+
+gcloud functions deploy send_notification \
+  --gen2 --runtime=python311 --region=us-central1 --source=. \
+  --entry-point=send_notification --trigger-http --allow-unauthenticated \
+  --project=YOUR_PROJECT_ID
+
+gcloud functions deploy dismiss_timer \
+  --gen2 --runtime=python311 --region=us-central1 --source=. \
+  --entry-point=dismiss_timer --trigger-http --allow-unauthenticated \
+  --project=YOUR_PROJECT_ID
+```
+
+---
+
+## 🔧 Configuration Changes
+
+### Update Project ID in main.py
+
+Replace these lines with your project ID:
+
+```python
+# Line 22
+PROJECT_ID = "YOUR_PROJECT_ID"  # Replace with your Firebase project ID
+
+# Line 16
+firebase_admin.initialize_app(cred, {
+    'databaseURL': 'https://YOUR_PROJECT_ID-default-rtdb.firebaseio.com'
+})
+```
+
+---
+
+## ✅ Verification
+
+```bash
+# Test schedule_timer
+curl -X POST https://us-central1-YOUR_PROJECT_ID.cloudfunctions.net/schedule_timer \
+  -H "Content-Type: application/json" \
+  -d '{
+    "seconds": 10,
+    "device_tokens": ["test_token"],
+    "label": "Test"
+  }'
+
+# Expected: {"success": true, "timer_id": "...", ...}
+
+# Test dismiss_timer
+curl -X POST https://us-central1-YOUR_PROJECT_ID.cloudfunctions.net/dismiss_timer \
+  -H "Content-Type: application/json" \
+  -d '{
+    "timer_id": "test_id",
+    "dismissed_by": "test"
+  }'
+
+# Expected: {"success": true, "timer_id": "test_id"}
+```
+
+---
+
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | ⬅️ [Timer Notifications](./timer-notifications.md)*

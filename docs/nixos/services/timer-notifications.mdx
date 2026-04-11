@@ -1,0 +1,814 @@
+---
+title: "Cross-Device Timer Notifications"
+description: "A cloud-based timer system with Firebase Cloud Messaging (FCM) push notifications and bidirectional cross-device synchronization. Features looping alarm soun..."
+---
+
+**Last Updated**: 2025-11-26
+
+A cloud-based timer system with Firebase Cloud Messaging (FCM) push notifications and bidirectional cross-device synchronization. Features looping alarm sounds, click-to-dismiss notifications, and secure Firebase Realtime Database.
+
+---
+
+## 🎯 Overview
+
+### Architecture
+
+The timer notification system consists of three components:
+
+1. **CLI Timer Tool (`t` command)** - Schedule timers from command line
+2. **Google Cloud Functions** - Server-side timer scheduling and notification delivery
+3. **Firebase Realtime Database** - Real-time state synchronization across devices
+4. **Client Listeners**:
+   - **Android Phone**: FCM push notifications (native app)
+   - **KDE Desktop**: RTDB listener with KDE notifications
+
+```
+┌─────────────┐         ┌──────────────┐         ┌──────────────────┐
+│   t CLI     │────────>│schedule_timer│────────>│ Realtime Database│
+│  (cmos)     │         │  Function    │         │  /timers/{id}    │
+└─────────────┘         └──────────────┘         └──────────────────┘
+                                │                          │
+                                ↓                          │
+                        ┌──────────────┐                   │
+                        │ Cloud Tasks  │                   │
+                        │  (queue)     │                   │
+                        └──────────────┘                   │
+                                │                          │
+                                ↓                          ↓
+                        ┌──────────────┐          ┌──────────────┐
+                        │send_notification│──FCM──>│Android Phone │
+                        │   Function   │          │(FCM + Ringtone)│
+                        └──────────────┘          └──────────────┘
+                                │                          │
+                                ↓                          │
+                        ┌──────────────────┐               │
+                        │ RTDB: delivered  │               │
+                        └──────────────────┘               │
+                                │                          │
+                                ↓                          │
+                        ┌──────────────┐                   │
+                        │KDE Desktop   │<──RTDB Listen─────┘
+                        │(D-Bus + Alarm)│
+                        └──────────────┘
+
+DISMISSAL SYNC (Bidirectional via FCM):
+
+  Phone Dismiss:                      KDE Dismiss:
+  ┌──────────┐                       ┌──────────┐
+  │  Phone   │                       │   KDE    │
+  │ Dismiss  │                       │ Dismiss  │
+  └────┬─────┘                       └────┬─────┘
+       │                                  │
+       ↓                                  ↓
+  ┌──────────────┐                  ┌──────────────┐
+  │dismiss_timer │                  │dismiss_timer │
+  │  Function    │                  │  Function    │
+  └──────────────┘                  └──────────────┘
+       │                                  │
+       ↓                                  ↓
+  ┌──────────────┐                  ┌──────────────┐
+  │RTDB: dismissed│                 │RTDB: dismissed│
+  │by: phone      │                 │by: desktop    │
+  └──────────────┘                  └──────────────┘
+       │                                  │
+       ↓                                  ↓
+  ┌──────────────┐                  ┌──────────────┐
+  │KDE sees RTDB │                  │FCM push to   │
+  │change, stops │                  │phone with    │
+  │alarm + popup │                  │timer_dismissed│
+  └──────────────┘                  └──────────────┘
+```
+
+### Features
+
+- ✅ **Cloud-based timers** - Survive terminal/system restarts
+- ✅ **Multi-device sync** - Phone and desktop receive notifications simultaneously
+- ✅ **Bidirectional dismissal** - Dismiss on one device, automatically dismisses on all others
+- ✅ **Looping alarm sound** - `message-new-instant.oga` plays on loop until dismissed
+- ✅ **Click-to-dismiss** - Click anywhere on KDE notification to dismiss (D-Bus integration)
+- ✅ **Interactive TUI** - View and manage active timers with `t list`
+- ✅ **Free tier usage** - &lt; 1% of Firebase free tier limits
+- ✅ **Secured RTDB** - Firebase Realtime Database locked down (Admin SDK only)
+- ✅ **Encrypted secrets** - FCM tokens and service account via agenix
+
+---
+
+## 🚀 Quick Start
+
+### Create a Timer
+```bash
+t 5m                    # 5 minute timer
+t 25m -L "Pomodoro"     # Timer with custom label
+t 2h                    # 2 hour timer
+```
+
+### Manage Timers
+```bash
+t list                  # Interactive TUI to view/delete timers
+t cancel <task-id>      # Cancel specific timer by ID
+```
+
+### View Service Status
+```bash
+# Desktop notification listener
+systemctl --user status kde-timer-notifications
+journalctl --user -u kde-timer-notifications -f
+
+# Cloud Functions logs
+gcloud functions logs read schedule_timer --region=us-central1 --limit=20
+gcloud functions logs read send_notification --region=us-central1 --limit=20
+```
+
+---
+
+## 📦 Components
+
+### 1. CLI Timer Tool
+
+**Location**: `/etc/nixos/apps/timer-cli/timer.py`
+
+**Module**: `/etc/nixos/modules/desktop/timer-cli.nix`
+
+**Commands**:
+- `t &lt;duration>` - Create timer (e.g., `t 5m`, `t 2h`)
+- `t list` - Interactive TUI with live countdown
+- `t cancel &lt;id>` - Cancel timer by ID
+
+**Secrets Required**:
+- `/run/agenix/firebase-service-account` - Firebase Admin SDK credentials
+- `/run/agenix/fcm-device-phone-token` - Android device FCM token
+
+### 2. Google Cloud Functions
+
+**Project**: `notifications-35dd5`
+**Region**: `us-central1`
+**Runtime**: Python 3.11
+
+#### Functions:
+
+**a) schedule_timer**
+- **URL**: `https://us-central1-notifications-35dd5.cloudfunctions.net/schedule_timer`
+- **Purpose**: Creates timer in Cloud Tasks queue and stores state in RTDB
+- **Trigger**: HTTP POST from `t` CLI
+- **Payload**:
+  ```json
+  {
+    "seconds": 300,
+    "device_tokens": ["phone_fcm_token"],
+    "label": "Timer"
+  }
+  ```
+
+**b) send_notification**
+- **URL**: `https://us-central1-notifications-35dd5.cloudfunctions.net/send_notification`
+- **Purpose**: Sends FCM notification to phone and updates RTDB status
+- **Trigger**: Cloud Tasks (scheduled execution)
+- **Payload**:
+  ```json
+  {
+    "device_tokens": ["phone_fcm_token"],
+    "title": "⏰ Timer",
+    "body": "5m timer complete!",
+    "label": "Timer"
+  }
+  ```
+
+**c) dismiss_timer**
+- **URL**: `https://us-central1-notifications-35dd5.cloudfunctions.net/dismiss_timer`
+- **Purpose**: Updates RTDB when timer dismissed and triggers cross-device sync via FCM
+- **Trigger**: HTTP POST from clients (phone app or KDE listener)
+- **Behavior**:
+  - Updates RTDB status to `dismissed` with `dismissed_by` field
+  - **If dismissed by desktop**: Sends FCM push with `type: timer_dismissed` to phone
+  - Phone app receives FCM push and auto-dismisses notification + stops ringtone
+- **Payload**:
+  ```json
+  {
+    "timer_id": "5329619607857897229",
+    "dismissed_by": "phone|desktop"
+  }
+  ```
+- **FCM Message** (when `dismissed_by: desktop`):
+  ```json
+  {
+    "type": "timer_dismissed",
+    "timer_id": "...",
+    "title": "Timer Dismissed",
+    "body": "Label dismissed from desktop"
+  }
+  ```
+
+### 3. Firebase Realtime Database
+
+**URL**: `https://notifications-35dd5-default-rtdb.firebaseio.com`
+
+**Data Structure**:
+```json
+/timers/{timer_id}: {
+  "id": "5329619607857897229",
+  "created": 1764101804834,
+  "scheduled_for": 1764101809834,
+  "duration_seconds": 300,
+  "label": "Pomodoro",
+  "device_tokens": ["phone_token"],
+  "status": "pending|delivered|dismissed|cancelled",
+  "dismissed_by": "phone|desktop|null",
+  "dismissed_at": 1764101809834,
+  "delivered_at": 1764101809834
+}
+```
+
+**Security Rules** (current - locked down):
+```json
+{
+  "rules": {
+    ".read": false,
+    ".write": false
+  }
+}
+```
+
+This configuration:
+- ❌ **Blocks all public access** - No unauthenticated reads or writes
+- ✅ **Admin SDK bypasses rules** - Cloud Functions and KDE listener still work
+- ✅ **FCM tokens protected** - Device tokens no longer publicly exposed
+
+**How Access Works**:
+| Client | Method | Access |
+|--------|--------|--------|
+| Cloud Functions | Firebase Admin SDK | ✅ Full access (bypasses rules) |
+| KDE Listener | Firebase Admin SDK | ✅ Full access (bypasses rules) |
+| Public HTTP | REST API | ❌ Blocked ("Permission denied") |
+| Android App | Client SDK | ❌ Blocked (uses FCM push instead) |
+
+### 4. KDE Desktop Notification Listener
+
+**Location**: `/etc/nixos/apps/kde-timer-notifications/timer_notifier.py`
+
+**Module**: `/etc/nixos/modules/desktop/kde-timer-notifications.nix`
+
+**Service**: `kde-timer-notifications.service` (systemd user service)
+
+**Purpose**:
+- Listens to Firebase RTDB for timer status changes (Admin SDK)
+- Shows KDE notifications via D-Bus when timers complete
+- Plays looping alarm sound (`message-new-instant.oga`) until dismissed
+- Click anywhere on notification to dismiss (D-Bus default action)
+- Auto-dismisses when phone dismisses timer (RTDB status change)
+- Syncs dismissals to server for cross-device coordination
+
+**Key Features**:
+- **D-Bus Notifications**: Uses `org.freedesktop.Notifications` interface directly
+- **Looping Alarm**: `paplay` subprocess plays sound every 0.3s until dismissed
+- **Click-to-Dismiss**: "default" D-Bus action makes entire notification clickable
+- **D-Bus Monitor**: Subprocess monitors `NotificationClosed` and `ActionInvoked` signals
+- **Cross-device Sync**: Calls `dismiss_timer` Cloud Function when dismissed locally
+
+**Dependencies**:
+- `firebase-admin` - Firebase Admin SDK (bypasses security rules)
+- `requests` - HTTP client for Cloud Function calls
+- `dbus-python` - D-Bus bindings for notification control
+- `libnotify` - notify-send (fallback)
+- `kdialog` - KDE dialog (fallback)
+- `pulseaudio` - paplay for alarm sound
+- `dbus` - dbus-monitor for signal monitoring
+
+**Service Configuration**:
+```nix
+systemd.user.services.kde-timer-notifications = {
+  description = "KDE Timer Notification Listener";
+  after = [ "graphical-session.target" ];
+  wantedBy = [ "graphical-session.target" ];
+  serviceConfig = {
+    Type = "simple";
+    ExecStart = "${timerNotifierScript}/bin/kde-timer-notifier";
+    Restart = "on-failure";
+    RestartSec = "10s";
+  };
+};
+```
+
+---
+
+## 🔧 Configuration
+
+### Secrets (agenix)
+
+All secrets stored in `/etc/nixos/secrets/` and encrypted with host-specific age keys.
+
+**Required Secrets**:
+
+1. **firebase-service-account.age**
+   - Firebase Admin SDK service account JSON
+   - Hosts: `allKeys` (cmos, misc, jimmich, nixvm)
+   - Owner: `root:fcm-access`
+   - Source: Firebase Console → Project Settings → Service Accounts → Generate new private key
+
+2. **fcm-device-phone-token.age**
+   - Android phone FCM device token
+   - Hosts: `allKeys`
+   - Owner: `root:fcm-access`
+   - Source: Android app logs when first launched
+
+**Secrets Configuration** (`/etc/nixos/secrets/secrets.nix`):
+```nix
+"firebase-service-account.age".publicKeys = allKeys;
+"fcm-device-phone-token.age".publicKeys = allKeys;
+```
+
+**Module Configuration** (`/etc/nixos/modules/core/security/secrets.nix`):
+```nix
+firebase-service-account = {
+  file = ../../../secrets/firebase-service-account.age;
+  mode = "0640";
+  owner = "root";
+  group = "fcm-access";
+};
+
+fcm-device-phone-token = {
+  file = ../../../secrets/fcm-device-phone-token.age;
+  mode = "0640";
+  owner = "root";
+  group = "fcm-access";
+};
+```
+
+### Enable Services
+
+**cmos host** (`/etc/nixos/hosts/cmos/default.nix`):
+```nix
+# CLI timer tool
+services.timer-cli.enable = true;
+
+# KDE notification listener
+services.kde-timer-notifications.enable = true;
+```
+
+### Port Allocation
+
+No ports required - all communication via HTTPS to Google Cloud.
+
+---
+
+## 📋 Fresh GCP Environment Deployment
+
+### Prerequisites
+
+- Google Cloud account
+- Firebase project created
+- `gcloud` CLI installed and authenticated
+- Android app built and FCM token obtained
+
+### Step 1: Create Firebase Project
+
+```bash
+# Set project ID
+PROJECT_ID="notifications-35dd5"  # Use your project ID
+PROJECT_NUMBER="553278385617"     # Get from Firebase Console
+
+# Enable APIs
+gcloud services enable firebasedatabase.googleapis.com --project=$PROJECT_ID
+gcloud services enable cloudtasks.googleapis.com --project=$PROJECT_ID
+gcloud services enable cloudfunctions.googleapis.com --project=$PROJECT_ID
+gcloud services enable cloudscheduler.googleapis.com --project=$PROJECT_ID
+```
+
+### Step 2: Create Firebase Realtime Database
+
+```bash
+# Create default RTDB instance
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  -H "X-Goog-User-Project: $PROJECT_ID" \
+  -d '{"type": "DEFAULT_DATABASE"}' \
+  "https://firebasedatabase.googleapis.com/v1beta/projects/$PROJECT_NUMBER/locations/us-central1/instances"
+
+# Set test mode security rules (open read/write)
+curl -X PUT \
+  -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  -H "X-Goog-User-Project: $PROJECT_ID" \
+  -d '{
+    "rules": {
+      ".read": true,
+      ".write": true
+    }
+  }' \
+  "https://$PROJECT_ID-default-rtdb.firebaseio.com/.settings/rules.json"
+```
+
+**Verify Database**:
+```bash
+# Test write
+curl -X PUT -d '{"test": "active"}' \
+  "https://$PROJECT_ID-default-rtdb.firebaseio.com/test.json"
+
+# Test read
+curl -s "https://$PROJECT_ID-default-rtdb.firebaseio.com/test.json"
+# Expected output: {"test":"active"}
+```
+
+### Step 3: Create Cloud Tasks Queue
+
+```bash
+# Create timer queue
+gcloud tasks queues create timer-queue \
+  --location=us-central1 \
+  --project=$PROJECT_ID
+
+# Verify queue exists
+gcloud tasks queues describe timer-queue \
+  --location=us-central1 \
+  --project=$PROJECT_ID
+```
+
+### Step 4: Deploy Cloud Functions
+
+**Prepare function source** (use files from `/tmp/cloud-functions-updated/`):
+
+```bash
+# Create deployment directory
+mkdir -p ~/timer-cloud-functions
+cd ~/timer-cloud-functions
+
+# Create main.py (copy content from /tmp/cloud-functions-updated/main.py)
+cat > main.py << 'EOF'
+# [Paste entire main.py content here - see section below]
+EOF
+
+# Create requirements.txt
+cat > requirements.txt << 'EOF'
+functions-framework==3.*
+google-cloud-tasks==2.*
+requests==2.*
+firebase-admin==6.*
+EOF
+```
+
+**Deploy Functions**:
+
+```bash
+# Deploy schedule_timer
+gcloud functions deploy schedule_timer \
+  --gen2 \
+  --runtime=python311 \
+  --region=us-central1 \
+  --source=. \
+  --entry-point=schedule_timer \
+  --trigger-http \
+  --allow-unauthenticated \
+  --project=$PROJECT_ID
+
+# Deploy send_notification
+gcloud functions deploy send_notification \
+  --gen2 \
+  --runtime=python311 \
+  --region=us-central1 \
+  --source=. \
+  --entry-point=send_notification \
+  --trigger-http \
+  --allow-unauthenticated \
+  --project=$PROJECT_ID
+
+# Deploy dismiss_timer
+gcloud functions deploy dismiss_timer \
+  --gen2 \
+  --runtime=python311 \
+  --region=us-central1 \
+  --source=. \
+  --entry-point=dismiss_timer \
+  --trigger-http \
+  --allow-unauthenticated \
+  --project=$PROJECT_ID
+```
+
+**Verify Deployment**:
+```bash
+# List functions
+gcloud functions list --region=us-central1 --project=$PROJECT_ID
+
+# Test schedule_timer endpoint
+curl -X POST https://us-central1-$PROJECT_ID.cloudfunctions.net/schedule_timer \
+  -H "Content-Type: application/json" \
+  -d '{
+    "seconds": 10,
+    "device_tokens": ["test_token"],
+    "label": "Test Timer"
+  }'
+
+# Expected output: {"success": true, "timer_id": "...", ...}
+```
+
+### Step 5: Get Firebase Service Account Key
+
+```bash
+# Generate service account key
+gcloud iam service-accounts keys create ~/firebase-service-account.json \
+  --iam-account=$PROJECT_NUMBER-compute@developer.gserviceaccount.com \
+  --project=$PROJECT_ID
+
+# Encrypt with agenix
+cd /etc/nixos/secrets
+echo "$(cat ~/firebase-service-account.json)" | \
+  nix run github:ryantm/agenix -- -e firebase-service-account.age -i ../keys/cmos-agenix.key
+
+# Cleanup plaintext
+rm ~/firebase-service-account.json
+```
+
+### Step 6: Get Android FCM Device Token
+
+**Option A: From Android App Logs** (recommended)
+
+1. Build and install the Android app from `/etc/nixos/apps/fcm-notifier`
+2. Launch the app
+3. Check logcat for FCM token:
+   ```bash
+   adb logcat | grep "FCM token"
+   ```
+4. Copy the token (starts with `fPBn...` or similar)
+
+**Option B: Manual Firebase Console**
+
+1. Go to Firebase Console → Cloud Messaging
+2. Send test notification to get device token
+3. Token appears in notification logs
+
+**Encrypt Token**:
+```bash
+cd /etc/nixos/secrets
+echo "YOUR_FCM_TOKEN_HERE" | \
+  nix run github:ryantm/agenix -- -e fcm-device-phone-token.age -i ../keys/cmos-agenix.key
+```
+
+### Step 7: Update NixOS Configuration
+
+**Update Project ID** in timer CLI (`/etc/nixos/apps/timer-cli/timer.py`):
+```python
+# Cloud Function URL
+CLOUD_FUNCTION_URL = "https://us-central1-YOUR_PROJECT_ID.cloudfunctions.net/schedule_timer"
+```
+
+**Update Project ID** in notification listener (`/etc/nixos/apps/kde-timer-notifications/timer_notifier.py`):
+```python
+RTDB_URL = "https://YOUR_PROJECT_ID-default-rtdb.firebaseio.com"
+DISMISS_FUNCTION_URL = "https://us-central1-YOUR_PROJECT_ID.cloudfunctions.net/dismiss_timer"
+```
+
+**Rebuild System**:
+```bash
+cd /etc/nixos
+git add apps/ modules/ secrets/
+nixos-rebuild switch --flake .#cmos
+```
+
+### Step 8: Test End-to-End
+
+```bash
+# Create test timer
+t 15s -L "Deployment Test"
+
+# Check RTDB
+curl -s "https://$PROJECT_ID-default-rtdb.firebaseio.com/timers.json?print=pretty"
+
+# Wait 15 seconds, check logs
+journalctl --user -u kde-timer-notifications -n 20
+gcloud functions logs read send_notification --region=us-central1 --limit=10
+
+# Verify notification on phone and desktop
+```
+
+---
+
+## 🔍 Troubleshooting
+
+### CLI Timer Fails to Schedule
+
+**Symptom**: `t 5m` returns error
+
+**Check**:
+```bash
+# Verify Firebase service account exists
+ls -la /run/agenix/firebase-service-account
+
+# Verify phone token exists
+ls -la /run/agenix/fcm-device-phone-token
+
+# Test Cloud Function directly
+curl -X POST https://us-central1-notifications-35dd5.cloudfunctions.net/schedule_timer \
+  -H "Content-Type: application/json" \
+  -d '{"seconds": 10, "device_tokens": ["test"], "label": "Test"}'
+```
+
+**Solution**: Re-encrypt secrets or check Cloud Function logs
+
+### Desktop Notifications Not Showing
+
+**Symptom**: Timer fires on phone but not desktop
+
+**Check**:
+```bash
+# Service status
+systemctl --user status kde-timer-notifications
+
+# Service logs
+journalctl --user -u kde-timer-notifications -f
+
+# Manual test
+notify-send -u critical "Test" "Timer notification test"
+```
+
+**Common Issues**:
+1. Service not running → `systemctl --user start kde-timer-notifications`
+2. Firebase credentials missing → Check `/run/agenix/firebase-service-account`
+3. RTDB connection failed → Check network/firewall
+
+### Cloud Function Errors
+
+**Symptom**: Cloud Tasks show `INVALID_ARGUMENT(3)` errors
+
+**Check**:
+```bash
+# Function logs
+gcloud functions logs read send_notification --region=us-central1 --limit=20
+
+# RTDB status
+curl -s "https://notifications-35dd5-default-rtdb.firebaseio.com/timers.json?print=pretty"
+
+# Cloud Tasks queue
+gcloud tasks list --queue=timer-queue --location=us-central1
+```
+
+**Common Issues**:
+1. Missing `device_tokens` parameter → Redeploy function
+2. RTDB permission denied → Check security rules
+3. FCM token invalid → Re-generate phone token
+
+### Cross-Device Dismissal Not Working
+
+**Symptom**: Dismissing on one device doesn't dismiss on other
+
+**Check**:
+```bash
+# RTDB timer status
+curl -s "https://notifications-35dd5-default-rtdb.firebaseio.com/timers/TIMER_ID.json"
+
+# Desktop listener logs
+journalctl --user -u kde-timer-notifications -f
+
+# Test dismiss endpoint
+curl -X POST https://us-central1-notifications-35dd5.cloudfunctions.net/dismiss_timer \
+  -H "Content-Type: application/json" \
+  -d '{"timer_id": "TIMER_ID", "dismissed_by": "test"}'
+```
+
+**Common Issues**:
+1. RTDB listener not detecting changes → Restart service
+2. dismiss_timer function not deployed → Deploy function
+3. Android app not listening to RTDB → Update app code
+
+---
+
+## 💰 Cost Analysis
+
+### Firebase Free Tier (Spark Plan)
+
+**Realtime Database**:
+- Storage: 1 GB/month
+- Bandwidth: 10 GB/month
+- Connections: 100 simultaneous
+
+**Estimated Usage** (20 timers/day):
+- Storage: ~120 KB/month (0.012% of limit)
+- Bandwidth: ~1 MB/month (0.01% of limit)
+- Connections: 2 (2% of limit)
+
+### Cloud Functions Free Tier
+
+**Limits**:
+- Invocations: 2 million/month
+- Compute time: 400,000 GB-seconds/month
+- Networking: 5 GB/month
+
+**Estimated Usage** (20 timers/day):
+- Invocations: ~1,200/month (0.06% of limit)
+- Compute time: ~5 GB-seconds/month (0.00125% of limit)
+
+### Total Cost
+
+**FREE** - Usage well within all free tier limits
+
+---
+
+## 🔐 Security Implementation
+
+### Current Security Posture
+
+**✅ Fully Secured**:
+- **RTDB locked down** - `.read: false, .write: false` blocks all public access
+- **Admin SDK access only** - Cloud Functions and KDE listener use service account
+- **FCM tokens protected** - No longer exposed via public RTDB reads
+- **Secrets encrypted** - agenix encryption for service account and FCM tokens
+- **HTTPS only** - All Cloud Function communication over TLS
+- **Minimal permissions** - Service account has only required Firebase access
+- **Systemd hardening** - User service with PrivateTmp, NoNewPrivileges, ProtectSystem
+
+### Security Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Firebase Realtime Database                    │
+│                  Rules: .read: false, .write: false              │
+└─────────────────────────────────────────────────────────────────┘
+                                ↑
+                    ┌───────────┴───────────┐
+                    │   Admin SDK Only      │
+                    │  (bypasses rules)     │
+                    └───────────┬───────────┘
+           ┌────────────────────┼────────────────────┐
+           ↓                    ↓                    ↓
+    ┌─────────────┐      ┌─────────────┐      ┌─────────────┐
+    │schedule_timer│      │send_notif.  │      │dismiss_timer│
+    │  Function   │      │  Function   │      │  Function   │
+    └─────────────┘      └─────────────┘      └─────────────┘
+           ↑                                         ↑
+           │                                         │
+    ┌─────────────┐                           ┌─────────────┐
+    │  t CLI      │                           │ KDE Listener│
+    │(via HTTP)   │                           │(Admin SDK)  │
+    └─────────────┘                           └─────────────┘
+```
+
+### Securing RTDB (Deployment Step)
+
+RTDB rules are deployed via Firebase CLI with service account:
+
+```bash
+# Create rules file
+cat > /tmp/firebase-rules/database.rules.json << 'EOF'
+{
+  "rules": {
+    ".read": false,
+    ".write": false
+  }
+}
+EOF
+
+cat > /tmp/firebase-rules/firebase.json << 'EOF'
+{
+  "database": {
+    "rules": "database.rules.json"
+  }
+}
+EOF
+
+# Deploy rules using service account
+cd /tmp/firebase-rules
+GOOGLE_APPLICATION_CREDENTIALS=/run/agenix/firebase-service-account \
+  nix-shell -p firebase-tools --run \
+  "firebase deploy --only database --project notifications-35dd5"
+```
+
+### Verification Commands
+
+```bash
+# Verify public access is blocked
+curl -s "https://notifications-35dd5-default-rtdb.firebaseio.com/timers.json"
+# Expected: {"error": "Permission denied"}
+
+# Verify Admin SDK still works (run on cmos)
+python3 << 'EOF'
+import firebase_admin
+from firebase_admin import credentials, db
+cred = credentials.Certificate("/run/agenix/firebase-service-account")
+firebase_admin.initialize_app(cred, {"databaseURL": "https://notifications-35dd5-default-rtdb.firebaseio.com"})
+print(f"Timers: {len(db.reference('timers').get() or {})}")
+EOF
+# Expected: Timers: <number>
+```
+
+### Optional Future Hardening
+
+**Cloud Functions Authentication** (not currently needed):
+- Add Firebase Auth to CLI for user-specific timers
+- Require authentication tokens in Cloud Functions
+- Use Cloud IAM for function invocation
+
+**Rate Limiting** (not currently needed):
+- Add Cloud Armor rules to limit requests
+- Implement quota checks in Cloud Functions
+- Use Firebase AppCheck for abuse prevention
+
+---
+
+## 📚 Related Documentation
+
+- [CLI Timer Tool](/etc/nixos/modules/desktop/timer-cli.nix)
+- [KDE Notifications](/etc/nixos/modules/desktop/kde-timer-notifications.nix)
+- [Agenix Secrets](./secrets.md)
+- [Firebase Documentation](https://firebase.google.com/docs)
+- [Cloud Functions Documentation](https://cloud.google.com/functions/docs)
+
+---
+
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md)*

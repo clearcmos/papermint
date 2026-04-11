@@ -1,0 +1,64 @@
+---
+title: "Konsole Troubleshooting Guide"
+description: "Symptoms:"
+---
+
+## Memory Issues and Crashes
+
+### Problem: Claude Code or Other Applications Crashing with `std::bad_alloc`
+
+**Symptoms:**
+- Applications crash with `std::bad_alloc` errors
+- System becomes unresponsive
+- Error messages like "not enough memory for the allocation"
+
+**Root Cause:**
+Konsole's scrollback buffer can accumulate massive amounts of memory over time. We've observed Konsole using up to 28.7GB of RAM due to unlimited scrollback buffer retention.
+
+**Example Case (2025-09-26):**
+```
+systemd[1954]: app-org.kde.konsole@6a46b90e45574c6c8b1e24a635af459a.service: 
+               Consumed 6min 5.225s CPU time, 28.7G memory peak, 4.3G memory swap peak.
+```
+
+Claude Code attempted to allocate 68GB on top of this, causing:
+```
+terminate called after throwing an instance of 'std::bad_alloc'
+  what():  std::bad_alloc
+```
+
+### Solutions
+
+#### Immediate Fixes
+1. **Clear scrollback buffer**: Press `Ctrl+Shift+K` in Konsole
+2. **Restart Konsole**: Close and reopen to free all memory
+3. **Check memory usage**: `journalctl | grep -E "(memory peak)" | grep konsole`
+
+#### Permanent Configuration
+1. **Limit scrollback buffer**:
+   - Settings → Edit Current Profile → Scrolling
+   - Set "Scrollback Lines" to 1000-5000 (instead of unlimited)
+   - Enable "Limit scrollback to"
+
+2. **Use alternative terminals for long-running sessions**:
+   - Use `tmux` or `screen` with limited scrollback
+   - Consider Alacritty or other lightweight terminals for intensive work
+
+#### Monitoring Commands
+```bash
+# Check Konsole memory usage
+systemctl --user status app-org.kde.konsole-*.scope | grep memory
+
+# View recent Konsole memory peaks
+journalctl --since "1 hour ago" | grep -E "konsole.*memory peak"
+
+# Monitor live memory usage
+watch -n 1 'ps aux | grep konsole | grep -v grep'
+```
+
+### Prevention Best Practices
+- Clear scrollback regularly when running verbose commands
+- Use `head`/`tail` to limit output instead of viewing full logs
+- Pipe verbose output to files instead of terminal: `command > output.log`
+- Close unused Konsole tabs to free memory
+- Consider periodic Konsole restarts for long development sessions

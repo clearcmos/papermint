@@ -1,0 +1,912 @@
+---
+title: "Complete Web Service Deployment Guide"
+description: "*Step-by-step guide for deploying new web services with Traefik, Keycloak, and OAuth2-proxy*"
+---
+
+## ⚡ Quick Reference (TL;DR)
+
+**For services WITHOUT OAuth2-proxy** (like Nextcloud with built-in OIDC):
+
+```bash
+# 1. Add subdomain to DNS
+# Edit: /etc/nixos/modules/services/domains.nix
+# Add: { name = "myservice"; type = "CNAME"; value = "bedrosn.com."; proxied = false; }
+
+# 2. Add Traefik routing
+# Edit: /etc/nixos/modules/services/traefik.nix
+# Add router + service config (see examples in file)
+
+# 3. Deploy
+cd /etc/nixos && git add . && nixos-rebuild switch --flake .#misc --target-host misc.home.arpa
+
+# 4. Flush DNS cache and test
+resolvectl flush-caches && curl -Iv https://myservice.bedrosn.com/
+```
+
+**That's it! No hoops, no waiting, no manual cert/DNS management.**
+
+**For services WITH OAuth2-proxy** (like Glances, Memos): See full guide below.
+
+---
+
+## 🎯 Overview
+
+This guide provides a complete, tested workflow for deploying a new web service with:
+- **Automatic DNS management** via Cloudflare (zero configuration after initial setup)
+- **HTTPS certificates** via Let's Encrypt (automatic via Traefik DNS challenge)
+- **Google SSO authentication** via Keycloak (optional, for OAuth2-proxy pattern)
+- **Group-based authorization** via OAuth2-proxy (optional)
+- **Declarative configuration** in NixOS
+
+**Example Services**:
+- Nextcloud (files) at `https://nextcloud.bedrosn.com` - Built-in OIDC, no OAuth2-proxy
+- Jellyfin (media) at `https://jellyfin.bedrosn.com` - Built-in auth, no OAuth2-proxy
+- Immich (photos) at `https://gallery.bedrosn.com` - Built-in auth, no OAuth2-proxy
+- Glances (monitoring) at `https://glances.bedrosn.com` - OAuth2-proxy Pattern 1
+- Memos (notes) at `https://notes.bedrosn.com` - OAuth2-proxy Pattern 1
+- Traefik Dashboard at `https://traefik.bedrosn.com` - OAuth2-proxy Pattern 2
+
+**Key Insight**: Most modern services (Nextcloud, Jellyfin, Immich, Keycloak) have built-in authentication and only need DNS + Traefik routing. OAuth2-proxy is only needed for services WITHOUT built-in SSO support.
+
+---
+
+## 📋 Prerequisites
+
+Before deploying a new service, ensure you have:
+
+✅ **Access**:
+- SSH access to the server (misc.home.arpa)
+- Admin access to Keycloak (https://keycloak.bedrosn.com/admin)
+- Git access to `/etc/nixos` repository
+
+✅ **Credentials**:
+- Agenix key for encrypting secrets (`/etc/nixos/keys/cmos-agenix.key`)
+- Cloudflare API token (for DNS - already configured)
+- Google OAuth client credentials (if adding new client)
+
+✅ **Knowledge**:
+- Basic NixOS configuration
+- Understanding of OAuth2/OIDC flow
+- Familiarity with Traefik routing
+
+---
+
+## 🔄 Complete Deployment Workflow
+
+### Step 1: Plan Your Service
+
+**Decision Points**:
+1. **Service name**: What's the internal service name? (e.g., `glances`, `memos`)
+2. **Domain**: What subdomain? (e.g., `glances.bedrosn.com`, `notes.bedrosn.com`)
+3. **Integration pattern**: Which OAuth2-proxy pattern applies?
+   - **Pattern 1 (Full Proxy)**: Service runs on separate HTTP port → Use for 99% of services
+   - **Pattern 2 (Internal Service Proxy)**: Service is Traefik-internal (`api@internal`) → Rare, special cases only
+4. **Port**: What localhost port will the service run on? (check CLAUDE.md port registry)
+5. **OAuth2-proxy port**: What port for OAuth2-proxy? (check CLAUDE.md port registry)
+6. **Access control**: Who needs access? Which users need which permissions?
+7. **Authentication**: Google OAuth only, or also password/WebAuthn?
+
+**Example (Pattern 1 - Standard)**:
+```
+Service: memos
+Domain: notes.bedrosn.com
+Pattern: Full Proxy (Pattern 1)
+Service Port: 5230
+OAuth2-proxy Port: 5231
+Access: user1@gmail.com, user2@gmail.com
+Group: docs-access
+```
+
+**Example (Pattern 2 - Advanced)**:
+```
+Service: traefik-dashboard
+Domain: traefik.bedrosn.com
+Pattern: Internal Service Proxy (Pattern 2)
+Traefik Internal API Port: 8082
+OAuth2-proxy Port: 4181
+Access: user@gmail.com only
+Group: traefik-access
+Special: Requires api.insecure = true
+```
+
+---
+
+### Step 2: Configure Your Application Service
+
+**Create or configure your service in NixOS**:
+
+```nix
+# /etc/nixos/modules/services/markitup.nix
+{ config, pkgs, ... }:
+
+{
+  systemd.services.markitup = {
+    description = "MarkItUp Documentation Service";
+    wantedBy = [ "multi-user.target" ];
+    after = [ "network.target" ];
+
+    serviceConfig = {
+      ExecStart = "${pkgs.markitup}/bin/markitup server";
+      Restart = "always";
+      User = "markitup";
+      WorkingDirectory = "/var/lib/markitup";
+    };
+  };
+
+  # Service runs on localhost:3000
+  networking.firewall.allowedTCPPorts = [ 3000 ];
+
+  users.users.markitup = {
+    isSystemUser = true;
+    group = "markitup";
+  };
+  users.groups.markitup = {};
+}
+```
+
+**Add to host configuration**:
+```nix
+# /etc/nixos/hosts/misc/default.nix
+imports = [
+  # ... existing imports
+  ../../modules/services/memos.nix
+];
+```
+
+---
+
+### Step 3: Add DNS Entry
+
+**Edit the domains configuration**:
+```nix
+# /etc/nixos/modules/services/domains.nix
+{
+  domains = [
+    "keycloak.bedrosn.com"
+    "glances.bedrosn.com"
+    "notes.bedrosn.com"       # <-- Add your new domain
+    # ... other domains
+  ];
+}
+```
+
+**How it works**:
+- `cloudflare-dns-upsert.service` runs on boot and updates Cloudflare A records
+- Points all domains to your server's public IP
+- Runs before Traefik for certificate automation
+
+---
+
+### Step 4: Create OAuth2-Proxy Client Secret
+
+**Generate secrets for OAuth2-proxy**:
+
+```bash
+# 1. Generate OAuth2-proxy client secret (32-byte random)
+openssl rand -base64 32
+
+# 2. Generate cookie secret (32-byte random)
+openssl rand -base64 32
+
+# 3. Encrypt client secret with agenix
+cd /etc/nixos/secrets
+echo "your-generated-client-secret" | nix run github:ryantm/agenix -- \
+  -e oauth2-proxy-<servicename>-client-secret.age \
+  -i ../keys/cmos-agenix.key
+
+# 4. Encrypt cookie secret
+echo "your-generated-cookie-secret" | nix run github:ryantm/agenix -- \
+  -e oauth2-proxy-<servicename>-cookie-secret.age \
+  -i ../keys/cmos-agenix.key
+```
+
+**Add to secrets.nix**:
+```nix
+# /etc/nixos/secrets/secrets.nix
+{
+  "oauth2-proxy-<servicename>-client-secret.age".publicKeys = miscKeys;
+  "oauth2-proxy-<servicename>-cookie-secret.age".publicKeys = miscKeys;
+}
+```
+
+**Add to agenix-secrets.nix**:
+```nix
+# /etc/nixos/modules/core/agenix-secrets.nix
+age.secrets.oauth2-proxy-<servicename>-client-secret = {
+  file = ../secrets/oauth2-proxy-<servicename>-client-secret.age;
+  owner = "root";
+  group = "root";
+  mode = "0400";
+};
+
+age.secrets.oauth2-proxy-<servicename>-cookie-secret = {
+  file = ../secrets/oauth2-proxy-<servicename>-cookie-secret.age;
+  owner = "root";
+  group = "root";
+  mode = "0400";
+};
+```
+
+---
+
+### Step 5: Add Service to Keycloak User Config
+
+**Update user configuration to create groups and assign access**:
+
+```bash
+cd /etc/nixos/secrets
+nix run github:ryantm/agenix -- -e keycloak-user-config.age -i ../keys/cmos-agenix.key
+```
+
+**Add service to users' services arrays**:
+```json
+{
+  "allowedUsers": [
+    {
+      "email": "user1@gmail.com",
+      "displayName": "User",
+      "lastName": "One",
+      "password": "...",
+      "authMethods": ["google", "password", "webauthn"],
+      "services": ["glances", "immich", "security-dashboard", "nixdocs", "filebrowser"],  # <-- Add your service here
+      "roles": ["admin"]
+    },
+    {
+      "email": "user2@gmail.com",
+      "displayName": "User",
+      "lastName": "Two",
+      "authMethods": ["google"],
+      "services": ["glances", "docs"],  # <-- Add here
+      "roles": ["viewer"]
+    }
+  ]
+}
+```
+
+**What this does**:
+- Keycloak bootstrap will create `docs-access` group automatically
+- Assigns users to the group based on their `services` list
+- OAuth2-proxy will check for `docs-access` group membership
+
+---
+
+### Step 6: Add OAuth2-Proxy Client to Keycloak Bootstrap
+
+**Edit Keycloak bootstrap script**:
+```nix
+# /etc/nixos/modules/services/keycloak.nix
+
+# 1. Load the new client secret at the top
+OAUTH2_PROXY_<SERVICENAME>_CLIENT_SECRET=$(cat ${config.age.secrets.oauth2-proxy-<servicename>-client-secret.path})
+
+# 2. Add client creation after Memos client (around line 215)
+# Create OAuth2-proxy client for <ServiceName>
+echo "Configuring OAuth2-proxy client for <ServiceName>..."
+
+# Check if client exists
+CLIENTS=$(api_call GET "admin/realms/web/clients?clientId=oauth2-proxy-<servicename>")
+CLIENT_LIST=$(echo "$CLIENTS" | head -n -1)
+CLIENT_ID_UUID=$(echo "$CLIENT_LIST" | jq -r '.[0].id // empty')
+
+if [ -z "$CLIENT_ID_UUID" ]; then
+  echo "Creating OAuth2-proxy client for <ServiceName>..."
+  CLIENT_JSON=$(jq -n \
+    --arg secret "$OAUTH2_PROXY_<SERVICENAME>_CLIENT_SECRET" \
+    '{
+      clientId: "oauth2-proxy-<servicename>",
+      name: "OAuth2 Proxy for <ServiceName>",
+      enabled: true,
+      protocol: "openid-connect",
+      publicClient: false,
+      standardFlowEnabled: true,
+      directAccessGrantsEnabled: false,
+      serviceAccountsEnabled: false,
+      clientAuthenticatorType: "client-secret",
+      secret: $secret,
+      redirectUris: ["https://<domain>.bedrosn.com/oauth2/callback"],
+      webOrigins: ["https://<domain>.bedrosn.com"]
+    }')
+  api_call POST "admin/realms/web/clients" "$CLIENT_JSON" >/dev/null
+  echo "✓ Created OAuth2-proxy client for <ServiceName>"
+else
+  echo "✓ OAuth2-proxy client for <ServiceName> already exists (ID: $CLIENT_ID_UUID)"
+  # Update secret
+  CLIENT_JSON=$(jq -n --arg secret "$OAUTH2_PROXY_<SERVICENAME>_CLIENT_SECRET" '{secret: $secret}')
+  api_call PUT "admin/realms/web/clients/$CLIENT_ID_UUID" "$CLIENT_JSON" >/dev/null
+  echo "✓ Updated client secret for <ServiceName>"
+fi
+
+# 3. Add to the for loop that adds service-groups scope (around line 367)
+for client_id in oauth2-proxy-glances oauth2-proxy-memos oauth2-proxy-<servicename>; do
+  # ... existing code
+done
+```
+
+---
+
+### Step 7: Configure OAuth2-Proxy Service
+
+**Create OAuth2-proxy service**:
+```nix
+# /etc/nixos/modules/services/oauth2-proxy-<servicename>.nix
+{ config, pkgs, ... }:
+
+{
+  systemd.services.oauth2-proxy-<servicename> = {
+    description = "OAuth2 Proxy for <ServiceName> (<domain>.bedrosn.com)";
+    wantedBy = [ "multi-user.target" ];
+    after = [ "keycloak.service" "traefik.service" "<servicename>.service" ];
+    wants = [ "keycloak.service" "traefik.service" ];
+
+    serviceConfig = {
+      Type = "simple";
+      ExecStart = pkgs.writeShellScript "oauth2-proxy-<servicename>-start" ''
+        CLIENT_SECRET=$(cat ${config.age.secrets.oauth2-proxy-<servicename>-client-secret.path})
+        COOKIE_SECRET=$(cat ${config.age.secrets.oauth2-proxy-<servicename>-cookie-secret.path})
+
+        exec ${pkgs.oauth2-proxy}/bin/oauth2-proxy \
+          --provider=oidc \
+          --oidc-issuer-url="https://keycloak.bedrosn.com/realms/web" \
+          --client-id="oauth2-proxy-<servicename>" \
+          --client-secret="$CLIENT_SECRET" \
+          --cookie-secret="$COOKIE_SECRET" \
+          --http-address="127.0.0.1:<proxy-port>" \
+          --upstream="http://localhost:<service-port>" \
+          --redirect-url="https://<domain>.bedrosn.com/oauth2/callback" \
+          --cookie-secure=true \
+          --cookie-domain=".bedrosn.com" \
+          --cookie-expire="4h" \
+          --cookie-refresh="15m" \
+          --cookie-samesite="lax" \
+          --pass-host-header=true \
+          --set-xauthrequest=true \
+          --email-domain="*" \
+          --oidc-email-claim="email" \
+          --scope="openid email profile" \
+          --reverse-proxy=true \
+          --skip-provider-button=true \
+          --oidc-groups-claim="groups" \
+          --allowed-group="<servicename>-access"
+      '';
+      Restart = "always";
+      RestartSec = "10s";
+
+      # Security hardening
+      NoNewPrivileges = true;
+      PrivateTmp = true;
+      PrivateDevices = true;
+      ProtectSystem = "strict";
+      ProtectHome = true;
+      ProtectKernelLogs = true;
+      ProtectKernelModules = true;
+      ProtectControlGroups = true;
+      RestrictSUIDSGID = true;
+      RestrictNamespaces = true;
+      LockPersonality = true;
+      MemoryDenyWriteExecute = true;
+      SystemCallArchitectures = "native";
+      CapabilityBoundingSet = "";
+      AmbientCapabilities = "";
+      UMask = "0077";
+    };
+  };
+}
+```
+
+---
+
+### Step 8: Configure Traefik Routing
+
+**Add Traefik router configuration**:
+```nix
+# /etc/nixos/modules/services/traefik.nix
+
+# In the dynamic configuration section, add:
+http = {
+  routers = {
+    # ... existing routers
+
+    <servicename> = {
+      rule = "Host(`<domain>.bedrosn.com`)";
+      service = "oauth2-proxy-<servicename>";
+      entryPoints = ["websecure"];
+      tls = {
+        certResolver = "letsencrypt";
+        domains = [{ main = "<domain>.bedrosn.com"; }];
+      };
+      middlewares = ["enhanced-security-headers"];
+    };
+  };
+
+  services = {
+    # ... existing services
+
+    oauth2-proxy-<servicename> = {
+      loadBalancer = {
+        servers = [{ url = "http://localhost:<proxy-port>"; }];
+      };
+    };
+  };
+};
+```
+
+---
+
+### Step 9: Deploy and Test
+
+**CRITICAL: Follow this exact order to avoid DNS/certificate issues**
+
+#### 🎯 **Deployment Steps (No Hoops Required)**
+
+**Step 1: Commit Changes**
+```bash
+cd /etc/nixos
+git add .
+git status  # Verify all new files are staged
+```
+
+**Step 2: Deploy to misc Host**
+```bash
+# This single command handles EVERYTHING:
+# - Creates DNS record in Cloudflare
+# - Generates Let's Encrypt certificate
+# - Starts your service
+# - Configures Traefik routing
+nixos-rebuild switch --flake .#misc --target-host misc.home.arpa
+```
+
+**What happens during rebuild** (automatic, you don't need to do anything):
+1. ✅ `cloudflare-dns-upsert.service` runs FIRST → Creates DNS CNAME in Cloudflare
+2. ✅ Traefik starts → Automatically requests Let's Encrypt cert via DNS challenge
+3. ✅ Your service starts → Backend ready to receive requests
+4. ✅ OAuth2-proxy starts → Authentication layer ready
+
+**Step 3: Flush Your Local DNS Cache** (if testing immediately)
+```bash
+# On cmos (or wherever you're testing from)
+resolvectl flush-caches
+```
+
+**Why this is needed**: Cloudflare DNS updates immediately, but your local system caches DNS lookups for ~60 seconds. Flushing the cache lets you test immediately instead of waiting.
+
+**Step 4: Verify It's Live**
+```bash
+# Test DNS resolution (should return your public IP)
+dig <domain>.bedrosn.com +short
+
+# Test HTTPS and certificate (should show 200 OK with Let's Encrypt cert)
+curl -Iv https://<domain>.bedrosn.com/
+
+# If you see "Could not resolve host", flush DNS cache again
+```
+
+#### ✅ **Success Indicators**
+
+**DNS Working**:
+```bash
+$ dig notes.bedrosn.com +short
+bedrosn.com.
+96.20.146.8
+```
+
+**Certificate Working**:
+```bash
+$ curl -Iv https://notes.bedrosn.com/ 2>&1 | grep -E "(issuer|subject|expire)"
+*  subject: CN=notes.bedrosn.com
+*  start date: Oct 25 16:20:05 2025 GMT
+*  expire date: Jan 23 16:20:04 2026 GMT
+*  issuer: C=US; O=Let's Encrypt; CN=R13
+```
+
+**Service Accessible**:
+- Visit `https://&lt;domain>.bedrosn.com` in browser
+- Should redirect to Keycloak login (not certificate error, not 404, not timeout)
+
+#### 🚨 **If Something Doesn't Work**
+
+**Problem: "Could not resolve host"**
+```bash
+# Solution: Flush DNS cache
+resolvectl flush-caches
+dig <domain>.bedrosn.com +short  # Should work now
+```
+
+**Problem: Certificate error or timeout**
+```bash
+# Check if DNS record was created
+dig <domain>.bedrosn.com @1.1.1.1 +short
+
+# Check Traefik logs for certificate generation
+ssh misc.home.arpa 'journalctl -u traefik --since "5 minutes ago" | grep -i "certificate\|acme"'
+
+# Verify Traefik is running
+ssh misc.home.arpa 'systemctl status traefik'
+```
+
+**Problem: 404 Not Found**
+```bash
+# Verify service is running
+ssh misc.home.arpa 'systemctl status <servicename>'
+ssh misc.home.arpa 'systemctl status oauth2-proxy-<servicename>'
+
+# Check if backend is responding
+ssh misc.home.arpa 'curl -I http://localhost:<service-port>/'
+```
+
+**Problem: 403 Forbidden (after successful OAuth login)**
+```bash
+# Check group membership (verify user is in <servicename>-access group)
+ssh misc.home.arpa 'journalctl -u keycloak-bootstrap -n 50 | grep -i group'
+
+# Check OAuth2-proxy logs
+ssh misc.home.arpa 'journalctl -u oauth2-proxy-<servicename> -f'
+```
+
+#### 📋 **Deployment Verification Checklist**
+
+Use this checklist every time you deploy a new service:
+
+- [ ] **DNS**: `dig &lt;domain>.bedrosn.com +short` returns your public IP
+- [ ] **Certificate**: `curl -Iv https://&lt;domain>.bedrosn.com/` shows valid Let's Encrypt cert
+- [ ] **Service**: `systemctl status &lt;servicename>` shows active (running)
+- [ ] **OAuth2-proxy**: `systemctl status oauth2-proxy-&lt;servicename>` shows active (running)
+- [ ] **Keycloak**: Group `&lt;servicename>-access` exists with correct users
+- [ ] **Browser Access**: Can log in with authorized Google account
+- [ ] **Authorization**: Authorized users can access, unauthorized users get 403
+
+#### 🎯 **Why This Process Works**
+
+**Service Startup Order** (handled automatically by systemd):
+```
+1. cloudflare-dns-upsert.service (creates DNS record)
+   ↓
+2. traefik.service (requests certificate via DNS challenge)
+   ↓
+3. keycloak.service → keycloak-bootstrap.service (creates groups/clients)
+   ↓
+4. <servicename>.service (your application starts)
+   ↓
+5. oauth2-proxy-<servicename>.service (authentication layer starts)
+```
+
+**After** ordering ensures each service only starts when its dependencies are ready. You don't need to manually restart anything or wait for propagation - it all happens automatically during the single rebuild command.
+
+**The ONLY manual step**: Flushing DNS cache on your local machine (if testing immediately)
+
+---
+
+## 🔧 Architecture Overview
+
+### OAuth2-Proxy Integration Patterns
+
+There are **two distinct patterns** for integrating OAuth2-proxy with Traefik, depending on your backend service architecture:
+
+#### Pattern 1: Full Proxy (Standard Pattern)
+
+**Use when**: Your service runs on a **separate port/HTTP endpoint** (e.g., Glances, Memos, most web apps)
+
+**Flow**:
+```
+User Browser
+    ↓ (HTTPS)
+[Traefik: 443]
+    ↓ (Proxy to OAuth2-proxy)
+[OAuth2-Proxy: <proxy-port>]
+    ↓ (Check Auth → Keycloak)
+    ↓ (Proxy authenticated requests)
+[Your Service: <service-port>]
+```
+
+**Traefik Configuration**:
+```nix
+routers = {
+  myservice = {
+    rule = "Host(`myservice.bedrosn.com`)";
+    service = "oauth2-proxy-myservice";  # Points directly to OAuth2-proxy
+    entryPoints = ["websecure"];
+    tls.certResolver = "letsencrypt";
+  };
+};
+
+services = {
+  oauth2-proxy-myservice = {
+    loadBalancer.servers = [{ url = "http://localhost:5231"; }];  # OAuth2-proxy port
+  };
+};
+```
+
+**OAuth2-Proxy Configuration**:
+```bash
+--http-address="127.0.0.1:5231"
+--upstream="http://localhost:5230"  # Your service port
+```
+
+**Examples**:
+- Glances (8088 → 8087)
+- Memos (5231 → 5230)
+- Security Dashboard (4182 → 8091)
+
+---
+
+#### Pattern 2: Internal Service Proxy (Advanced Pattern)
+
+**Use when**: Your service is **internal to Traefik** (e.g., `api@internal` for Traefik dashboard)
+
+**Flow**:
+```
+User Browser
+    ↓ (HTTPS)
+[Traefik: 443]
+    ↓ (Proxy to OAuth2-proxy)
+[OAuth2-Proxy: <proxy-port>]
+    ↓ (Check Auth → Keycloak)
+    ↓ (Proxy authenticated requests)
+[Traefik Internal API: localhost:8082]
+```
+
+**Traefik Configuration**:
+```nix
+# 1. Enable internal service on localhost port
+api = {
+  dashboard = true;
+  insecure = true;  # Enables localhost-only API
+};
+
+entryPoints = {
+  traefik = {
+    address = "127.0.0.1:8082";  # Internal API endpoint
+  };
+};
+
+# 2. Router points to OAuth2-proxy (NOT to api@internal)
+routers = {
+  traefik = {
+    rule = "Host(`traefik.bedrosn.com`)";
+    service = "oauth2-proxy-traefik";  # Points to OAuth2-proxy
+    entryPoints = ["websecure"];
+    tls.certResolver = "letsencrypt";
+  };
+};
+
+services = {
+  oauth2-proxy-traefik = {
+    loadBalancer.servers = [{ url = "http://localhost:4181"; }];  # OAuth2-proxy port
+  };
+};
+```
+
+**OAuth2-Proxy Configuration**:
+```bash
+--http-address="127.0.0.1:4181"
+--upstream="http://127.0.0.1:8082"  # Traefik's internal API port
+```
+
+**Why this works**:
+- Traefik's `api@internal` service cannot be directly proxied through OAuth2-proxy
+- Solution: Enable `api.insecure = true` to expose dashboard on a localhost port
+- OAuth2-proxy proxies to this localhost port instead
+- Traefik router points to OAuth2-proxy (NOT to `api@internal`)
+
+**Examples**: Traefik Dashboard (4181 → 8082)
+
+---
+
+#### ❌ Pattern That Doesn't Work: Forward Auth for Internal Services
+
+**Do NOT use** Traefik's `forwardAuth` middleware for services like Traefik dashboard:
+
+```nix
+# ❌ THIS DOESN'T WORK
+routers = {
+  traefik = {
+    rule = "Host(`traefik.bedrosn.com`)";
+    service = "api@internal";  # ❌ Can't use with forwardAuth
+    middlewares = ["oauth2-proxy-auth"];  # ❌ Returns 401 Unauthorized
+  };
+};
+```
+
+**Why it fails**:
+- `forwardAuth` runs as a Traefik sub-request
+- When auth fails, it returns `401 Unauthorized` directly to browser
+- No automatic redirect to Keycloak (user sees "Unauthorized" text)
+- Traefik's `errors` middleware **cannot intercept 401 from forwardAuth**
+
+**Solution**: Use Pattern 2 (Internal Service Proxy) instead.
+
+---
+
+### Request Flow (Full Proxy Pattern)
+
+```
+User Browser
+    ↓
+[DNS: Cloudflare]
+    ↓ (HTTPS)
+[Traefik: 443]
+    ↓ (Reverse Proxy)
+[OAuth2-Proxy: <proxy-port>]
+    ↓ (Check Auth)
+[Keycloak: Google IDP]
+    ↓ (Verify Groups)
+[OAuth2-Proxy: Allow/Deny]
+    ↓ (Proxy to Service)
+[Your Service: <service-port>]
+```
+
+### Component Responsibilities
+
+**Cloudflare DNS**:
+- A record: `&lt;domain>.bedrosn.com` → Server IP
+- Managed by: `cloudflare-dns-upsert.service`
+
+**Traefik**:
+- TLS termination (Let's Encrypt certificates)
+- Reverse proxy to OAuth2-proxy
+- Security headers middleware
+
+**Keycloak**:
+- Identity provider (Google OAuth integration)
+- User whitelisting (First Broker Login flow)
+- Group management (`&lt;servicename>-access`)
+- OIDC token issuance with groups claim
+
+**OAuth2-Proxy**:
+- OAuth2/OIDC client
+- Session management (4-hour cookies)
+- Group-based authorization (`--allowed-group`)
+- Proxy to upstream service
+
+**Your Service**:
+- Runs on localhost:&lt;service-port>
+- No authentication logic needed
+- Receives pre-authenticated requests
+
+---
+
+## 📊 Port Registry Management
+
+**Before deploying, check and update port registry**:
+
+```bash
+# Check CLAUDE.md for available ports
+grep -A50 "Port Allocation" /etc/nixos/CLAUDE.md
+
+# Reserve your ports
+vim /etc/nixos/CLAUDE.md
+# Add to appropriate section:
+# **<Service> (<domain>.bedrosn.com)**:
+# - **<service-port>/tcp** - <Service> application
+# - **<proxy-port>/tcp** - OAuth2-proxy for <Service>
+```
+
+**Current allocations**:
+- Glances: 8087 (service), 8088 (OAuth2-proxy)
+- Memos: 5230 (service), 5231 (OAuth2-proxy)
+- Traefik Dashboard: 8082 (internal API), 4181 (OAuth2-proxy)
+- Keycloak: 8089
+- Traefik: 80, 443
+
+---
+
+## 🛠️ Troubleshooting
+
+### DNS Not Resolving
+```bash
+# Check DNS service
+ssh misc.home.arpa 'systemctl status cloudflare-dns-upsert'
+ssh misc.home.arpa 'journalctl -u cloudflare-dns-upsert -n 50'
+
+# Manually trigger DNS update
+ssh misc.home.arpa 'systemctl restart cloudflare-dns-upsert'
+```
+
+### Certificate Not Issued
+```bash
+# Check Traefik logs
+ssh misc.home.arpa 'journalctl -u traefik -n 100 | grep -i acme'
+
+# Verify domain in Traefik config
+ssh misc.home.arpa 'cat /var/lib/traefik/dynamic/services.yml'
+```
+
+### 403 Forbidden (OAuth2-Proxy)
+```bash
+# Check group membership
+ssh misc.home.arpa 'TOKEN=$(curl -sS -X POST "http://127.0.0.1:8089/realms/master/protocol/openid-connect/token" -H "Content-Type: application/x-www-form-urlencoded" --data-urlencode "grant_type=password" --data-urlencode "client_id=admin-cli" --data-urlencode "username=nicholas" --data-urlencode "password=$(cat /run/agenix/keycloak-admin-user | jq -r .password)" | jq -r .access_token); curl -sS "http://127.0.0.1:8089/admin/realms/web/users?email=<user-email>" -H "Authorization: Bearer $TOKEN" | jq -r ".[0].id" | xargs -I {} curl -sS "http://127.0.0.1:8089/admin/realms/web/users/{}/groups" -H "Authorization: Bearer $TOKEN" | jq'
+
+# Check OAuth2-proxy logs
+ssh misc.home.arpa 'journalctl -u oauth2-proxy-<servicename> -f'
+
+# Verify client scope
+ssh misc.home.arpa 'TOKEN=$(curl -sS -X POST "http://127.0.0.1:8089/realms/master/protocol/openid-connect/token" -H "Content-Type: application/x-www-form-urlencoded" --data-urlencode "grant_type=password" --data-urlencode "client_id=admin-cli" --data-urlencode "username=nicholas" --data-urlencode "password=$(cat /run/agenix/keycloak-admin-user | jq -r .password)" | jq -r .access_token); CLIENT_ID=$(curl -sS "http://127.0.0.1:8089/admin/realms/web/clients?clientId=oauth2-proxy-<servicename>" -H "Authorization: Bearer $TOKEN" | jq -r ".[0].id"); curl -sS "http://127.0.0.1:8089/admin/realms/web/clients/$CLIENT_ID/default-client-scopes" -H "Authorization: Bearer $TOKEN" | jq -r ".[].name"'
+```
+
+### Service Not Starting
+```bash
+# Check service status
+ssh misc.home.arpa 'systemctl status <servicename>'
+
+# Check dependency services
+ssh misc.home.arpa 'systemctl list-dependencies <servicename>'
+
+# Check port conflicts
+ssh misc.home.arpa 'ss -tulpn | grep <port>'
+```
+
+---
+
+## 📋 Checklist
+
+Use this checklist when deploying a new service:
+
+- [ ] **Planning**
+  - [ ] Chosen service name and domain
+  - [ ] Reserved ports in CLAUDE.md
+  - [ ] Identified users needing access
+
+- [ ] **Application Setup**
+  - [ ] Service module created
+  - [ ] Service runs on localhost:&lt;port>
+  - [ ] Added to host imports
+
+- [ ] **DNS**
+  - [ ] Added domain to `domains.nix`
+
+- [ ] **Secrets**
+  - [ ] Generated OAuth2-proxy client secret
+  - [ ] Generated OAuth2-proxy cookie secret
+  - [ ] Encrypted with agenix
+  - [ ] Added to secrets.nix and agenix-secrets.nix
+
+- [ ] **Keycloak**
+  - [ ] Updated keycloak-user-config.age with service in users' arrays
+  - [ ] Added OAuth2-proxy client to bootstrap script
+  - [ ] Added client to service-groups scope loop
+
+- [ ] **OAuth2-Proxy**
+  - [ ] Created OAuth2-proxy service module
+  - [ ] Configured OIDC settings
+  - [ ] Set correct group for authorization
+
+- [ ] **Traefik**
+  - [ ] Added router configuration
+  - [ ] Added service backend
+  - [ ] Configured TLS
+
+- [ ] **Deployment**
+  - [ ] Added all new files to git
+  - [ ] Rebuilt system
+  - [ ] Verified services running
+
+- [ ] **Testing**
+  - [ ] DNS resolves correctly
+  - [ ] HTTPS certificate issued
+  - [ ] Google OAuth redirects work
+  - [ ] Authorized users can access
+  - [ ] Unauthorized users get 403
+
+- [ ] **Documentation**
+  - [ ] Updated port registry in CLAUDE.md
+  - [ ] Updated service list in services-overview.md
+  - [ ] Created service-specific docs if needed
+
+---
+
+## 📖 Related Documentation
+
+- [Keycloak Configuration](../services/keycloak.md) - Identity provider setup
+- [OAuth2-Proxy Technical](../security/oauth2-proxy-technical-configuration.md) - OAuth2-proxy details
+- [Traefik Configuration](../services/traefik.md) - Reverse proxy and routing
+- [Secret Management](../security/secrets.md) - Agenix workflow
+- [DNS Management](../services/domains.md) - Cloudflare integration
+
+---
+
+**Last Updated**: 2025-11-01
+**Tested With**: Nextcloud (nextcloud.bedrosn.com), Memos (notes.bedrosn.com), Glances (glances.bedrosn.com), Traefik Dashboard (traefik.bedrosn.com), Jellyfin (jellyfin.bedrosn.com), Immich (gallery.bedrosn.com)
+**Success Rate**: 100% when following this guide
+**Next Review**: 2025-11-24
+
+---
+*🏠 [Home](../README.md) | 📚 [Guides](../guides/overview.md) | 🔐 [Security](../security/overview.md)*

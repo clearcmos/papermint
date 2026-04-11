@@ -1,0 +1,283 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Docs",
+  "colors": {
+    "primary": "#0E0E0E",
+    "light": "#D4A27F",
+    "dark": "#0E0E0E"
+  },
+  "appearance": {
+    "default": "dark"
+  },
+  "background": {
+    "color": {
+      "light": "#FDFDF7",
+      "dark": "#09090B"
+    }
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Getting Started",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "index"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Career",
+        "groups": [
+          {
+            "group": "Career",
+            "pages": [
+              "career/overview",
+              "career/linkedin-profile",
+              "career/interview-plan-optable"
+            ]
+          },
+          {
+            "group": "Assessment",
+            "pages": [
+              "career/assessment/addressing-pushback",
+              "career/assessment/profile",
+              "career/assessment/repository-review",
+              "career/assessment/title-and-comp"
+            ]
+          },
+          {
+            "group": "Briefs",
+            "pages": [
+              "career/briefs/markdown/project-brief-claude-plugins",
+              "career/briefs/markdown/project-brief-greenhouse-migration",
+              "career/briefs/markdown/project-brief-cloud-functions",
+              "career/briefs/markdown/project-brief-google-workspace",
+              "career/briefs/markdown/project-brief-ukg-extraction",
+              "career/briefs/markdown/project-brief-kudosai",
+              "career/briefs/markdown/project-brief-nix-scan",
+              "career/briefs/markdown/project-brief-nixnav",
+              "career/briefs/markdown/project-brief-nixos-infrastructure",
+              "career/briefs/markdown/project-brief-okta-terraform",
+              "career/briefs/markdown/project-brief-send2lan",
+              "career/briefs/markdown/project-brief-vommander"
+            ]
+          },
+          {
+            "group": "Projects",
+            "pages": [
+              "career/projects/overview",
+              "career/projects/circleci-plan-review",
+              "career/projects/claude-code-plugin-system",
+              "career/projects/cloud-functions-automation",
+              "career/projects/google-workspace-automation",
+              "career/projects/greenhouse-data-migration",
+              "career/projects/kandji-mdm-toolkit",
+              "career/projects/okta-automation-platform",
+              "career/projects/okta-terraform-iac",
+              "career/projects/security-cross-system-correlation",
+              "career/projects/ukg-data-extraction"
+            ]
+          },
+          {
+            "group": "Strategy",
+            "pages": [
+              "career/strategy/playbook"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "NixOS",
+        "groups": [
+          {
+            "group": "AI",
+            "pages": [
+              "nixos/ai/overview",
+              "nixos/ai/models",
+              "nixos/ai/monitoring",
+              "nixos/ai/applications",
+              "nixos/ai/cpu",
+              "nixos/ai/diet-mcp-server",
+              "nixos/ai/configuration",
+              "nixos/ai/performance"
+            ]
+          },
+          {
+            "group": "Desktop",
+            "pages": [
+              "nixos/desktop/overview",
+              "nixos/desktop/bluetooth",
+              "nixos/desktop/brave",
+              "nixos/desktop/chatgpt-quick",
+              "nixos/desktop/discord-gpu-crash-fix",
+              "nixos/desktop/droidcam",
+              "nixos/desktop/kde-fonts-optimization",
+              "nixos/desktop/kde-postfonts",
+              "nixos/desktop/kde-prefonts",
+              "nixos/desktop/kde-icon-fix",
+              "nixos/desktop/kde-logout-fix",
+              "nixos/desktop/kitty",
+              "nixos/desktop/konsole-troubleshooting",
+              "nixos/desktop/kwin-xcb-freeze",
+              "nixos/desktop/librechat",
+              "nixos/desktop/soundcore-openscq30",
+              "nixos/desktop/sunshine",
+              "nixos/desktop/twitch-tui",
+              "nixos/desktop/wow",
+              "nixos/desktop/kde-multimonitor",
+              "nixos/desktop/vm-management"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "nixos/guides/deploy-web-service",
+              "nixos/guides/oauth2-proxy-ajax-fix",
+              "nixos/guides/suricata"
+            ]
+          },
+          {
+            "group": "Infrastructure",
+            "pages": [
+              "nixos/infrastructure/overview",
+              "nixos/infrastructure/hosts-jimmich",
+              "nixos/infrastructure/hosts-misc",
+              "nixos/infrastructure/hosts-cmos",
+              "nixos/infrastructure/hosts"
+            ]
+          },
+          {
+            "group": "Operations",
+            "pages": [
+              "nixos/operations/overview",
+              "nixos/operations/bootstrap-automated-iso",
+              "nixos/operations/bootstrap-overview",
+              "nixos/operations/fresh",
+              "nixos/operations/home-manager-migration",
+              "nixos/operations/practices",
+              "nixos/operations/bootstrap-yubikey-secure",
+              "nixos/operations/bootstrap-scripts"
+            ]
+          },
+          {
+            "group": "Reference",
+            "pages": [
+              "nixos/reference/overview",
+              "nixos/reference/man-create-repo",
+              "nixos/reference/man-gissue",
+              "nixos/reference/man-suricata"
+            ]
+          },
+          {
+            "group": "Security",
+            "pages": [
+              "nixos/security/overview",
+              "nixos/security/secrets-agenix",
+              "nixos/security/secrets-1password",
+              "nixos/security/cve-patching-research",
+              "nixos/security/oauth2-proxy-technical-configuration",
+              "nixos/security/git-secret-removal",
+              "nixos/security/secrets",
+              "nixos/security/security-dashboard-hardening",
+              "nixos/security/scanning",
+              "nixos/security/network-configuration",
+              "nixos/security/fail2ban"
+            ]
+          },
+          {
+            "group": "Services",
+            "pages": [
+              "nixos/services/overview",
+              "nixos/services/chhoto-url",
+              "nixos/services/timer-notifications",
+              "nixos/services/discord-monitors",
+              "nixos/services/fail2ban-ssh",
+              "nixos/services/firebase-cloud-messaging",
+              "nixos/services/immich",
+              "nixos/services/jellyfin",
+              "nixos/services/jellyfin-sso-setup",
+              "nixos/services/jellyfin-users",
+              "nixos/services/keycloak",
+              "nixos/services/med-tracker",
+              "nixos/services/media",
+              "nixos/services/nixdocs",
+              "nixos/services/personal-docs",
+              "nixos/services/portfolio-gate",
+              "nixos/services/security-dashboard",
+              "nixos/services/timer-notifications-cloud-functions"
+            ]
+          },
+          {
+            "group": "Storage",
+            "pages": [
+              "nixos/storage/overview",
+              "nixos/storage/claude-nas-backup",
+              "nixos/storage/printer",
+              "nixos/storage/backup",
+              "nixos/storage/google-drive"
+            ]
+          },
+          {
+            "group": "Tools",
+            "pages": [
+              "nixos/tools/overview",
+              "nixos/tools/man",
+              "nixos/tools/qr",
+              "nixos/tools/tmux",
+              "nixos/tools/timer-cli"
+            ]
+          },
+          {
+            "group": "Troubleshooting",
+            "pages": [
+              "nixos/troubleshooting/overview",
+              "nixos/troubleshooting/issue-2026-01-14-brave-secure-preferences-reset",
+              "nixos/troubleshooting/issue-2026-01-11-chatgpt-quick-wayland-paste",
+              "nixos/troubleshooting/issue-2026-01-11-claude-code-stale-additional-directories",
+              "nixos/troubleshooting/issue-2025-09-23-guacamole-salted-password-authentication",
+              "nixos/troubleshooting/issue-2025-10-06-kde-plasmashell-segfault",
+              "nixos/troubleshooting/issue-2025-09-08-kde-slow-login",
+              "nixos/troubleshooting/issue-2026-01-04-kwin-qml-crash",
+              "nixos/troubleshooting/issue-2025-09-09-kde-complete-failure",
+              "nixos/troubleshooting/ollama",
+              "nixos/troubleshooting/issue-2025-12-25-sddm-getty-vt1-conflict",
+              "nixos/troubleshooting/issue-2025-08-25-system-freeze-keyboard-config",
+              "nixos/troubleshooting/issue-2025-09-22-traefik-redirect-middleware-ordering"
+            ]
+          },
+          {
+            "group": "Updates",
+            "pages": [
+              "nixos/updates/overview"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Study Plans",
+        "groups": [
+          {
+            "group": "Study Plans",
+            "pages": [
+              "study-plans/dialogue-ai-integration-developer",
+              "study-plans/cloud-architecture-certifications"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "code": {
+    "copy": true
+  },
+  "modeToggle": {
+    "default": "dark"
+  },
+  "seo": {
+    "indexHiddenPages": false
+  }
+}

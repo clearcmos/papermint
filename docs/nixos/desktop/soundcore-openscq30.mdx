@@ -1,0 +1,193 @@
+---
+title: "Soundcore OpenSCQ30 - Headphone Control"
+description: "OpenSCQ30 is a cross-platform tool for controlling Soundcore Bluetooth headphones from Linux. It provides CLI and GUI access to device settings that are norm..."
+---
+
+**Last Updated**: 2026-01-03
+
+---
+
+## 🎯 Overview
+
+[OpenSCQ30](https://github.com/Oppzippy/OpenSCQ30) is a cross-platform tool for controlling Soundcore Bluetooth headphones from Linux. It provides CLI and GUI access to device settings that are normally only available through the Soundcore mobile app.
+
+**Supported Features:**
+- Query firmware version and serial number
+- Battery level monitoring
+- ANC/Transparency mode control
+- Equalizer presets and custom profiles
+- Noise canceling mode selection
+
+**Supported Devices:** Life Q30, Life Q35, Life Tune, Liberty 4, Space One, and many more (see `openscq30-cli list-models`)
+
+---
+
+## 🔧 Installation
+
+OpenSCQ30 is not currently in nixpkgs. Use the pre-built binary:
+
+```bash
+# Download latest CLI binary
+curl -sL -o /tmp/openscq30-cli \
+  https://github.com/Oppzippy/OpenSCQ30/releases/latest/download/openscq30-cli-linux-x86_64
+chmod +x /tmp/openscq30-cli
+
+# Run with dbus library (required on NixOS)
+nix-shell -p dbus --run "LD_LIBRARY_PATH=\$(nix-build '<nixpkgs>' -A dbus.lib --no-out-link)/lib /tmp/openscq30-cli --help"
+```
+
+**Note:** A NixOS flake for this tool is planned for `/etc/nixos/repos/OpenSCQ30`.
+
+---
+
+## 📋 Device Pairing
+
+OpenSCQ30 "pairing" is **separate from Bluetooth pairing**. It registers the device's MAC address and model with the tool.
+
+### Step 1: Find Device MAC Address
+
+```bash
+bluetoothctl devices Connected
+# Output: Device E8:EE:CC:46:F1:AC Soundcore Life Q30
+```
+
+### Step 2: Find Model Identifier
+
+```bash
+# Using the dbus wrapper (required on NixOS)
+nix-shell -p dbus --run "LD_LIBRARY_PATH=\$(nix-build '<nixpkgs>' -A dbus.lib --no-out-link)/lib \
+  /tmp/openscq30-cli list-models" | grep -i "q30\|life"
+
+# Output includes:
+# SoundcoreA3028      Soundcore Life Q30
+# SoundcoreA3027      Soundcore Life Q35
+```
+
+### Step 3: Register Device
+
+```bash
+nix-shell -p dbus --run "LD_LIBRARY_PATH=\$(nix-build '<nixpkgs>' -A dbus.lib --no-out-link)/lib \
+  /tmp/openscq30-cli paired-devices add --mac-address E8:EE:CC:46:F1:AC --model SoundcoreA3028"
+
+# Output: Paired
+```
+
+---
+
+## 🔍 Query Firmware Version
+
+Once paired, query device information:
+
+```bash
+nix-shell -p dbus --run "LD_LIBRARY_PATH=\$(nix-build '<nixpkgs>' -A dbus.lib --no-out-link)/lib \
+  /tmp/openscq30-cli device --mac-address E8:EE:CC:46:F1:AC setting \
+    -g firmwareVersion -g serialNumber -g batteryLevel"
+
+# Output:
+# Setting ID       Value
+# firmwareVersion  03.50
+# serialNumber     3028ACF146CCEEE8
+# batteryLevel     4/5
+```
+
+---
+
+## 🎛️ Available Settings
+
+List all available settings for your device:
+
+```bash
+nix-shell -p dbus --run "LD_LIBRARY_PATH=\$(nix-build '<nixpkgs>' -A dbus.lib --no-out-link)/lib \
+  /tmp/openscq30-cli device --mac-address E8:EE:CC:46:F1:AC list-settings"
+```
+
+### Sound Modes (ANC/Transparency)
+
+```bash
+# Get current mode
+... setting -g ambientSoundMode -g noiseCancelingMode
+
+# Set to Noise Canceling
+... setting -s ambientSoundMode=NoiseCanceling
+
+# Set to Transparency
+... setting -s ambientSoundMode=Transparency
+
+# Set to Normal (ANC off)
+... setting -s ambientSoundMode=Normal
+
+# Noise canceling sub-modes (when ANC enabled)
+... setting -s noiseCancelingMode=Transport  # For commuting
+... setting -s noiseCancelingMode=Indoor
+... setting -s noiseCancelingMode=Outdoor
+```
+
+### Equalizer
+
+```bash
+# Get current preset
+... setting -g presetEqualizerProfile
+
+# Set preset (available: SoundcoreSignature, Acoustic, BassBooster, Classical, etc.)
+... setting -s presetEqualizerProfile=BassBooster
+
+# Clear preset (use custom EQ)
+... setting -s presetEqualizerProfile=
+```
+
+---
+
+## 🚀 Wrapper Script
+
+For convenience, create a wrapper script:
+
+```bash
+# Add to environment.systemPackages via writeShellScriptBin, or create manually:
+cat > ~/.local/bin/scq30 << 'EOF'
+#!/usr/bin/env bash
+MAC="E8:EE:CC:46:F1:AC"
+DBUS_LIB=$(nix-build '<nixpkgs>' -A dbus.lib --no-out-link 2>/dev/null)/lib
+LD_LIBRARY_PATH="$DBUS_LIB" /tmp/openscq30-cli device --mac-address "$MAC" "$@"
+EOF
+chmod +x ~/.local/bin/scq30
+
+# Usage:
+scq30 setting -g firmwareVersion
+scq30 setting -s ambientSoundMode=NoiseCanceling
+```
+
+---
+
+## ⚠️ Important Notes
+
+### BLE Connection Conflicts
+
+OpenSCQ30 uses RFCOMM (serial over Bluetooth), which coexists with audio. However, **BLE-based tools (like Python's bleak library) can disconnect active audio connections** when they attempt to connect.
+
+If your headphones disconnect unexpectedly, reconnect with:
+```bash
+bluetoothctl connect E8:EE:CC:46:F1:AC
+```
+
+### Building from Source
+
+The repo requires a newer Rust version than NixOS stable provides. Features like `result_flattening` and const generic inference need nightly or recent stable Rust. Use pre-built binaries instead.
+
+### Rust Build Errors
+
+If building from source at `/etc/nixos/repos/OpenSCQ30`:
+```
+error[E0658]: use of unstable library feature `result_flattening`
+```
+This indicates the system Rust is too old. Download pre-built binaries instead.
+
+---
+
+## 📖 Related Documentation
+
+- [Bluetooth Configuration](bluetooth.md) - System Bluetooth setup and Q30 auto-connect
+- [OpenSCQ30 GitHub](https://github.com/Oppzippy/OpenSCQ30) - Official repository
+
+---
+
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md)*

@@ -1,0 +1,557 @@
+---
+title: "Keycloak Identity Provider"
+description: "*Centralized authentication and authorization service for SSO and OAuth2/OIDC*"
+---
+
+## 🎯 Overview
+
+Keycloak is a modern identity and access management solution providing:
+- **Single Sign-On (SSO)** for web applications
+- **OAuth2 Device Flow** for SSH authentication
+- **Google Identity Provider** integration for federated login
+- **OpenID Connect (OIDC)** protocol support
+- **Declarative configuration** via Keycloak Admin API
+
+**Deployment**: misc.home.arpa
+**URL**: https://keycloak.bedrosn.com
+**Database**: PostgreSQL 17.6
+
+---
+
+## 📚 Realms Configuration
+
+### Master Realm
+- **Purpose**: Keycloak administration realm
+- **Admin User**: Configured via `keycloak-admin-user.age` secret
+- **Access**: Admin console at https://keycloak.bedrosn.com/admin
+- **Features**: preview,scripts (Script Authenticator enabled)
+
+### Web Realm
+- **Purpose**: Web application authentication with Google IDP
+- **Clients**: oauth2-proxy-glances
+- **Users**: Pre-created from whitelist, linked on first Google login
+- **Authentication Flow**: Custom "First Broker Login with Whitelist"
+- **Features**:
+  - Google federated authentication (Google IDP)
+  - **Pre-existing user enforcement** - only whitelisted users can authenticate
+  - Automatic linking of Google identity to pre-created users
+  - OAuth2-proxy integration for service authentication
+  - **No auto-creation** - unauthorized users are blocked entirely
+
+### SSH Realm (Legacy)
+- **Status**: ⚠️ Deprecated - SSH now uses Web Realm
+- **Purpose**: Originally for SSH OAuth2 device flow
+- **Migration**: SSH PAM client moved to Web Realm for unified Google IDP authentication
+
+### SSH OAuth2 Device Flow (Web Realm)
+- **Purpose**: QR code-based SSH authentication from WAN
+- **Client**: `ssh-pam` (registered in Web Realm)
+- **Grant Type**: `urn:ietf:params:oauth:grant-type:device_code`
+- **Authentication**: Google IDP via Web Realm (same as web services)
+- **User Mapping**: Email from OAuth → local Unix user via PAM config
+- **Allowed Emails**: Stored in `ssh-allowed-emails.age` secret (not hardcoded)
+
+**Security Architecture (Multi-Layer)**:
+| Layer | Protection |
+|-------|------------|
+| **SSH** | WAN: only `nicholas` allowed, `keyboard-interactive` only |
+| **PAM** | Email must be in `ssh-allowed-emails.age` to map to local user |
+| **Keycloak** | Only whitelisted emails in `keycloak-user-config.age` can authenticate |
+| **Google** | Requires valid Google account credentials |
+
+**WAN SSH Access Rules** (cmos):
+- Only `nicholas` user allowed from WAN
+- Root login disabled from WAN
+- Public key auth disabled from WAN (must use OAuth)
+- LAN users have full access with SSH keys
+
+---
+
+## 🔑 Secret Management
+
+### keycloak-admin-user.age
+**Purpose**: Master realm admin account configuration
+**Format**: JSON
+**Structure**:
+```json
+{
+  "username": "admin-username",
+  "firstName": "First",
+  "lastName": "Last",
+  "email": "admin@example.com",
+  "password": "admin-password",
+  "authMethods": ["password"]
+}
+```
+
+**Usage**:
+- Keycloak bootstrap admin account (KC_BOOTSTRAP_ADMIN_USERNAME/PASSWORD)
+- Keycloak Admin CLI (kcadm.sh) authentication
+- Bootstrap script authentication for realm configuration
+
+**Important Notes**:
+- ⚠️ **Do NOT include "webauthn" in authMethods** - this adds required actions that block kcadm.sh direct grant authentication
+- WebAuthn can be added manually via Keycloak UI after deployment
+- Username and password are read dynamically from JSON by bootstrap scripts
+
+### keycloak-ssh-client.age
+**Purpose**: SSH OAuth client credentials for Web Realm
+**Format**: Environment file (KEY=value)
+**Structure**:
+```
+SSH_CLIENT_ID=ssh-pam
+SSH_CLIENT_SECRET=generated-secret-here
+```
+
+**Usage**:
+- Web Realm `ssh-pam` client configuration
+- Keycloak bootstrap script uses this to register the client
+- PAM module uses `ssh-oauth-client-secret.age` (same value)
+
+### ssh-oauth-client-secret.age
+**Purpose**: Client secret for PAM OAuth2 device module
+**Format**: Plain text (secret value only)
+**Hosts**: cmos, misc, jimmich
+
+**Usage**:
+- PAM module authentication to Keycloak
+- Injected into `/etc/pam_oauth2_device/config.json` at boot
+
+### ssh-allowed-emails.age
+**Purpose**: Email whitelist for SSH OAuth authentication
+**Format**: Plain text (one email per line)
+**Hosts**: cmos, misc, jimmich
+
+**Usage**:
+- PAM module reads this to build user mapping
+- Maps OAuth email → local Unix users (nicholas, root)
+- **Primary access control** for SSH OAuth (in addition to Keycloak whitelist)
+
+### keycloak-user-config.age
+**Purpose**: **Declarative user and group management** for web realm
+**Format**: JSON
+**Structure**:
+```json
+{
+  "allowedUsers": [
+    {
+      "email": "user@example.com",
+      "displayName": "User Name",
+      "lastName": "Last Name",
+      "authMethods": ["google", "password"],
+      "services": ["glances", "immich", "docs"],
+      "roles": ["admin"]
+    }
+  ]
+}
+```
+
+**Usage**:
+- **Declaratively creates service groups** (`&lt;service>-access`) from `services` arrays
+- Pre-creates whitelisted users in web realm
+- **Automatically assigns users to service groups** based on their `services` list
+- Google IDP federation automatic linking via email
+- **Group-based access control** for OAuth2-proxy integration
+- **Critical**: Only users in this list can authenticate via Google
+
+**How It Works**:
+1. Bootstrap script extracts unique services from all users' `services` arrays
+2. Creates Keycloak groups: `docs-access`, `glances-access`, `immich-access`, etc.
+3. Creates users with `emailVerified: true` and `username: email`
+4. Assigns each user to their specified service groups
+5. OAuth2-proxy clients check group membership via `oidc-groups-claim`
+
+### keycloak-db-password.age
+**Purpose**: PostgreSQL database password for Keycloak user
+**Format**: Plain text
+**Owner**: postgres:postgres
+
+### google-oauth-keycloak.age
+**Purpose**: Google OAuth client credentials for IDP
+**Format**: Environment file
+**Structure**:
+```
+GOOGLE_CLIENT_ID=...apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=GOCSPX-...
+OAUTH2_PROXY_CLIENT_SECRET=...
+```
+
+---
+
+## 🚀 Bootstrap Process
+
+### 1. Keycloak Service Start
+**Service**: `keycloak.service`
+**Process**:
+1. ExecStartPre reads `keycloak-admin-user.age` JSON
+2. Parses username and password
+3. Creates `/run/keycloak/admin.env` with:
+   - KC_BOOTSTRAP_ADMIN_USERNAME
+   - KC_BOOTSTRAP_ADMIN_PASSWORD
+4. Keycloak starts and creates temporary bootstrap admin user
+
+### 2. Web Realm Bootstrap
+**Service**: `keycloak-bootstrap.service` (consolidated)
+**Dependencies**: keycloak.service, network-online.target
+**Process**:
+1. Waits for Keycloak HTTP endpoint to be ready
+2. Logs into master realm using admin credentials from JSON secret
+3. Creates/configures web realm:
+   - Sets up Google identity provider with mappers
+   - Creates OAuth2-proxy clients (oauth2-proxy-glances, oauth2-proxy-memos)
+   - **Creates custom "First Broker Login with Whitelist" authentication flow**:
+     - `idp-detect-existing-broker-user` (REQUIRED) - finds existing user or fails
+     - `idp-auto-link` (REQUIRED) - automatically links Google identity to user
+   - **Creates `service-groups` client scope** with groups mapper
+   - **Adds service-groups scope to OAuth2-proxy clients** for group claims
+   - **Declaratively creates service groups** from `keycloak-user-config.age`:
+     - Extracts unique services from all users
+     - Creates `&lt;service>-access` groups (e.g., docs-access, glances-access)
+   - **Pre-creates whitelisted users** with group assignments:
+     - Creates users with email as username
+     - Assigns users to their service groups automatically
+   - Configures Google IDP mappers for email/username matching
+   - Updates Google IDP to use whitelist flow
+4. Verifies realm configuration via OIDC well-known endpoint
+
+### 3. SSH Realm Bootstrap
+**Service**: `keycloak-bootstrap-ssh-realm.service`
+**Dependencies**: keycloak.service, network-online.target
+**Process**:
+1. Waits for Keycloak HTTP endpoint
+2. Logs into master realm using admin credentials
+3. Creates/configures SSH realm:
+   - Creates ssh-pam OAuth client
+   - Enables device authorization grant
+   - Sets client secret from `keycloak-ssh-client.age`
+   - Creates admin user for SSH access
+4. Verifies device flow endpoint availability
+
+---
+
+## 🔧 Configuration Details
+
+### Database Configuration
+```nix
+services.keycloak.database = {
+  type = "postgresql";
+  host = "localhost";
+  port = 5432;
+  name = "keycloak";
+  username = "keycloak";
+  passwordFile = config.age.secrets.keycloak-db-password.path;
+  createLocally = false;  # Managed by PostgreSQL module
+};
+```
+
+### Network Configuration
+```nix
+services.keycloak.settings = {
+  hostname = "https://keycloak.bedrosn.com";
+  http-enabled = true;
+  http-host = "127.0.0.1";
+  http-port = 8089;
+  proxy-headers = "xforwarded";
+};
+```
+
+### Admin Credentials Setup
+```nix
+systemd.services.keycloak = {
+  path = [ pkgs.jq pkgs.coreutils ];
+  serviceConfig = {
+    ExecStartPre = setupAdminScript;  # Reads JSON and creates /run/keycloak/admin.env
+    EnvironmentFile = "-/run/keycloak/admin.env";  # Optional prefix allows missing file
+  };
+};
+```
+
+**Important**: `initialAdminPassword = null` prevents NixOS module from setting default KC_BOOTSTRAP_ADMIN_* env vars, allowing our EnvironmentFile to be the only source.
+
+### First Broker Login Flow Configuration
+
+**Authentication Flow**: "first broker login with whitelist"
+**Executions**:
+1. **idp-detect-existing-broker-user** (REQUIRED)
+   - Searches for existing Keycloak user matching Google identity
+   - Uses email and username mappers to find match
+   - Fails authentication if no matching user exists
+
+2. **idp-auto-link** (REQUIRED)
+   - Automatically links Google identity to detected user
+   - No password prompt required
+   - Silent linking for seamless authentication
+
+**Google IDP Mappers**:
+```bash
+# Email mapper - maps Google 'email' claim to user email attribute
+{
+  "name": "email",
+  "identityProviderMapper": "oidc-user-attribute-idp-mapper",
+  "config": {
+    "claim": "email",
+    "user.attribute": "email",
+    "syncMode": "INHERIT"
+  }
+}
+
+# Username mapper - sets username to email for deterministic matching
+{
+  "name": "username",
+  "identityProviderMapper": "oidc-username-idp-mapper",
+  "config": {
+    "template": "${CLAIM.email}",
+    "syncMode": "INHERIT"
+  }
+}
+```
+
+**User Pre-creation**: Users are created with `emailVerified: true`, `username: email`, matching the mapper configuration for deterministic linking.
+
+### OAuth2-Proxy Integration
+```nix
+services.oauth2-proxy = {
+  provider = "keycloak-oidc";
+  upstream = "http://localhost:8087";  # Glances service
+  clientID = "oauth2-proxy-glances";
+  clientSecret = config.age.secrets.oauth2-proxy-client-secret.path;
+  oidcIssuerUrl = "https://keycloak.bedrosn.com/realms/web";
+};
+```
+
+**Secret Alignment**: OAuth2-proxy client secret must match Keycloak client configuration:
+- **Keycloak client secret**: Set during bootstrap (fixed value in code)
+- **oauth2-proxy-client-secret.age**: Must contain same value
+- **Secret value**: `REDACTED_OAUTH2_CLIENT_SECRET`
+
+---
+
+## 🛠️ Common Operations
+
+### Manually Log Into Admin Console
+```bash
+# Via kcadm.sh
+ssh misc.home.arpa
+ADMIN_CONFIG=$(cat /run/agenix/keycloak-admin-user)
+ADMIN_USER=$(echo "$ADMIN_CONFIG" | jq -r '.username')
+ADMIN_PASS=$(echo "$ADMIN_CONFIG" | jq -r '.password')
+
+/nix/store/*/keycloak-*/bin/kcadm.sh config credentials \
+  --server http://127.0.0.1:8089 \
+  --realm master \
+  --user "$ADMIN_USER" \
+  --password "$ADMIN_PASS"
+```
+
+### Check Bootstrap Service Status
+```bash
+systemctl status keycloak-bootstrap-web-realm.service
+systemctl status keycloak-bootstrap-ssh-realm.service
+journalctl -u keycloak-bootstrap-web-realm.service -n 50
+```
+
+### Restart Bootstrap Services
+```bash
+# After changing secrets or configuration
+systemctl restart keycloak.service
+systemctl restart keycloak-bootstrap-web-realm.service
+systemctl restart keycloak-bootstrap-ssh-realm.service
+```
+
+### Add New User to Web Realm
+1. Update `keycloak-user-config.age`:
+```bash
+cd /etc/nixos/secrets
+nix run github:ryantm/agenix -- -e keycloak-user-config.age -i ../keys/cmos-agenix.key
+# Add new user to allowedUsers array with email, displayName, and lastName
+```
+
+2. Delete existing user (if updating):
+```bash
+# Via Keycloak Admin UI: Users → Search by email → Delete
+# Or via kcadm.sh (see manual login section)
+```
+
+3. Rebuild to pre-create new user:
+```bash
+nixos-rebuild switch --flake .#misc --target-host misc.home.arpa
+```
+
+**Note**: Users ARE pre-created from the whitelist. On first Google login, their identity is automatically linked to the pre-existing account.
+
+### Change Admin Password
+1. Update `keycloak-admin-user.age`:
+```bash
+cd /etc/nixos/secrets
+nix run github:ryantm/agenix -- -e keycloak-admin-user.age -i ../keys/cmos-agenix.key
+# Update password field
+```
+
+2. Rebuild and restart:
+```bash
+nixos-rebuild switch --flake .#misc --target-host misc.home.arpa
+ssh misc.home.arpa 'systemctl restart keycloak.service'
+```
+
+---
+
+## 🚨 Troubleshooting
+
+### "Account is not fully set up [invalid_grant]"
+**Cause**: Required actions (like webauthn-register) block direct grant authentication
+
+**Solution**: Remove "webauthn" from authMethods in `keycloak-admin-user.age`
+```json
+{
+  "authMethods": ["password"]  // Remove "webauthn"
+}
+```
+
+**Why**: Keycloak adds required actions when authMethods includes "webauthn", which prevents kcadm.sh from using direct grant flow
+
+### Features Build Cache Issue
+**Error**:
+```
+The following build time options have values that differ from what is persisted - the new values will NOT be used until another build is run: kc.features
+keycloak.service: Main process exited, code=exited, status=2/INVALIDARGUMENT
+```
+
+**Cause**: Conflicting feature configuration between `services.keycloak.settings.features` and environment variables.
+
+**Solution**: Remove any `KC_FEATURES` environment variable overrides in systemd service configuration. Only use `settings.features`.
+
+**Not a Database Issue**: This is a Keycloak build cache in `/run/keycloak/`, not database state. Dropping the database won't fix this.
+
+### OAuth2-Proxy Client Secret Mismatch
+**Error**: `token exchange failed: oauth2: "unauthorized_client" "Invalid client or Invalid client credentials"`
+
+**Cause**: `oauth2-proxy-client-secret.age` doesn't match Keycloak client secret.
+
+**Verification**:
+```bash
+# On misc host, check OAuth2-proxy secret
+cat /run/agenix/oauth2-proxy-client-secret
+
+# Query Keycloak for actual client secret
+ADMIN_CONFIG=$(cat /run/agenix/keycloak-admin-user)
+ADMIN_USER=$(echo "$ADMIN_CONFIG" | jq -r '.username')
+ADMIN_PASS=$(echo "$ADMIN_CONFIG" | jq -r '.password')
+
+/nix/store/*/keycloak-*/bin/kcadm.sh config credentials \
+  --server http://127.0.0.1:8089 \
+  --realm master \
+  --user "$ADMIN_USER" \
+  --password "$ADMIN_PASS"
+
+/nix/store/*/keycloak-*/bin/kcadm.sh get clients -r web -q clientId=oauth2-proxy-glances --fields secret
+```
+
+**Solution**: Re-encrypt `oauth2-proxy-client-secret.age` with correct value: `REDACTED_OAUTH2_CLIENT_SECRET`
+
+### Unauthorized User Getting "Invalid username or password"
+**Symptom**: Non-whitelisted Google account receives "Invalid username or password" error when trying to authenticate.
+
+**Expected Behavior**: ✅ This is correct! The whitelist is working as designed.
+
+**How It Works**:
+1. User authenticates with Google successfully
+2. Keycloak receives user info from Google (email, name, etc.)
+3. First Broker Login flow runs:
+   - `idp-detect-existing-broker-user` searches for matching user
+   - **No match found** (user not in whitelist)
+   - Flow fails with "Invalid username or password"
+4. **No user account is created** - unauthorized user is completely blocked
+
+**To Allow Access**: Add user to `keycloak-user-config.age` and rebuild to pre-create their account.
+
+### User Prompted for Family Name
+**Symptom**: Whitelisted user is prompted to enter family name after Google login.
+
+**Cause**: User was created without `lastName` field.
+
+**Solution**:
+1. Add `lastName` to user config in `keycloak-user-config.age`
+2. Delete the user in Keycloak Admin UI
+3. Rebuild to recreate user with lastName
+
+### OAuth2-Proxy Shows "Authenticated" on Black Screen
+**Symptom**: After Google login, page shows "Authenticated" but not the actual service (Glances).
+
+**Cause**: OAuth2-proxy upstream configured as `static://202` instead of actual service.
+
+**Solution**: Update upstream in both places:
+```nix
+services.oauth2-proxy.upstream = "http://localhost:8087";  # In module config
+
+# And in systemd service override
+--upstream="http://localhost:8087"  # Not static://202
+```
+
+### Bootstrap Services Failing
+```bash
+# Check Keycloak is running
+systemctl status keycloak.service
+
+# Check admin.env was created
+cat /run/keycloak/admin.env
+
+# Check secret decryption
+cat /run/agenix/keycloak-admin-user | jq
+
+# Test manual login
+/nix/store/*/keycloak-*/bin/kcadm.sh config credentials \
+  --server http://127.0.0.1:8089 \
+  --realm master \
+  --user nicholas \
+  --password "password-from-secret"
+```
+
+### Database Connection Issues
+```bash
+# Check PostgreSQL is running
+systemctl status postgresql.service
+
+# Check database exists
+sudo -u postgres psql -c '\l' | grep keycloak
+
+# Check user permissions
+sudo -u postgres psql keycloak -c '\du'
+
+# Test connection
+sudo -u postgres psql keycloak -c 'SELECT version();'
+```
+
+### Environment File Not Loading
+**Symptom**: KC_BOOTSTRAP_ADMIN_PASSWORD not set
+**Check**:
+```bash
+systemctl show keycloak.service | grep EnvironmentFile
+cat /run/keycloak/admin.env
+```
+
+**Common Issue**: Missing `-` prefix makes file mandatory. Should be:
+```nix
+EnvironmentFile = "-/run/keycloak/admin.env";  # Optional
+```
+
+---
+
+## 📖 Related Documentation
+
+- [Secret Management](../security/secrets.md) - Managing Keycloak secrets
+- [Traefik Configuration](../traefik.md) - Reverse proxy setup for Keycloak
+- [OAuth2-Proxy](../oauth2-proxy.md) - Using Keycloak for web service authentication
+- [SSH OAuth Authentication](../operations/ssh-oauth.md) - SSH device flow configuration
+
+---
+
+**Last Updated**: 2025-12-05
+**Service Version**: Keycloak 26.2.5
+**Database**: PostgreSQL 17.6
+**Authentication Method**: First Broker Login flow with pre-existing user enforcement
+**Access Control**: Declarative group-based authorization via `keycloak-user-config.age`
+**OAuth2 Integration**: Client scope with groups claim for OAuth2-proxy
+**Next Review**: 2025-11-01
+
+---
+*🏠 [Home](../README.md) | 📚 [Services](../README.md) | 🔐 [Security](../security/overview.md)*

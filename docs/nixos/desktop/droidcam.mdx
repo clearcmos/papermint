@@ -1,0 +1,271 @@
+---
+title: "DroidCam - Phone as Webcam"
+description: "*Turn your Android phone into a wireless webcam for your desktop*"
+---
+
+## 🎯 Overview
+
+DroidCam allows you to use your Android phone (S25, etc.) as a wireless webcam for video calls, streaming, and recording on your NixOS desktop. It creates a virtual v4l2loopback device that any application can use as a standard webcam.
+
+---
+
+## 🔧 Configuration
+
+### 📦 NixOS Setup
+
+**Package Installation** (`modules/desktop/packages.nix`):
+```nix
+environment.systemPackages = with pkgs; [
+  droidcam
+  # ... other packages
+];
+```
+
+**Kernel Module Configuration** (`modules/desktop/packages.nix`):
+```nix
+# Load v4l2loopback kernel module for droidcam virtual webcam
+boot.extraModulePackages = with config.boot.kernelPackages; [ v4l2loopback ];
+boot.kernelModules = [ "v4l2loopback" ];
+```
+
+**CRITICAL**: The v4l2loopback kernel module requires a **reboot** after initial installation to be loaded.
+
+### 📱 Android Setup
+
+1. **Install DroidCam app** from Google Play Store
+2. Launch the app on your phone
+3. Note the **IP address** shown in the app (e.g., 192.168.1.100)
+4. Keep the app running while using the camera
+
+---
+
+## 🚀 Usage
+
+### 🔌 Connecting Your Phone
+
+**Via WiFi (Recommended)**:
+1. Ensure phone and desktop are on the same network
+2. Launch **DroidCam** on phone
+3. Launch **droidcam** client on desktop
+4. Enter phone's **IP address** in the client
+5. Click **Start** to begin streaming
+
+**Via USB**:
+1. Connect phone via USB cable
+2. Enable **USB debugging** on phone
+3. Launch DroidCam on both devices
+4. Select **USB** connection in desktop client
+5. Click **Start**
+
+### 📹 Using the Virtual Camera
+
+Once connected, the virtual camera appears as **`/dev/video0`** (or first available video device).
+
+**Device Information**:
+```bash
+# List all video devices
+v4l2-ctl --list-devices
+
+# Output shows:
+# Dummy video device (0x0000) (platform:v4l2loopback-000):
+#     /dev/video0
+```
+
+**Application Integration**:
+- **Discord**: Settings → Voice & Video → Camera → Select "Dummy video device (0x0000)"
+- **Zoom**: Video Settings → Camera → Select first video device
+- **OBS Studio**: Add "Video Capture Device" → Select `/dev/video0`
+- **Browser Apps**: Select "Dummy video device" when prompted for camera
+- **Any app**: Look for "Dummy video device" or `/dev/video0` in camera settings
+
+### 🎥 Testing the Camera
+
+**Preview with ffplay**:
+```bash
+ffplay /dev/video0
+```
+
+**Preview with webcamoid** (already installed):
+```bash
+webcamoid
+# Select /dev/video0 from camera dropdown
+```
+
+**Verify device exists**:
+```bash
+ls -la /dev/video*
+# Should show /dev/video0 when DroidCam is running
+```
+
+---
+
+## 🔍 Troubleshooting
+
+### ❌ "Loopback device not found" Error
+
+**Symptoms**:
+- Error message: "Droidcam/v4l2loopback device not found (/dev/video[0-9])"
+- Message: "Did it install correctly? If you had a kernel update, you may need to re-install."
+
+**Solution**:
+```bash
+# Check if v4l2loopback module is loaded
+lsmod | grep v4l2loopback
+
+# If not loaded, reboot the system
+reboot
+
+# After reboot, verify module is loaded
+lsmod | grep v4l2loopback
+# Should show: v4l2loopback  [size]  [used by count]
+```
+
+**Root Cause**: Kernel modules are only loaded at boot time in NixOS. After adding the module configuration, a reboot is required.
+
+### 📱 Connection Issues
+
+**Can't connect via WiFi**:
+- Verify phone and desktop are on same network
+- Check firewall isn't blocking DroidCam ports
+- Ensure IP address is correct (changes after router DHCP lease)
+- Try USB connection as alternative
+
+**USB connection not working**:
+- Enable **USB debugging** in Android Developer Options
+- Install `android-tools` if needed: `adb devices`
+- Check USB cable supports data transfer (not charge-only)
+
+### 🎥 Video Quality Issues
+
+**Low quality or choppy video**:
+- Reduce resolution in DroidCam settings
+- Use USB connection instead of WiFi
+- Ensure phone has good WiFi signal strength
+- Close other bandwidth-intensive applications
+
+**Wrong orientation**:
+- Rotate phone to desired orientation
+- DroidCam should auto-detect and adjust
+- Some apps may need manual rotation setting
+
+---
+
+## 🎯 Use Cases
+
+### 💼 Professional
+
+**Video Conferencing**:
+- Better camera quality than typical laptop webcams
+- Use phone's superior camera hardware
+- Wide-angle or telephoto lens options
+- Better low-light performance
+
+**Content Creation**:
+- High-quality streaming camera
+- OBS Studio integration
+- Multiple camera angles (if using multiple phones/DroidCam instances)
+- Professional video recording
+
+### 🎮 Gaming & Streaming
+
+**Twitch/YouTube Streaming**:
+- Face cam for gaming streams
+- Better quality than budget webcams
+- Easy setup and configuration
+- No additional hardware purchase needed
+
+---
+
+## 📊 Performance
+
+**Network Requirements**:
+- **Minimum**: 2 Mbps WiFi connection
+- **Recommended**: 5+ Mbps or USB connection
+- **Latency**: &lt;100ms on local network
+
+**Resource Usage**:
+- **CPU**: Low (video decode handled by phone)
+- **Network**: ~2-5 Mbps depending on quality
+- **Phone Battery**: Medium (use charger for extended sessions)
+
+---
+
+## 🔧 Advanced Configuration
+
+### 🎛️ OBS Studio Integration
+
+**Optional OBS Plugin** (not installed by default):
+```nix
+# Add to packages.nix if needed
+environment.systemPackages = with pkgs; [
+  obs-studio-plugins.droidcam-obs
+];
+```
+
+**Using standard Video Capture Device**:
+1. Add **Video Capture Device** source in OBS
+2. Select **`/dev/video0`** (Dummy video device)
+3. Configure resolution and settings
+4. Works without OBS plugin
+
+### 📹 Multiple Camera Setup
+
+**Using multiple phones**:
+- Each phone creates separate video device
+- Configure v4l2loopback for multiple devices
+- Useful for multi-angle streaming/recording
+
+---
+
+## 📖 Related Documentation
+
+### 🖥️ Desktop
+- **[Desktop README](../README.md)** - Desktop environment overview
+- **[Applications](../applications/)** - Other desktop applications
+
+### 🎥 Streaming & Recording
+- **[OBS Studio]** - Video streaming and recording (if documented)
+- **[Webcamoid](../README.md)** - Alternative camera application
+
+### 🔐 Network
+- **[Network Security](../security/network-security/)** - Firewall configuration
+- **[Services](../services/)** - Related network services
+
+---
+
+## 🛠️ Maintenance
+
+### 📅 Regular Checks
+
+**Weekly**:
+- Test connection before important meetings
+- Update DroidCam app on phone
+- Verify video quality settings
+
+**After System Updates**:
+- Reboot if kernel was updated (module compatibility)
+- Test DroidCam connection after NixOS rebuild
+- Verify `/dev/video0` still appears when connected
+
+### 🔄 Updating
+
+**NixOS Side**:
+```bash
+# DroidCam updates with system rebuilds
+nixos-rebuild switch --flake .#cmos
+```
+
+**Android Side**:
+- Update via Google Play Store
+- Check for compatibility with desktop client version
+
+---
+
+**Last Updated**: 2025-10-01
+**Status**: ✅ Active
+**Platform**: cmos (AMD Desktop)
+**Phone**: Samsung S25
+**Next Review**: 2025-11-01
+
+---
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🖥️ [Desktop](../README.md) | 📱 [Applications](./)*

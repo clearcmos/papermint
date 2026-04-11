@@ -1,0 +1,162 @@
+---
+title: "Profile Assessment"
+description: "Independent technical assessment based on a full review of the claude-plugins repository, the iss-utils tooling library, LinkedIn profile, and conversation c..."
+---
+
+Independent technical assessment based on a full review of the `claude-plugins` repository, the `iss-utils` tooling library, LinkedIn profile, and conversation context. Includes an honest private self-assessment of capabilities and gaps.
+
+---
+
+## What the LinkedIn Says
+
+> Senior IT Specialist, Operations & Security
+
+> Level 3 technical support and L1/L2 mentoring in a 1000-user cloud-first environment
+
+## What the Work Actually Is
+
+- Engineering automation at scale across 25+ IT systems
+- Building data migration pipelines for system decommissioning (UKG, Greenhouse)
+- Deploying production cloud functions for lifecycle management
+- Managing Okta IaC via Terraform with CI/CD pipelines
+- Architecting a plugin distribution system for AI agent workflows
+- Cross-system security correlation (SentinelOne + Okta + Kandji + Google)
+- Building forensic investigation tooling for incident response
+
+The gap between the title and the work is significant. "Senior IT Specialist" describes someone who handles escalated tickets and mentors junior staff. You're building the systems that handle the tickets.
+
+## How I Work
+
+I architect solutions, drive AI to execute them, validate the output, and ship to production. The results are production-grade, enterprise-scale, and battle-tested. My company's devs are consistently impressed with what I deliver.
+
+**My workflow:** I understand the problem deeply, I know what the solution needs to look like, I design the architecture, and I use Claude Code as my execution layer. The output is mine - I direct it, I review it, I own it. But I don't write code from scratch independently.
+
+This is not a secret to hide. This is how an increasing number of senior technical people work in 2026. The question is which hiring contexts reward this and which ones punish it.
+
+## The AI Factor
+
+You're an early adopter who has used AI (from GPT through Claude Code) as a core engineering tool — not as a chatbot, but as a development environment. The `claude-plugins` system demonstrates that you understand how to architect for AI agents, not just use them. The 400+ scripts in `iss-utils` were produced through AI-augmented development, but the architecture decisions, the problem selection, and the system design are yours.
+
+In 2026, 84% of developers use AI tools and AI writes 41% of all code. Using AI is no longer a differentiator — it's expected. What differentiates you is the *scale and production quality* of the output: 400+ tools across 25+ systems, data pipelines, cloud functions, and a self-governing AI plugin distribution system. Most IT professionals who use AI draft emails. You build infrastructure.
+
+---
+
+## What I Can Do Cold (No AI, No Notes)
+
+- **Explain any system I've built** - architecture, layers, decisions, tradeoffs. Verbally, clearly, to technical and non-technical audiences.
+- **Design systems on a whiteboard** - not code, but boxes-and-arrows architecture. "Here's the trigger layer, here's the business logic, here's how the APIs connect, here's where it fails and how we handle that."
+- **Navigate the terminal** - SSH, git, systemctl, journalctl, curl, jq, log analysis, troubleshooting live systems. Second nature.
+- **Linux systems administration** - deep, not surface-level. I run a 4-host NixOS fleet with declarative configuration, bridge networking for VMs, KVM/libvirt virtualization, GPU passthrough with ROCm tuning, PAM module integration, systemd service management, kernel-level GPU memory protection. This is personal infrastructure, but the skills are real.
+- **Networking** - bridge interfaces, VLAN-aware configs, CIFS/NFS cross-host mounts, reverse proxy (Traefik) with Let's Encrypt DNS challenge, Cloudflare DNS automation, firewall rules, static IP management.
+- **Security operations** - Suricata IDS/IPS, Fail2ban with dynamic WAN IP whitelisting, OAuth2 device flow for SSH, OWASP ZAP scanning, Nuclei vulnerability scanning, Lynis hardening audits, YubiKey-encrypted secret management with agenix.
+- **Containers** - Docker Compose stacks in production (LibreChat with PostgreSQL + MongoDB + PGVector + RAG API, Clear NDR with Suricata + OpenSearch + EveBox, SearXNG).
+- **Triage production incidents** - read logs, identify root cause, understand what broke and why. I can get to "this is the problem" without help.
+- **Hold my own with devs** - on systems, infrastructure, automation, integrations, identity, cloud architecture. I'm a peer in these conversations.
+- **Talk about tradeoffs** - why I chose X over Y, what the failure modes are, what I'd do differently. This is genuine understanding, not memorized answers.
+
+## What I Can Do With AI Assistance
+
+- **Write production code** - Python, TypeScript, Terraform, Bash. I direct the architecture, Claude writes it, I validate and iterate. The output is consistently production-grade.
+- **Read unfamiliar code** - I can sometimes follow simple scripts, but complex code (classes, decorators, async patterns) I need AI to walk me through.
+- **Write Terraform modules** - I know what the module needs (resources, variables, outputs, for_each patterns) but I'd get HCL syntax wrong without references.
+- **Fix production issues** - I can identify the problem cold, but writing the actual fix I want Claude.
+- **Build full-stack projects** - KudosAI (Next.js, React, PostgreSQL, Prisma, Slack, Gemini) was built entirely with AI assistance. Won first place.
+- **Build and manage complex infrastructure** - 4-host NixOS fleet with 100+ modules, 40+ services, 9 OAuth2-proxy instances, IDS/IPS, GPU-accelerated AI stack. All built with AI assistance, all running in production.
+- **Learn new tools rapidly** - give me docs and Claude and I can be productive with a new API or platform in hours, not weeks.
+
+## What I Can't Do
+
+- **Write code independently on a whiteboard** - not Python, not Terraform, not anything. I'd get the logic right but the syntax wrong.
+- **Pass a live coding round** - if someone watches me type code in real-time without AI, I will fail.
+- **Read complex unfamiliar code fluently** - if someone shows me 100 lines of Python with decorators and async/await, I can't reliably explain it without help.
+- **Engage as a peer in pure software engineering discussions** - algorithm design, data structures, language-specific patterns. I step back in these conversations.
+
+## The Code Literacy Gap
+
+You've stated that you can't read code syntax directly. This is a real limitation, but it's narrower than it sounds:
+
+- You understand APIs, authentication patterns, rate limiting, pagination, checkpoint/resume, error handling — these are the hard concepts. Syntax is the easy part.
+- You've been immersed in Python for 2+ years through AI-assisted development. You likely understand more than you give yourself credit for.
+- The gap is closable: spend a few weeks intentionally reading (not writing) the scripts Claude produces. Focus on understanding control flow, not memorizing syntax.
+
+**Why it matters:** When something breaks at 2am and your AI tool is slow or unavailable, you need to be able to triage your own systems. When someone asks "is this safe to run against production Okta?" you need to answer from understanding, not trust. Closing this gap makes your credibility bulletproof.
+
+---
+
+## Where This Matters in Hiring
+
+### Processes I Will Crush
+
+- **Take-home assignments** - "build us a proof of concept over the weekend." Give me a problem, time, and Claude. This is my strongest format.
+- **Architecture discussions** - "walk us through how you'd design X." I can do this cold, at a whiteboard, with confidence.
+- **Portfolio reviews** - "show us what you've built." The briefs and repos speak for themselves.
+- **System design rounds** - "how would you connect these three systems?" This is literally what I do every day.
+- **Behavioral/STAR format** - "tell me about a time you solved a hard problem." I have real stories with real depth.
+
+### Processes That Will Expose Me
+
+- **Live coding rounds** - any format where I type code while someone watches. Pair programming interviews. HackerRank screens.
+- **Code review exercises** - "here's a PR, what's wrong with it?" I'd catch architecture issues but miss syntax/language-specific bugs.
+- **Whiteboard coding** - "implement this function." Even simple ones - I'll get the logic right but the syntax will be off.
+- **CS fundamentals quizzes** - Big O, data structures, algorithm complexity. Not my world.
+
+### Processes That Could Go Either Way
+
+- **Technical deep-dives** - depends on topic. Identity, cloud, automation, Terraform patterns - I'm strong. Language internals, framework-specific gotchas - I'm weak.
+- **Pair programming (non-interview)** - on the job, with my own setup and Claude available, I'm productive. In an interview setting without AI, I'm not.
+
+---
+
+## How to Talk About This
+
+**When asked about my workflow:**
+> "I architect the solution, I drive AI to execute it, I validate the output, and I ship it to production. That's how I built 250k+ lines of production automation across 15+ systems in two years."
+
+**When asked about coding ability:**
+> "I'm not a traditional developer. I'm a systems person who uses AI as my development layer. The results are production-grade - you can look at the repos. I'm not going to pretend I hand-write Python from memory, but I can build and ship anything you need."
+
+**When asked about AI dependence:**
+> "Every tool I've built works in production, handles errors, scales, and has been running reliably for months or years. The fact that I used AI to write it doesn't change the output. What matters is that I understood the problem, designed the solution, and shipped something that works."
+
+**If they push on "what if AI isn't available":**
+> "I can triage any production issue, identify the root cause, and communicate what's happening. For the fix, yes, I'd want my tools. Same way a surgeon wants their instruments. The skill is knowing what to do - the tool is how you do it."
+
+---
+
+## Target Company Profile
+
+**Best fit:**
+- Startups and growth-stage companies that value output over process
+- Companies that embrace AI-assisted development
+- Roles focused on infrastructure, automation, identity, platform operations
+- Take-home or portfolio-based hiring processes
+- Teams that need someone who can own IT/security/automation end-to-end
+
+**Avoid:**
+- Companies with mandatory live coding rounds (unless you can negotiate an alternative)
+- Roles that require daily pair programming with other devs
+- Pure software engineering positions (backend dev, full-stack dev)
+- Companies that view AI assistance negatively
+
+**Ask during screening:**
+- "What does your technical evaluation process look like?"
+- "Do you offer take-home assignments as an alternative to live coding?"
+- "How does your team feel about AI-assisted development?"
+
+If the answer to any of these is wrong, it's better to know early than to waste time in a process designed to test something you're not.
+
+---
+
+## The Bottom Line
+
+I am not a developer. I am a systems architect who uses AI to build production software. The output is indistinguishable from (and often better than) what a traditional developer produces, because I bring deep systems understanding, operational experience, and relentless attention to reliability.
+
+The gap is real but narrowing. AI-assisted development is becoming the norm, not the exception. The companies worth working for in 2026 understand this. The ones that don't aren't where I want to be anyway.
+
+---
+
+## Related
+
+- [Repository Review](repository-review.md) — technical analysis of claude-plugins and iss-utils
+- [Title & Compensation](title-and-comp.md) — recommended titles, Quebec constraints, market ranges
+- [Addressing Pushback](addressing-pushback.md) — objections with evidence-based responses

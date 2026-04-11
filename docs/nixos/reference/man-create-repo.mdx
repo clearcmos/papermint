@@ -1,0 +1,173 @@
+---
+title: "create-repo"
+description: "create-repo - Interactive GitHub repository creation wizard"
+---
+
+# SYNOPSIS
+
+**create-repo**
+
+# DESCRIPTION
+
+**create-repo** is an interactive shell function that guides you through creating a new GitHub repository and configuring your local Git repository to use it as a remote.
+
+The function handles Git initialization, GitHub authentication verification, repository creation, and remote configuration in a streamlined workflow.
+
+# USAGE
+
+## Interactive Workflow
+
+**create-repo**
+: Launch the interactive repository creation wizard
+
+# PREREQUISITES
+
+- GitHub CLI (**gh**) must be installed
+- GitHub CLI must be authenticated (`gh auth login`)
+- Current directory should be (or will become) a Git repository
+- Internet connection for GitHub API access
+
+# WORKFLOW
+
+The wizard follows these steps:
+
+## 1. Git Repository Check
+
+Verifies current directory is a Git repository. If not, offers to initialize:
+```
+Would you like to initialize it? (y/n):
+```
+
+## 2. GitHub Authentication
+
+Checks GitHub CLI authentication status. If not authenticated, initiates login:
+```
+Authenticating now...
+gh auth login
+```
+
+## 3. Repository Name
+
+Prompts for repository name:
+```
+Enter the repository name:
+```
+
+## 4. Visibility Selection
+
+Choose repository visibility (default: public):
+```
+Make repository public or private? (public/private) [public]:
+```
+
+## 5. Repository Creation
+
+Creates repository on GitHub using **gh** CLI with the specified settings.
+
+## 6. Branch Configuration
+
+Ensures the local repository uses **main** as the default branch:
+- If no commits exist, creates new **main** branch
+- If on different branch, renames to **main**
+
+## 7. Remote Configuration
+
+Sets up **origin** remote pointing to the newly created GitHub repository.
+
+## 8. Next Steps
+
+Displays suggested commands to complete the setup:
+```
+git add .
+git commit -m "Initial commit"
+git push -u origin main
+```
+
+# EXAMPLES
+
+## Create a New Repository
+
+```bash
+# Navigate to your project directory
+cd ~/projects/my-new-project
+
+# Run the wizard
+create-repo
+
+# Follow the prompts:
+# - Choose to initialize git if needed
+# - Authenticate with GitHub if needed
+# - Enter repository name: my-new-project
+# - Choose visibility: public
+```
+
+## Initialize and Create
+
+```bash
+# Create directory and initialize
+mkdir new-app && cd new-app
+
+# Run wizard (will offer to initialize git)
+create-repo
+```
+
+# EXIT STATUS
+
+**0**
+: Repository created successfully
+
+**1**
+: Error occurred (user cancellation, authentication failure, network error, or API error)
+
+# AUTHENTICATION
+
+The command uses **gh** CLI authentication. First-time users will be prompted to authenticate:
+
+1. Choose authentication method (browser or token)
+2. Select GitHub account type (GitHub.com or Enterprise)
+3. Complete authentication flow
+4. Verify access by listing repositories
+
+Authentication credentials are stored by **gh** and persist across sessions.
+
+# BRANCH STRATEGY
+
+The function enforces **main** as the default branch:
+
+- New repositories initialize with **main**
+- Existing repositories on other branches are migrated
+- Follows modern GitHub default branch naming
+- Ensures consistency across all repositories
+
+# RELATED COMMANDS
+
+**gissue**(1) - GitHub issue management
+**gpush**(1) - Multi-repository git workflow
+**ghelp**(1) - Git and GitHub workflow help
+
+**gh**(1) - GitHub CLI (underlying tool)
+**gh-repo-create**(1) - GitHub CLI repository creation
+**git**(1) - Git version control system
+
+# SEE ALSO
+
+**git**(1), **git-init**(1), **git-remote**(1), **gh**(1), **gh-repo**(1)
+
+# CONFIGURATION
+
+Defined in `/etc/nixos/modules/core/git.nix` as part of the Git workflow functions.
+
+Uses environment variables:
+- **GH_TOKEN**: GitHub Personal Access Token (loaded from agenix secret)
+
+# AUTHOR
+
+Part of the NixOS Git workflow functions defined in `/etc/nixos/modules/core/git.nix`.
+
+---
+
+**Last Updated**: 2025-10-18
+**Module**: `/etc/nixos/modules/core/git.nix`
+
+---
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🔧 [Tools](../tools/overview.md)*

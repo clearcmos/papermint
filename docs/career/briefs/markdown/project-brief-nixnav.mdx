@@ -1,0 +1,247 @@
+---
+title: "NixNav"
+description: "::: subtitle"
+---
+
+Technical Brief - Desktop File Navigator
+:::
+
+::: {.note style="margin-top: 0; margin-bottom: 1.5rem;"}
+Personal project, not employer work. Built for the NixOS/KDE Wayland ecosystem.
+:::
+
+::: pitch
+Built a **desktop file navigator** in Rust with a Qt6/QML GUI that searches 650,000+ files using trigram indexing - sub-millisecond for selective queries, sub-10ms for most real-world searches. Deep KDE Plasma integration, smart file previews, and frecency-based ranking.
+:::
+
+:::::::::::: section
+## Architecture
+
+::::::::::: layers
+:::: {.layer .layer-ui}
+[QML Interface]{.layer-title} [- Qt6/QML frontend with search bar, sortable results, resizable preview pane, system tray.]{.layer-desc}
+
+::: layer-items
+Main.qml SearchBar.qml ResultsList.qml PreviewPanel.qml BookmarkDialog.qml
+:::
+::::
+
+:::: {.layer .layer-bridge}
+[Qt Bridge (cxx-qt)]{.layer-title} [- Memory-safe Rust-C++ interop. Exposes search engine and preview system to QML.]{.layer-desc}
+
+::: layer-items
+SearchEngine bridge PreviewBridge system_tray.cpp context_menu.cpp
+:::
+::::
+
+:::: {.layer .layer-core}
+[Rust Search Engine]{.layer-title} [- Trigram index, query parser, search cache, background file watcher, integrity checker.]{.layer-desc}
+
+::: layer-items
+trigram.rs engine.rs query.rs scanner.rs watcher.rs
+:::
+::::
+
+:::: {.layer .layer-data}
+[SQLite + Filesystem]{.layer-title} [- WAL-mode database for trigram posting lists. inotify for local, periodic rescan for network mounts.]{.layer-desc}
+
+::: layer-items
+database.rs config.rs inotify watcher
+:::
+::::
+:::::::::::
+::::::::::::
+
+::::::::::::::::::: section
+## Spotlight
+
+:::::::::::::::: card
+### Trigram Search Engine
+
+The core search system. Benchmarked at 652k files: selective queries at 23-169 microseconds, most real-world searches under 10ms. Common short terms (e.g., \"config\") push to 10-34ms due to large posting lists.
+
+::::::::::::::: workflow
+::::: wf-step
+::: wf-num
+1
+:::
+
+::: wf-content
+#### Trigram Indexing
+
+Every filename is split into 3-character sliding windows. \"config.py\" produces \[\"con\", \"onf\", \"nfi\", \"fig\", \"ig.\", \"g.p\", \".py\"\]. Each trigram maps to a posting list of file IDs stored in SQLite.
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+2
+:::
+
+::: wf-content
+#### Candidate Narrowing
+
+A search for \"config\" intersects the posting lists for \[\"con\", \"onf\", \"nfi\", \"fig\"\] - reducing 600k files to roughly 5% before any string matching happens.
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+3
+:::
+
+::: wf-content
+#### Multi-Mode Matching
+
+Four query modes: substring (default), regex (prefix with /), glob (\* and ?), and fuzzy (prefix with \~, Levenshtein distance). Path-aware filtering extracts directory segments from queries (e.g., \"src/config\"). Extension filtering happens inline - \"\*.py query\" restricts results before display.
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+4
+:::
+
+::: wf-content
+#### Search Cache
+
+Results for \"conf\" are cached and reused when the user types \"config\" - incremental refinement instead of full re-search. Cache is invalidated when the query contracts or changes modes.
+:::
+:::::
+:::::::::::::::
+::::::::::::::::
+
+::: card
+### Smart Preview System
+
+Preview pane (toggled with Ctrl+P) handles 8+ file types without external viewers:
+
+- **Text/Code** - syntax-highlighted up to 50KB
+- **Markdown** - rendered to HTML via pulldown-cmark
+- **Images** - PNG, JPG, GIF, WebP, SVG inline display
+- **Audio** - ID3 tags, album art, duration, bitrate (via ffprobe)
+- **Video** - resolution, duration, audio tracks, subtitle streams
+- **Archives** - ZIP, TAR, GZ, BZ2, 7Z, RAR contents listing
+- **PDFs** - metadata extraction via pdfinfo
+- **Directories** - file listing with sizes
+:::
+
+::: card
+### KDE Desktop Integration
+
+Not a standalone tool - integrates at the KDE Frameworks level:
+
+- **Right-click context menus** - identical to Dolphin (rename, delete, copy, open with) via KService and KIO
+- **System tray** - hide-to-tray on close, global hotkey toggle (Alt+\`)
+- **App discovery** - KDE application database for \"Open With\" options
+- **Wayland-native** - full Wayland support, not just X11 fallback
+:::
+:::::::::::::::::::
+
+::::::::::::::::::: section
+## Key Technical Decisions
+
+:::::: card
+### Sequence Counter for Stale Results
+
+::: decision
+[Problem]{.decision-label .problem} [User types fast - \"c\", \"co\", \"con\", \"conf\" fires four searches. A slow search for \"c\" (huge result set) could finish after a fast search for \"conf\" and overwrite the correct results.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [Atomic sequence counter increments on every keystroke. Each search carries its sequence number. Results are silently discarded if their sequence is older than the current counter.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [Zero visual flicker during fast typing. The UI always shows results for the most recent query, regardless of execution order.]{.decision-text}
+:::
+::::::
+
+:::::: card
+### Two-Phase Initialization
+
+::: decision
+[Problem]{.decision-label .problem} [Loading the trigram index for 600k+ files takes 1-2 seconds. A blocking load means staring at nothing on launch.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [Qt window renders immediately with an empty state. Index loads on a background thread. File watcher starts only after the index is ready.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [Instant window appearance. Search becomes available within 1-2 seconds with no perceived freeze.]{.decision-text}
+:::
+::::::
+
+:::::: card
+### Frecency Ranking
+
+::: decision
+[Problem]{.decision-label .problem} [Sorting by name or date alone doesn\'t surface the files you actually use. A file you open ten times a day shouldn\'t rank below one you last touched a year ago.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [Frecency score = ln(1 + open_count) \* tiered_weight. Weights: 4x for last hour, 2x for last day, 1.5x for last week, 1x for last month, 0.5x for older. Logarithmic scale prevents extreme scores from power users.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [Frequently-used files naturally float to the top without manual pinning. The ranking adapts to changing workflows over time.]{.decision-text}
+:::
+::::::
+
+:::::: card
+### Dual Bookmark Strategy
+
+::: decision
+[Problem]{.decision-label .problem} [Network-mounted directories (NAS, SMB) can\'t use inotify - the kernel doesn\'t support it for remote filesystems. But local bookmarks need instant change detection.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [Two bookmark types: local (inotify-based, instant updates) and network (periodic rescan, configurable interval). Users mark bookmarks as network in the config.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [Local bookmarks update instantly. Network bookmarks stay fresh without hanging the application on unresponsive mounts.]{.decision-text}
+:::
+::::::
+:::::::::::::::::::
+
+:::::::::::: section
+## Talking Points
+
+::::::::::: {.card .stories}
+### \"Tell me about NixNav\"
+
+:::: talk-point
+::: answer
+I needed a file navigator for my NixOS desktop that could search across 650k+ files instantly. Nothing in the Linux ecosystem did trigram-indexed search with deep KDE integration, so I built one. It\'s a **Qt6 GUI app written in Rust** with safe C++ interop via cxx-qt, a SQLite-backed trigram index, and full KDE Frameworks integration for context menus and system tray.
+:::
+::::
+
+### \"Why Rust with Qt instead of a simpler stack?\"
+
+:::: talk-point
+::: answer
+The search engine needs to be fast - benchmarked at sub-millisecond for selective queries on 652k files. Rust gives me that performance plus memory safety without a garbage collector. Qt6/QML gives me a **native KDE desktop experience** - proper context menus, system tray, Wayland support. The cxx-qt bridge lets Rust own the logic while QML owns the presentation, with safe FFI between them.
+:::
+::::
+
+### \"What was the hardest part?\"
+
+:::: talk-point
+::: answer
+Getting the search to feel instant during fast typing. The trigram index handles raw speed, but the **stale result problem** was subtle - when you type \"config\" fast, slow queries for shorter prefixes can finish after fast queries for longer ones and overwrite the results. I solved it with an atomic sequence counter that silently drops outdated results. The cache refinement logic also needed careful handling - you can reuse \"conf\" results for \"config\", but not if the original query hit the result limit.
+:::
+::::
+
+### \"What would you do differently?\"
+
+:::: talk-point
+::: answer
+I\'d look at a treesitter-based preview for code files instead of plain text rendering. The preview system works well but syntax highlighting would make it more useful. I\'d also consider exposing the search engine as a standalone library - the trigram + SQLite approach is reusable beyond file navigation.
+:::
+::::
+:::::::::::
+::::::::::::
+
+Project brief - not for distribution. All details sanitized.

@@ -1,0 +1,241 @@
+---
+title: "Nix-Scan"
+description: "::: subtitle"
+---
+
+Technical Brief - CVE Vulnerability Scanner for NixOS
+:::
+
+::: {.note style="margin-top: 0; margin-bottom: 1.5rem;"}
+Personal project, not employer work. Built to address a gap in the NixOS security tooling ecosystem.
+:::
+
+::: pitch
+Built a **CVE vulnerability scanner** in Rust that scans \~2,800 NixOS runtime packages against the National Vulnerability Database in 5-10 seconds. Evolved from 95% false positives (v0.1) to near-zero (v0.3) through CPE-based matching and multi-branch version filtering.
+:::
+
+:::::::::::: section
+## Architecture
+
+::::::::::: layers
+:::: {.layer .layer-cli}
+[CLI + Output]{.layer-title} [- clap argument parsing, human (ANSI color) and JSON output, optional web report via embedded Axum server.]{.layer-desc}
+
+::: layer-items
+main.rs report.rs serve.rs
+:::
+::::
+
+:::: {.layer .layer-scanner}
+[Scanner Orchestration]{.layer-title} [- Coordinates package discovery, CVE lookup, false positive filtering, confidence scoring, optional AI analysis.]{.layer-desc}
+
+::: layer-items
+scanner.rs ai_analyzer.rs
+:::
+::::
+
+:::: {.layer .layer-matching}
+[CVE Matching Engine]{.layer-title} [- CPE-based vendor:product lookup, multi-branch version range filtering, numeric-aware version comparison.]{.layer-desc}
+
+::: layer-items
+local_cve_db.rs package.rs version.rs
+:::
+::::
+
+:::: {.layer .layer-data}
+[Data Sources]{.layer-title} [- NixOS runtime closure via nix-store, local SQLite CVE cache, NVD 2.0 API with rate limiting, OSV fallback.]{.layer-desc}
+
+::: layer-items
+nix_store.rs cve_db.rs SQLite (WAL) NVD API
+:::
+::::
+:::::::::::
+::::::::::::
+
+::::::::::::::::::: section
+## Spotlight
+
+:::::::::::::::: card
+### From 95% False Positives to Near-Zero
+
+The central engineering challenge - making CVE matching actually useful.
+
+::::::::::::::: workflow
+::::: wf-step
+::: wf-num
+1
+:::
+
+::: wf-content
+#### v0.1: Text Matching (Broken)
+
+Searched CVE descriptions with LIKE \'%package_name%\'. \"curl\" matched \"Curlinux\", \"linux\" matched \"MiniDVBLinux\", \"python\" matched \"python-docutils\". 95% of results were noise.
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+2
+:::
+
+::: wf-content
+#### v0.2: CPE Extraction
+
+Switched to NVD\'s structured CPE data. Extract vendor:product:version tuples at download time, store in indexed SQLite table. Search by exact product name instead of text. False positives dropped to \~5%.
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+3
+:::
+
+::: wf-content
+#### v0.2.1: Multi-Branch Version Filtering
+
+A CVE might affect OpenSSL 3.4.0-3.4.5 but not 1.1.1. The fix: group all CPE rows by CVE ID (no DISTINCT - need every range), then check if the installed version falls within any applicable range. Only matching branches count.
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+4
+:::
+
+::: wf-content
+#### v0.3: Confidence Scoring
+
+Exact version match = 0.95, version range match = 0.90, wildcard \"all versions\" = 0.65. Users filter by confidence threshold. Combined with heuristic filters (skip firmware CVEs, WordPress plugins) - near-zero false positives.
+:::
+:::::
+:::::::::::::::
+::::::::::::::::
+
+::: card
+### Nix-Specific Package Deduplication
+
+NixOS outputs multiple variants of every package - openssl-3.4.3, openssl-3.4.3-bin, openssl-3.4.3-dev, openssl-3.4.3-lib. Scanning all four separately wastes time and inflates results.
+
+The deduplicator strips Nix output suffixes (-bin, -dev, -lib, -man, -doc, -modules-shrunk, etc.) in a defined order and deduplicates by base key. Reduces \~5,400 raw store paths to \~2,800 unique packages.
+:::
+
+::: card
+### Numeric-Aware Version Comparison
+
+Standard string comparison breaks on real-world versions. \"6.12.63\" sorts before \"5.10.248\" lexicographically (6 \&lt; 5\... wait, no - but \"248\" \> \"63\" as strings).
+
+Custom comparator splits on dots, compares numeric segments numerically, falls back to lexicographic only for non-numeric suffixes like \"1.1.1ze\". Handles every version format found in nixpkgs.
+:::
+:::::::::::::::::::
+
+:::::::::::::::::::: section
+## Key Technical Decisions
+
+:::::: card
+### Pre-Extracted CPE Tables
+
+::: decision
+[Problem]{.decision-label .problem} [NVD\'s CVE JSON has deeply nested \"configurations\" objects with CPE match criteria. Parsing this at scan time for every package against every CVE is too slow.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [Extract vendor:product:version tuples at download time and store them in an indexed cpe_products table. Scan-time lookup becomes a simple indexed SQL query.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [Scan of 2,800 packages completes in 5-10 seconds. Initial DB build takes 3-15 minutes (one time), then incremental updates are seconds.]{.decision-text}
+:::
+::::::
+
+:::::: card
+### 4-Month Rolling Window
+
+::: decision
+[Problem]{.decision-label .problem} [The NVD contains 200,000+ CVEs going back decades. Mirroring the full database is slow, large, and mostly irrelevant - NixOS patches are current.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [Only cache the last 120 days of CVEs. Old vulnerabilities are already patched in nixpkgs; unpatched ones would have been caught when they were new.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [Manageable database size. Fast initial download. Focused on actionable findings rather than historical noise.]{.decision-text}
+:::
+::::::
+
+::::::: card
+### Hardcoded CPE Mapping Table
+
+::: decision
+[Problem]{.decision-label .problem} [Nix package names don\'t match NVD CPE vendor:product names. \"python3\" in Nix is \"cpe:2.3:a:python:python\" in NVD. \"linux\" is \"cpe:2.3:o:linux:linux_kernel\".]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [Hand-curated HashMap with \~90 Nix-to-CPE mappings for the most common packages. No machine learning, no fuzzy matching - explicit mapping.]{.decision-text}
+:::
+
+::: decision
+[Why]{.decision-label .why} [NVD naming is inconsistent enough that automated mapping produces false matches. Only \~90 packages matter (the ones with CVEs). Manual curation is reliable and maintainable.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [Zero mapping-related false positives. New packages can be added in one line.]{.decision-text}
+:::
+:::::::
+
+:::::: card
+### Optional AI False Positive Filter
+
+::: decision
+[Problem]{.decision-label .problem} [Some CVEs technically match by version range but aren\'t actually exploitable in the NixOS context (e.g., a CVE for a library feature that NixOS doesn\'t enable).]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [Optional \--ai-filter flag sends CVE+package pairs to a local Ollama instance for relevance analysis. AI adjusts confidence scores based on its assessment.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [Extra filtering layer without network dependency (Ollama runs locally). Strictly opt-in - the scanner works fine without it.]{.decision-text}
+:::
+::::::
+::::::::::::::::::::
+
+:::::::::::: section
+## Talking Points
+
+::::::::::: {.card .stories}
+### \"Tell me about Nix-Scan\"
+
+:::: talk-point
+::: answer
+NixOS didn\'t have a working CVE scanner - the existing tool (vulnix) was outdated and unmaintained. I built one in Rust that scans the full runtime closure against the National Vulnerability Database. The hard part wasn\'t querying NVD - it was **making the results accurate**. The first version had 95% false positives. It took three major iterations to get to near-zero.
+:::
+::::
+
+### \"How did you fix the false positive problem?\"
+
+:::: talk-point
+::: answer
+Text matching was fundamentally broken - searching CVE descriptions for package names produces garbage. The fix was **switching to CPE-based matching** - NVD structures its vulnerability data around CPE identifiers (vendor:product:version). I extract those at download time, store them in indexed SQLite tables, and search by exact product match. Then I added multi-branch version filtering so a CVE for OpenSSL 3.x doesn\'t match an OpenSSL 1.1.1 installation. Combined with confidence scoring and heuristic filters, false positives dropped from 95% to near-zero.
+:::
+::::
+
+### \"What\'s Nix-specific about it?\"
+
+:::: talk-point
+::: answer
+Two things. First, **package discovery** - NixOS doesn\'t have /usr/bin. Everything lives in /nix/store with hashed paths. I query the runtime closure via nix-store -qR to get exactly what\'s running, then deduplicate Nix output variants (-bin, -dev, -lib suffixes) to avoid scanning the same package four times. Second, **naming** - Nix package names don\'t match NVD names. I maintain a curated mapping table of \~90 common packages to their CPE identifiers.
+:::
+::::
+
+### \"What would you improve?\"
+
+:::: talk-point
+::: answer
+The CPE mapping table is manual. For 90 packages it\'s fine, but it doesn\'t scale to nixpkgs\' 80,000+ packages. A better approach would be parsing nixpkgs metadata (the meta.homepage and meta.pname fields) to auto-generate mappings. I\'d also add systemd timer integration for automated weekly scans with diff reporting - \"3 new CVEs since last scan.\"
+:::
+::::
+:::::::::::
+::::::::::::
+
+Project brief - not for distribution. All details sanitized.

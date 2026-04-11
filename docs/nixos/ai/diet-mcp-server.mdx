@@ -1,0 +1,92 @@
+---
+title: "Diet MCP Server"
+description: "*HTTP-based MCP server exposing diet/nutrition tools to LibreChat*"
+---
+
+## Overview
+
+Model Context Protocol (MCP) server that bridges LibreChat with the diet/nutrition SQLite database. Allows Claude in LibreChat to log meals, search foods, track nutrition goals, and manage preferences — all through natural conversation.
+
+**Module:** `modules/desktop/ai/diet-mcp.nix`
+**App code:** `apps/diet-db/diet-mcp-server.py`
+**Port:** 8112 (localhost only)
+**Protocol:** JSON-RPC 2.0 over HTTP (Streamable HTTP MCP)
+**Host:** cmos
+**Auth:** None (localhost-only, accessed by LibreChat process)
+
+## Architecture
+
+```
+LibreChat (cmos:8090) → MCP client → localhost:8112/mcp → diet-mcp-server → SQLite
+```
+
+- **Framework:** FastAPI + Uvicorn
+- **Database:** `~nicholas/.local/share/diet-db/diet.db` (shared with CLI `diet` tool)
+- **User:** nicholas (for home directory access)
+
+## Available MCP Tools (13)
+
+| Tool | Purpose |
+|------|---------|
+| `search_food` | Search nutrition database |
+| `add_food` | Add/update food nutrition (per 100g) |
+| `delete_food` | Remove food from database |
+| `log_meal` | Record meal eaten |
+| `get_meal_log` | Query meal history by date |
+| `delete_meal_log` | Remove meal entry |
+| `daily_summary` | Daily nutrition totals vs goals |
+| `manage_goals` | View/update nutrition targets |
+| `save_preference` | Learn user preference (seasoning, cooking style) |
+| `get_preferences` | Retrieve saved preferences |
+| `delete_preference` | Remove preference |
+| `log_weight` | Log weight or view history |
+| `delete_weight_log` | Remove weight entry |
+
+## Testing
+
+```bash
+# Health check
+curl http://localhost:8112/mcp/health
+
+# List tools
+curl -X POST http://localhost:8112/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}'
+
+# Search food
+curl -X POST http://localhost:8112/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "search_food", "arguments": {"query": "chicken"}}}'
+```
+
+## Troubleshooting
+
+```bash
+# Service status
+systemctl status diet-mcp-server
+
+# Logs
+journalctl -u diet-mcp-server -n 50
+
+# Check database
+sqlite3 ~/.local/share/diet-db/diet.db "SELECT COUNT(*) FROM foods"
+
+# Check port
+ss -tlnp | grep 8112
+
+# Restart
+systemctl restart diet-mcp-server
+```
+
+## Notes
+
+- Database is shared with the CLI `diet` command — changes in LibreChat are reflected in CLI and vice versa
+- Nutrition values are stored per 100g and automatically scaled to requested portion size
+- Handles plural forms (potatoes/potato, foods/food)
+
+---
+
+**Last Updated**: 2026-03-06
+
+---
+*[Home](../README.md) | [AI Overview](overview.md)*

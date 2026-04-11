@@ -1,0 +1,155 @@
+---
+title: "️ Host Specifications"
+description: "*Detailed documentation for all NixOS hosts in the infrastructure*"
+---
+
+## 🎯 Overview
+
+This section provides comprehensive documentation for each host in the NixOS infrastructure, including hardware specifications, network configuration, installed services, and operational procedures.
+
+---
+
+## 📚 Host Index
+
+| Host | Role | Status | Documentation |
+|------|------|--------|---------------|
+| **[cmos](cmos.md)** | Desktop Workstation | ✅ Active | AI/ML, Gaming, Development |
+| **[misc](misc.md)** | Primary Server | ✅ Active | Web Services, Authentication, Monitoring |
+| **[jimmich](jimmich.md)** | Secondary Server | ✅ Active | File Services, Backup |
+
+---
+
+## 🌐 Network Overview
+
+### IP Address Allocation
+
+| Host | IP Address | Interface | Connection |
+|------|-----------|-----------|------------|
+| **cmos** | `192.168.1.2/24` | enp8s0 | Static (Ethernet) |
+| **misc** | `192.168.1.5/24` | enp3s0f0 | Static (Ethernet) |
+| **jimmich** | `192.168.1.10/24` | enp8s0 | Static (Ethernet) |
+
+### Gateway & DNS
+- **Gateway**: `192.168.1.1` (Router)
+- **DNS**: `192.168.1.1` (Router forwarding to Cloudflare)
+- **Domain**: `home.arpa` (local network)
+
+---
+
+## 🏗️ Host Roles
+
+### 🖥️ Desktop Workstation (cmos)
+**Primary Use**: Development, AI/ML workloads, gaming
+
+**Key Features**:
+- AMD Radeon RX 6800 XT with ROCm for AI acceleration
+- 32GB RAM + 16GB swap for large AI models
+- KDE Plasma 6 desktop environment
+- Ollama for local LLM inference
+- Gaming stack (Steam, Wine, Lutris)
+
+**Services**:
+- Ollama AI server (port 11434)
+- KDE Remote Desktop (port 8002)
+- GPU monitoring (radeontop-web)
+- Claude Code WebUI (port 8084)
+
+---
+
+### 🌐 Primary Server (misc)
+**Primary Use**: Web services, authentication, reverse proxy
+
+**Key Features**:
+- Intel server platform (Mac Mini)
+- Central authentication and service hosting
+- Public-facing services via Traefik
+- PostgreSQL database for multiple services
+
+**Services**:
+- Traefik reverse proxy (80/443)
+- Keycloak identity provider + OAuth2-proxy
+- SABnzbd/Radarr/Sonarr media automation
+- Cockpit system management
+- Clear NDR (Suricata IDS)
+- Security Dashboard
+- NixDocs documentation site
+- PrivateBin encrypted pastebin
+- Memos note-taking
+
+---
+
+### 💾 Secondary Server (jimmich)
+**Primary Use**: File services, backup, storage
+
+**Key Features**:
+- High storage capacity
+- File sharing via Samba
+- Backup target for other hosts
+- Minimal services (server-only)
+
+**Services**:
+- Samba file shares
+- SSH access
+- Cockpit dashboard
+
+---
+
+## 🔄 Service Distribution
+
+### By Function
+
+**Authentication & Security**:
+- Keycloak + OAuth2-proxy (misc)
+- SSH OAuth device flow (cmos)
+- Fail2ban intrusion prevention (misc)
+
+**Web Services**:
+- Traefik reverse proxy (misc)
+- NixDocs (misc)
+- PrivateBin (misc)
+- Memos (misc)
+- Security Dashboard (misc)
+
+**Desktop Environments**:
+- KDE Plasma 6 (cmos)
+
+**AI & ML**:
+- Ollama with ROCm (cmos)
+
+**File Services**:
+- Samba shares (all hosts)
+- Filebrowser web UI (misc)
+
+**Monitoring**:
+- Cockpit (all hosts)
+- Glances (misc)
+- radeontop-web (cmos)
+
+---
+
+## 📖 Detailed Host Documentation
+
+For complete specifications, configuration details, and operational procedures, see individual host documentation:
+
+- **[cmos.md](cmos.md)** - Desktop workstation with AI/ML and gaming
+- **[misc.md](misc.md)** - Primary server with web services
+- **[jimmich.md](jimmich.md)** - Secondary server for file services
+
+---
+
+## 🔗 Related Documentation
+
+- **[Infrastructure Overview](../README.md)** - High-level architecture
+- **[Bootstrap Methods](../operations/bootstrap-overview.md)** - Fresh host deployment
+- **[Network Security](../security/network-security-overview.md)** - Firewall and security
+- **[Services Index](../services/overview.md)** - All deployed services
+
+---
+
+**Last Updated**: 2026-01-10
+**Maintained By**: Infrastructure Team
+**Next Review**: 2025-11-03
+
+---
+
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🏗️ [Infrastructure](../README.md)*

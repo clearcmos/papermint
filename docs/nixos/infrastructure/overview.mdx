@@ -1,0 +1,262 @@
+---
+title: "️ Infrastructure & Architecture"
+description: "*Complete system architecture and deployment documentation*"
+---
+
+## 🎯 Overview
+
+This section covers the foundational architecture of our NixOS infrastructure, including multi-host deployment, network topology, and service distribution across the environment.
+
+### 🏠 Host Architecture
+
+```
+Internet → Cloudflare → misc.bedrosn.com (Traefik) → Services
+                           ↓
+    cmos.home.arpa ←→ misc.home.arpa ←→ jimmich.home.arpa
+         ↓                 ↓                  ↓
+    [Desktop]         [Services]          [Services]
+    [AI/GPU]         [Auth/Proxy]        [Media/Files]
+    [Gaming]         [Monitoring]        [Backup]
+```
+
+---
+
+## 📚 Documentation Index
+
+### 🖥️ Host Specifications
+
+| Host | Role | Hardware | Primary Services | Documentation |
+|------|------|----------|------------------|---------------|
+| **cmos** | Desktop Workstation | AMD RX 6800 XT, 32GB RAM | KDE, AI/ML, Gaming, Development | [Details](hosts/cmos.md) |
+| **misc** | Primary Server | Mac Mini (Intel) | Traefik, Keycloak, Web Services | [Details](hosts/misc.md) |
+| **jimmich** | Secondary Server | High Storage Capacity | File Services, Backup | [Details](hosts/jimmich.md) |
+
+**Complete Host Documentation**: [hosts/](hosts/README.md)
+
+### 🌐 Network Architecture
+
+**Internal Network**: `192.168.1.0/24`
+- **Gateway**: `192.168.1.1` (Router)
+- **DNS**: Cloudflare (1.1.1.1, 1.0.0.1)
+- **Local Discovery**: mDNS/Avahi
+
+**Host IP Assignments**:
+- **cmos.home.arpa**: `192.168.1.2/24` (static)
+- **misc.home.arpa**: `192.168.1.5/24` (static)
+- **jimmich.home.arpa**: `192.168.1.10/24` (static)
+
+### 🔌 Network Interfaces
+
+**Per-Host Interface Configuration**:
+- **cmos**: `enp8s0` (PCIe network adapter)
+- **misc**: `enp3s0f0` (Server-grade dual-port NIC)
+- **jimmich**: `enp8s0` (Standard ethernet)
+
+⚠️ **Critical**: Network interfaces are configured **per-host** in `hosts/*/default.nix`. Always verify with `ip link` before configuration changes.
+
+### 🚪 Port Allocation
+
+#### Core Infrastructure Ports (All Hosts)
+- **22/tcp** - SSH
+- **139/tcp, 445/tcp** - SMB/CIFS file sharing
+- **9090/tcp** - Cockpit web management
+- **137/udp, 138/udp** - NetBIOS
+- **5353/udp, 5355/udp** - mDNS/LLMNR
+
+#### Host-Specific Ports
+**CMOS (Desktop)**:
+- **8000/tcp** - Keeper app API
+- **8001/tcp** - radeontop-web GPU monitoring
+- **8002/tcp** - KDE Remote Desktop
+- **8084/tcp** - Claude Code WebUI
+- **11434/tcp** - Ollama AI server
+- **27036/tcp** - Steam Remote Play
+- **47984-47990/tcp** - Sunshine streaming *(when enabled)*
+
+**Server Hosts (misc, jimmich)**:
+- **80/tcp, 443/tcp** - Traefik HTTP/HTTPS
+
+---
+
+## 🔄 Service Distribution
+
+### 🖥️ Desktop Services (cmos)
+- **Desktop Environment**: KDE Plasma 6
+- **AI Services**: Ollama with ROCm acceleration
+- **Gaming**: Steam, Lutris, Wine
+- **Development**: VSCode, Git, Docker
+- **Remote Access**: xrdp, KDE Connect
+
+### 🌐 Web Services (misc)
+- **Reverse Proxy**: Traefik with Let's Encrypt
+- **Authentication**: Keycloak + OAuth2 Proxy
+- **Monitoring**: Glances, Security Dashboard
+- **File Management**: Filebrowser web interface
+- **System Management**: Cockpit dashboard
+- **Network Security**: Clear NDR (Suricata IDS), Fail2ban
+
+### 💾 Storage Services (jimmich)
+- **File Shares**: Samba/CIFS network shares
+- **Backup Target**: Central backup storage for other hosts
+- **Minimal Services**: Server-only (no desktop)
+
+---
+
+## 🛠️ Deployment Architecture
+
+### 🔄 Flake-Based Deployment
+
+**Structure**:
+```
+/etc/nixos/
+├── flake.nix              # Host definitions and inputs
+├── hosts/                 # Host-specific configurations
+│   ├── cmos/             # Desktop workstation
+│   ├── misc/             # Primary server
+│   └── jimmich/          # Media server
+├── modules/               # Shared configuration modules
+│   ├── core/             # Essential modules (all hosts)
+│   ├── desktop/          # GUI modules (cmos)
+│   └── services/         # Server modules (misc, jimmich)
+└── secrets/              # Encrypted secrets (agenix)
+```
+
+### 🔐 Secret Management Architecture
+
+**Agenix Integration**:
+- **Public Keys**: Per-host age keys in `keys/`
+- **Encrypted Secrets**: In `secrets/` directory
+- **Shared Secrets**: Available to multiple hosts
+- **Host-Specific**: Secrets for individual hosts
+
+### 🔧 Build Commands
+
+```bash
+# Local host rebuild
+nixos-rebuild switch --flake .#$(hostname)
+
+# Remote host rebuild
+nixos-rebuild switch --flake .#misc --target-host misc.home.arpa
+
+# Test configuration
+nixos-rebuild test --flake .#<host>
+
+# Check changes
+nixos-rebuild dry-run --flake .#<host>
+```
+
+---
+
+## 🌐 DNS Management
+
+### 📋 Declarative DNS
+- **Single Source**: `modules/services/domains.nix`
+- **Cloudflare Integration**: Automated DNS record management
+- **Traefik Integration**: Automatic certificate generation
+- **Service Discovery**: mDNS for local services
+
+### 🏷️ Domain Structure
+```
+bedrosn.com
+├── glances.bedrosn.com      # System monitoring
+├── security.bedrosn.com     # Security dashboard
+├── files.bedrosn.com        # File browser
+├── keycloak.bedrosn.com     # Keycloak Identity Provider
+├── suricata.bedrosn.com     # Network IDS (Clear NDR)
+└── <service>.bedrosn.com    # Additional services
+```
+
+---
+
+## 🔒 Security Architecture
+
+### 🛡️ Defense in Depth
+1. **Network Level**: Cloudflare WAF + DDoS protection
+2. **Proxy Level**: Traefik with security headers
+3. **Application Level**: Keycloak + OAuth2 Proxy
+4. **System Level**: NixOS isolation + systemd hardening
+
+### 🔑 Authentication Flow
+```
+User → Cloudflare → Traefik → OAuth2 Proxy → Keycloak OIDC → Service
+```
+
+### 🏠 LAN vs WAN Access
+- **LAN Access**: Direct bypass for `192.168.1.1/32`
+- **WAN Access**: Full authentication required
+- **Emergency Access**: Documented bypass procedures
+
+---
+
+## 📊 Monitoring Architecture
+
+### 📈 System Monitoring
+- **Cockpit**: Web-based system management
+- **Glances**: Real-time system metrics
+- **Security Dashboard**: Service status and security posture
+- **Systemd**: Service health monitoring
+
+### 🔍 Log Management
+- **Journald**: Centralized logging
+- **Log Rotation**: Automatic cleanup
+- **Emergency Procedures**: Log analysis without session crashes
+
+---
+
+## 🚀 Performance Optimization
+
+### ⚡ Gaming Optimization (cmos)
+- **GPU Scheduling**: AI and gaming workload balance
+- **VRAM Management**: Reserved 6-7GB for gaming
+- **CPU Allocation**: Controlled AI thread usage
+- **Storage**: NVMe SSD for games and AI models
+
+### 🌐 Network Optimization
+- **CDN**: Cloudflare for global performance
+- **Compression**: Gzip and Brotli compression
+- **HTTP/2**: Modern protocol support
+- **Caching**: Optimized cache headers
+
+---
+
+## 🔧 Maintenance Procedures
+
+### 📅 Regular Maintenance
+- **Daily**: Service health checks via Cockpit
+- **Weekly**: Security log review, backup verification
+- **Monthly**: Performance optimization, documentation updates
+- **Quarterly**: Security audit, disaster recovery testing
+
+### 🚨 Emergency Procedures
+- **Service Outages**: Restart procedures and fallbacks
+- **Security Incidents**: Containment and recovery
+- **Hardware Failures**: Disaster recovery protocols
+- **Configuration Issues**: Rollback procedures
+
+---
+
+## 📖 Related Documentation
+
+### 🔐 Security
+- **[Authentication Systems](../security/authentication/README.md)** - Keycloak + OAuth2 Proxy
+- **[Secret Management](../security/secrets/README.md)** - Agenix and encryption
+- **[Network Security](../security/network-security-overview.md)** - Traefik and TLS
+
+### 🌐 Services
+- **[Web Services](../services/web-services-overview.md)** - Web apps, file sharing
+- **[Monitoring Services](../services/monitoring/README.md)** - Cockpit, Glances
+- **[File Services](../services/file-services-overview.md)** - Samba, cloud sync
+
+### 🛠️ Operations
+- **[Fresh Deployment](../operations/fresh.md)** - New host setup
+- **[Best Practices](../operations/practices.md)** - Operational guidelines
+- **[Migration Guide](../operations/home-manager-migration.md)** - System transitions
+
+---
+
+**Last Updated**: 2025-10-09
+**Maintained By**: Infrastructure Team
+**Review Schedule**: Monthly infrastructure review
+
+---
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🖥️ [Hosts](hosts/README.md) | 🔐 [Security](../security/overview.md)*

@@ -1,0 +1,372 @@
+---
+title: "Twitch TUI - Terminal Twitch Chat Client"
+description: "*Watch and interact with Twitch streams from your terminal*"
+---
+
+## 🎯 Overview
+
+Twitch TUI (`twt`) is a lightweight terminal-based Twitch chat client that allows you to watch and participate in Twitch chat directly from the command line. Perfect for dual-monitor setups where you want chat in a terminal while watching the stream in a browser.
+
+**Key Features**:
+- 💬 **Chat Interaction**: Send and receive Twitch chat messages
+- 🎨 **Emote Support**: Display Twitch, BTTV, 7TV, and FFZ emotes (requires Kitty terminal)
+- 🏷️ **Badges**: Show user badges (subscriber, moderator, etc.)
+- 📊 **Dashboard**: Quick access to favorite channels
+- 🎨 **Themes**: Multiple color palettes (configured: pastel)
+- 📝 **Chat Logs**: Automatic logging with 7-day retention
+
+---
+
+## 🔧 Configuration
+
+### 📁 **File Locations**
+
+```
+~/.config/twt/config.toml              # Main configuration
+~/.local/share/twitch-tui/channels.txt # Favorite channels list
+~/.local/share/twitch-tui/state.json   # Application state
+~/.local/share/twitch-tui/logs/        # Chat logs (7-day retention)
+~/.local/bin/twitch-tui                # Wrapper script with OAuth token
+```
+
+### 🔐 **Authentication**
+
+Twitch TUI requires an OAuth access token from Twitch. The token is **securely stored in agenix** and loaded automatically by the wrapper script.
+
+**Token Format**: `oauth:xxxxxxxxxxxxxxxxxxxxxxxxxxxxx`
+
+**Obtaining a Token**:
+1. Visit: https://twitchapps.com/tmi/
+2. Authorize with your Twitch account
+3. Copy the OAuth token (format: `oauth:xxxxxx...`)
+4. Store in agenix:
+   ```bash
+   echo "oauth:YOUR_TOKEN_HERE" | \
+     ( cd /etc/nixos/secrets && nix run github:ryantm/agenix -- -e twitch-access-token.age -i ../keys/cmos-agenix.key )
+
+   # Backup to 1Password
+   python3 /etc/nixos/scripts/backup-secrets.py
+   ```
+
+### ⚙️ **Settings**
+
+**Current Configuration**:
+- **Username**: `clearcmos`
+- **Default Channel**: `lana_lux`
+- **Favorite Channels**: `lana_lux`, `payo`
+- **Color Palette**: Pastel
+- **Message Limit**: 150 messages in buffer
+- **Chat Logs**: Kept for 7 days
+
+**Emote Support** (requires Kitty terminal):
+- ✅ Twitch emotes
+- ✅ BetterTTV (BTTV) emotes
+- ✅ 7TV emotes
+- ✅ FrankerFaceZ (FFZ) emotes
+
+---
+
+## 🚀 Usage
+
+### 🎬 **Launching Twitch TUI**
+
+```bash
+# Launch with default channel (lana_lux)
+twitch-tui
+
+# Launch and join specific channel
+twitch-tui -c <channel-name>
+
+# Examples
+twitch-tui -c xqc
+twitch-tui -c shroud
+twitch-tui -c payo
+```
+
+**Alternative Command**:
+```bash
+# Use the original binary name
+twt -c <channel-name>
+```
+
+### ⌨️ **Key Shortcuts**
+
+**Navigation**:
+- `Tab` - Switch between dashboard and chat
+- `Esc` - Go back / Close menus
+- `q` - Quit application
+- `↑/↓` - Scroll through messages
+- `Page Up/Down` - Scroll faster
+
+**Chat**:
+- `i` - Enter insert mode (type a message)
+- `Enter` - Send message (in insert mode)
+- `Esc` - Exit insert mode
+- `/` - Enter command mode
+
+**Channels**:
+- `c` - Change channel
+- `f` - View favorite channels
+- `s` - Search for channels
+
+**Other**:
+- `?` - Show help
+- `r` - Refresh view
+- `l` - View logs
+
+### 💬 **Sending Messages**
+
+1. Press `i` to enter insert mode
+2. Type your message
+3. Press `Enter` to send
+4. Press `Esc` to exit insert mode
+
+**Twitch Commands** (start with `/`):
+```
+/me <message>        - Send action message (colored)
+/timeout <user> <s>  - Timeout a user (moderator only)
+/ban <user>          - Ban a user (moderator only)
+/clear               - Clear chat (moderator only)
+/color <color>       - Change your username color
+/followers           - Enable followers-only mode (mod only)
+/slow <seconds>      - Enable slow mode (mod only)
+```
+
+---
+
+## 🎨 Customization
+
+### 📝 **Editing Configuration**
+
+```bash
+# Edit main config
+nano ~/.config/twt/config.toml
+
+# Edit favorite channels
+nano ~/.local/share/twitch-tui/channels.txt
+```
+
+### 🎨 **Available Palettes**
+
+Change the `palette` setting in `config.toml`:
+- `pastel` (current)
+- `default`
+- `nord`
+- `dracula`
+- `gruvbox`
+
+**Example**:
+```toml
+[frontend]
+palette = "nord"
+```
+
+### 📺 **Adding Favorite Channels**
+
+**Method 1: Edit channels.txt**:
+```bash
+nano ~/.local/share/twitch-tui/channels.txt
+# Add one channel per line
+```
+
+**Method 2: Edit config.toml**:
+```toml
+[twitch]
+favorite_channels = ["lana_lux", "payo", "xqc", "shroud"]
+```
+
+### 📅 **Chat Log Retention**
+
+Adjust log retention period:
+```toml
+[storage]
+logs_time_until_erasure = 14  # Keep logs for 14 days
+```
+
+Disable logging:
+```toml
+[storage]
+logs_directory = ""  # Empty string disables logging
+```
+
+---
+
+## 🎮 Use Cases
+
+### 🖥️ **Dual Monitor Setup**
+
+**Perfect for**:
+- Stream on one monitor (browser)
+- Chat on other monitor (terminal)
+- Low resource usage compared to browser chat
+
+**Example Workflow**:
+```bash
+# Terminal 1: Watch stream in browser
+brave https://twitch.tv/lana_lux
+
+# Terminal 2: Chat with Twitch TUI
+twitch-tui -c lana_lux
+```
+
+### 📊 **Stream Monitoring**
+
+Monitor multiple channels:
+```bash
+# Terminal splits with tmux
+tmux new-session \; \
+  send-keys 'twitch-tui -c lana_lux' C-m \; \
+  split-window -h \; \
+  send-keys 'twitch-tui -c payo' C-m
+```
+
+### 📝 **Chat Logging**
+
+All chat is automatically logged to:
+```
+~/.local/share/twitch-tui/logs/
+```
+
+**View logs**:
+```bash
+# Recent logs
+ls -lt ~/.local/share/twitch-tui/logs/ | head
+
+# View specific channel log
+cat ~/.local/share/twitch-tui/logs/lana_lux_YYYY-MM-DD.log
+
+# Search chat history
+grep -i "keyword" ~/.local/share/twitch-tui/logs/*.log
+```
+
+---
+
+## 🐛 Troubleshooting
+
+### ❌ **Authentication Failures**
+
+**Problem**: "Invalid OAuth token" or can't connect to chat
+
+**Solutions**:
+1. Verify token is correct:
+   ```bash
+   cat /run/agenix/twitch-access-token
+   # Should start with "oauth:" and have ~30 characters after
+   ```
+
+2. Regenerate token:
+   - Visit https://twitchapps.com/tmi/
+   - Revoke old token
+   - Generate new token
+   - Update agenix secret
+
+3. Check token permissions:
+   - Token must have `chat:read` and `chat:edit` scopes
+
+### 🎨 **Emotes Not Displaying**
+
+**Problem**: Emotes show as `:emoji_name:` instead of images
+
+**Solution**: **Use Kitty terminal**
+```bash
+# Emotes only work in Kitty terminal
+kitty -e twitch-tui -c lana_lux
+```
+
+**Why**: Twitch TUI uses Kitty's graphics protocol for emote rendering. Other terminals don't support this feature.
+
+### 🔌 **Connection Issues**
+
+**Problem**: Can't connect to Twitch chat
+
+**Solutions**:
+1. Check internet connection:
+   ```bash
+   ping twitch.tv
+   ```
+
+2. Verify Twitch API status:
+   - https://status.twitch.tv
+
+3. Check firewall:
+   ```bash
+   # Twitch uses ports 80, 443, 6667
+   sudo firewall-cmd --list-ports
+   ```
+
+### 📁 **Config Not Loading**
+
+**Problem**: Changes to config don't apply
+
+**Solutions**:
+1. Verify config syntax:
+   ```bash
+   cat ~/.config/twt/config.toml
+   # Check for TOML syntax errors
+   ```
+
+2. Restart application:
+   ```bash
+   # Exit and relaunch twitch-tui
+   q  # (in app)
+   twitch-tui
+   ```
+
+3. Check file permissions:
+   ```bash
+   ls -la ~/.config/twt/config.toml
+   # Should be owned by nicholas:users
+   ```
+
+---
+
+## 🔒 Security
+
+### 🔐 **OAuth Token Protection**
+
+- ✅ **Encrypted Storage**: Token stored in agenix-encrypted secret
+- ✅ **Not in Git**: Token never committed to repository
+- ✅ **Secure Access**: Loaded at runtime from `/run/agenix/`
+- ✅ **Limited Scope**: Token only has chat read/write permissions
+
+**Token Security Best Practices**:
+1. Never share your OAuth token
+2. Regenerate token if compromised
+3. Revoke old tokens when generating new ones
+4. Don't commit config files with tokens to git
+
+### 🔍 **Token Scope**
+
+The OAuth token has these permissions:
+- `chat:read` - Read chat messages
+- `chat:edit` - Send chat messages
+- ❌ No account management permissions
+- ❌ No payment/subscription permissions
+
+---
+
+## 📖 Related Documentation
+
+- **[Kitty Terminal](../desktop/kitty.md)** - Required for emote display
+- **[Desktop Overview](../desktop/overview.md)** - Desktop environment setup
+- **[Secret Management](../security/secrets-agenix.md)** - Agenix workflow
+- **[Brave Configuration](../desktop/brave.md)** - Twitch web app
+
+---
+
+## 🔗 External Resources
+
+- **GitHub**: https://github.com/Xithrius/twitch-tui
+- **Twitch OAuth**: https://twitchapps.com/tmi/
+- **Twitch API Docs**: https://dev.twitch.tv/docs/api
+- **Emote Support**: Requires Kitty terminal
+
+---
+
+**Last Updated**: 2025-10-20
+**Command**: `twitch-tui` or `twt`
+**Configuration**: `~/.config/twt/config.toml`
+**Default Channel**: lana_lux
+
+---
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🖥️ [Desktop](../desktop/overview.md) | 🐱 [Kitty](../desktop/kitty.md)*

@@ -1,0 +1,280 @@
+---
+title: "Google Workspace Automation Suite"
+description: "Technical Brief - sanitized, no proprietary details"
+---
+
+::: sanitize-note
+This document is sanitized. No company names, API keys, internal system names, or proprietary code. All details describe architecture, patterns, and decisions - not source code.
+:::
+
+:::: section
+::: pitch
+Built a suite of **28+ production tools** that automate the hardest parts of Google Workspace administration - email restoration with conversation threading, data lifecycle management backed by BigQuery, drive ownership transfers that preserve every permission, and cross-system audit tooling. These aren\'t wrappers around admin console buttons. They solve problems the admin console can\'t.
+:::
+::::
+
+::::::::::::: section
+## Architecture
+
+:::::::::::: card
+### Tool Suite Layers
+
+::::::::::: layers
+:::: {.layer .layer-api}
+[Google APIs + Identity]{.layer-title} [- Domain-wide delegation via service account. Credentials from secret manager at runtime. Impersonation per-user as needed.]{.layer-desc}
+
+::: layer-items
+Gmail API Drive API Calendar API Admin SDK Vault API Sheets API BigQuery
+:::
+::::
+
+:::: {.layer .layer-process}
+[Processing Engine]{.layer-title} [- Thread-safe concurrent execution with rate limiting. Batch HTTP requests where supported.]{.layer-desc}
+
+::: layer-items
+ThreadPoolExecutor Token bucket rate limiter Batch API requests Exponential backoff
+:::
+::::
+
+:::: {.layer .layer-data}
+[Data Integration]{.layer-title} [- Cross-API correlation. Combines identity provider data with Google data for enriched reporting.]{.layer-desc}
+
+::: layer-items
+Okta user profiles BigQuery last-access GCS MBOX exports ACL snapshots
+:::
+::::
+
+:::: {.layer .layer-output}
+[Output & Audit]{.layer-title} [- Results written to Sheets, CSV, or filesystem. Full audit trails for compliance.]{.layer-desc}
+
+::: layer-items
+Google Sheets reports CSV exports Progress logging Checkpoint/resume
+:::
+::::
+:::::::::::
+::::::::::::
+:::::::::::::
+
+::::::::::::::::::::::::::::: section
+## Spotlight: Key Tools
+
+:::::::::::::::: card
+### Vault Matter Restoration
+
+Restores email from Google Vault back into a user\'s mailbox with full conversation threading intact.
+
+::::::::::::::: workflow
+::::: wf-step
+::: wf-num
+1
+:::
+
+::: wf-content
+#### Download MBOX from Cloud Storage
+
+Extracts nested ZIP archives from Vault export. Optional caching to avoid re-downloading.
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+2
+:::
+
+::: wf-content
+#### Parse and reconstruct threads
+
+Reads RFC2822 headers (In-Reply-To, References) and uses topological sorting so parent messages are inserted before replies.
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+3
+:::
+
+::: wf-content
+#### Insert via Gmail API
+
+Uses messages.insert() (not send) at 100 msg/min. Rewrites Message-IDs to map old thread references to new Gmail thread IDs.
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+4
+:::
+
+::: wf-content
+#### Checkpoint and verify
+
+JSON checkpoint auto-saves progress. If interrupted, resumes from exact point. Real-time speed metrics and ETA.
+:::
+:::::
+:::::::::::::::
+::::::::::::::::
+
+::::::::::::: card
+### Archive Cleanup Engine
+
+Data-driven cleanup of stale email and Drive content. Combines Gmail, Drive, BigQuery, and Sheets in one workflow.
+
+:::::::::::: workflow
+::::: wf-step
+::: wf-num
+1
+:::
+
+::: wf-content
+#### Query BigQuery for last-access data
+
+Identifies Drive files and folders that haven\'t been touched in months/years.
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+2
+:::
+
+::: wf-content
+#### Audit Gmail labels and Drive folders
+
+Concurrent scanning with thread-local service instances. Token bucket rate limiter at 2.0 ops/sec to stay under quota.
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+3
+:::
+
+::: wf-content
+#### Generate reports and outreach
+
+Writes combined results to Google Sheets. Auto-generates personalized emails to file owners about inactive content.
+:::
+:::::
+::::::::::::
+:::::::::::::
+
+::: card
+### Drive Ownership Transfer
+
+Transfers ownership of entire folder trees while preserving every permission. Critical for offboarding.
+
+- Recursive file enumeration across nested folders with pagination
+- Exports full ACL snapshot before transfer - user, group, and domain permissions
+- Multi-credential pattern: one service account impersonates current owner, another acts as admin
+- Restores permissions after transfer with duplicate detection to avoid errors
+- Comprehensive audit report with URLs for every transferred file
+:::
+:::::::::::::::::::::::::::::
+
+::::::::::::::::::: section
+## Key Technical Decisions
+
+:::::: card
+### Thread Reconstruction via Topological Sort
+
+::: decision
+[Problem]{.decision-label .problem} [Google Vault exports MBOX files, but Gmail\'s threading depends on insertion order. If you restore a reply before its parent, it creates a new thread instead of joining the existing one.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [Parse RFC2822 headers (In-Reply-To, References) to build a dependency graph, then topologically sort messages so parents always go in first. Rewrite Message-ID mappings on the fly as Gmail assigns new IDs.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [Restored emails land in the correct conversation threads. Users see their mailbox as it was, not a mess of orphaned messages.]{.decision-text}
+:::
+::::::
+
+:::::: card
+### Thread-Local Service Instances for Concurrency
+
+::: decision
+[Problem]{.decision-label .problem} [Google API client objects are not thread-safe. Sharing them across ThreadPoolExecutor workers causes intermittent request failures and corrupted state.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [Each worker thread creates its own API service instance using thread-local storage. Combined with a custom token bucket rate limiter to stay under Gmail\'s 15,000 quota units/minute.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [Concurrent processing without shared-state bugs. Rate limiter prevents quota exhaustion without sacrificing throughput.]{.decision-text}
+:::
+::::::
+
+:::::: card
+### BigQuery-Backed Data Lifecycle
+
+::: decision
+[Problem]{.decision-label .problem} [Deciding which files to archive or delete based on \"nobody uses this\" requires actual usage data, not just modified dates. Drive\'s \"last viewed\" isn\'t exposed in the standard API.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [Query BigQuery audit logs for last-access timestamps, cross-reference with Drive API metadata, and combine into a single Sheets report with auto-generated outreach to owners.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [Cleanup decisions based on real access data, not guesswork. Owners get personalized emails before anything is removed.]{.decision-text}
+:::
+::::::
+
+:::::: card
+### Multi-Credential Impersonation
+
+::: decision
+[Problem]{.decision-label .problem} [Transferring Drive ownership requires acting as the current owner (to grant), while restoring permissions requires admin access. One credential can\'t do both.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [Domain-wide delegation with per-operation impersonation. Same service account, different impersonated users depending on the operation. Credentials retrieved from secret manager at runtime.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [Clean separation of privilege. No admin credentials stored anywhere. Audit logs show exactly which user was impersonated for each action.]{.decision-text}
+:::
+::::::
+:::::::::::::::::::
+
+:::::::::::: section
+## Talking Points
+
+::::::::::: {.card .stories}
+### \"Tell me about this project\"
+
+:::: talk-point
+::: answer
+I built a suite of 28+ tools that automate the operational side of Google Workspace - the stuff the admin console doesn\'t do. The biggest one is an **email restoration system that preserves conversation threading**. When you export email from Google Vault and re-import it, you normally lose all threading - every message becomes its own conversation. I built a pipeline that parses RFC2822 headers, topologically sorts messages so parents insert before replies, and rewrites Message-IDs on the fly. The result is a restored mailbox that looks exactly like the original.
+:::
+::::
+
+### \"What was the hardest part?\"
+
+:::: talk-point
+::: answer
+Concurrency with the Google APIs. The client objects aren\'t thread-safe, so sharing them across threads causes silent failures. I had to use **thread-local storage for API service instances** combined with a custom token bucket rate limiter to stay under quota. The archive cleanup tool was especially tricky - it combines Gmail, Drive, BigQuery, and Sheets APIs in one workflow, each with different rate limits, and needs to handle quota errors, precondition failures, and network timeouts differently.
+:::
+::::
+
+### \"What problem does this solve that the admin console doesn\'t?\"
+
+:::: talk-point
+::: answer
+Most of these. The admin console can transfer file ownership one file at a time. My tool walks entire folder trees, snapshots all permissions, transfers ownership, and restores every ACL - user, group, and domain-level. The archive cleanup uses BigQuery for real access data, not just modified dates. The Vault restoration preserves threading. These are the gaps between what Google provides and what IT operations actually needs at scale.
+:::
+::::
+
+### \"What did you learn?\"
+
+:::: talk-point
+::: answer
+That **the hard part of API automation isn\'t calling the API - it\'s handling the failure modes**. Rate limits, quota exhaustion, precondition errors, thread safety, session expiration. The happy path is 20% of the code. The other 80% is making it reliable enough that you can kick off a multi-hour operation and walk away. Also learned that BigQuery is underused for IT operations - most teams don\'t realize they have detailed access logs sitting there.
+:::
+::::
+:::::::::::
+::::::::::::
+
+Project brief - not for distribution. All details sanitized.

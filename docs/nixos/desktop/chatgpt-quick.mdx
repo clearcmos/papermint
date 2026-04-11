@@ -1,0 +1,203 @@
+---
+title: "ChatGPT Quick Input"
+description: "*System-wide keyboard shortcut for instant ChatGPT prompts via Chrome DevTools Protocol*"
+---
+
+## 🎯 Overview
+
+ChatGPT Quick Input provides a **Meta+F12** keyboard shortcut that opens a GTK4/libadwaita popup for text input, then injects the text directly into ChatGPT via Chrome DevTools Protocol (CDP). This bypasses Wayland's input-injection restrictions that prevent traditional keyboard simulation tools from working.
+
+### Why CDP?
+
+On KDE Plasma 6 Wayland, tools like `ydotool`, `dotool`, and `wtype` cannot inject keyboard input into native Wayland applications like Brave browser. KWin intentionally does not forward uinput events to Wayland clients. CDP solves this by operating **inside** the browser's JavaScript context.
+
+---
+
+## 🚀 Quick Start
+
+### Usage
+
+1. Press **Meta+F12** from anywhere
+2. Type your prompt in the GTK4 popup
+3. Press **Ctrl+Enter** or click **Send**
+4. ChatGPT opens (or activates) and receives your prompt in a new conversation
+
+### First Run
+
+On first use, the system:
+1. Launches Brave with a dedicated CDP profile
+2. Opens `https://chatgpt.com/` in app mode (maximized, no browser chrome)
+3. You may need to log in to ChatGPT once
+
+---
+
+## 🏗️ Architecture
+
+```
+Meta+F12 (KWin shortcut)
+   └── D-Bus call to systemd
+          └── chatgpt-quick.service (user)
+                 └── chatgpt-router (bash)
+                        ├── chatgpt-quick (GTK4 popup) → get text
+                        ├── Launch Brave with CDP flags (if not running)
+                        ├── kdotool windowactivate (visual focus)
+                        └── chatgpt-cdp-send (Python CDP client)
+                               ├── WebSocket to Brave CDP (port 9222)
+                               ├── Page.navigate to chatgpt.com/ (new chat)
+                               ├── Runtime.evaluate to focus textarea
+                               ├── Input.insertText to inject prompt
+                               └── Runtime.evaluate to click send button
+```
+
+### Components
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| **KWin Script** | `~/.local/share/kwin/scripts/chatgptquick/` | Registers Meta+F12 shortcut |
+| **Systemd Service** | `chatgpt-quick.service` (user) | Orchestrates the workflow |
+| **Router Script** | `chatgpt-router` | Manages browser and CDP injection |
+| **GTK4 Popup** | `chatgpt-quick` | Text input UI |
+| **CDP Client** | `chatgpt-cdp-send` | Python WebSocket client for CDP |
+| **Browser Profile** | `~/.local/share/brave-chatgpt-cdp/` | Dedicated Brave profile |
+| **NixOS Module** | `/etc/nixos/modules/desktop/chatgpt-quick.nix` | Complete configuration |
+
+---
+
+## 🔧 Technical Details
+
+### Browser Launch Flags
+
+```bash
+brave \
+  --remote-debugging-port=9222 \
+  --remote-debugging-address=127.0.0.1 \
+  --remote-allow-origins="http://127.0.0.1:9222" \
+  --user-data-dir="~/.local/share/brave-chatgpt-cdp" \
+  --start-maximized \
+  --app=https://chatgpt.com/
+```
+
+| Flag | Purpose |
+|------|---------|
+| `--remote-debugging-port=9222` | Enable CDP on localhost:9222 |
+| `--remote-debugging-address=127.0.0.1` | Bind CDP to localhost only |
+| `--remote-allow-origins` | Allow WebSocket connections from localhost |
+| `--user-data-dir` | Dedicated profile (separate from main Brave) |
+| `--start-maximized` | Open maximized window |
+| `--app` | PWA-style mode (no browser chrome) |
+
+### CDP Text Injection Flow
+
+1. **Connect** - WebSocket to `ws://127.0.0.1:9222`
+2. **Find tab** - Search for ChatGPT tab via `/json` endpoint
+3. **Navigate** - If in existing conversation (`/c/`), navigate to `chatgpt.com/` for fresh chat
+4. **Focus** - JavaScript to find and focus `#prompt-textarea` (ProseMirror contenteditable)
+5. **Inject** - `Input.insertText` API for reliable text injection
+6. **Send** - Click send button via JavaScript
+
+### Window Management
+
+- **kdotool** activates window at KDE Wayland level (visual focus)
+- CDP's `Page.bringToFront` brings tab to front within browser
+- Window class: `brave-chatgpt.com__-Default` (auto-generated from URL)
+
+---
+
+## 🐛 Debugging
+
+### View Logs
+
+```bash
+# Router service logs
+journalctl --user -u chatgpt-quick -n 50
+
+# Follow logs in real-time
+journalctl --user -u chatgpt-quick -f
+```
+
+### Check CDP Availability
+
+```bash
+# Check if CDP is running
+curl -s http://127.0.0.1:9222/json/version
+
+# List all browser tabs
+curl -s http://127.0.0.1:9222/json | jq '.[].url'
+```
+
+### Manual Window Activation
+
+```bash
+# Find ChatGPT window
+kdotool search --class "brave-chatgpt.com__-Default"
+
+# Activate it
+kdotool search --class "brave-chatgpt.com__-Default" | xargs kdotool windowactivate
+```
+
+### Test CDP Script Manually
+
+```bash
+chatgpt-cdp-send "Hello, this is a test prompt"
+```
+
+### Check KWin Script
+
+```bash
+# Verify script is loaded
+qdbus org.kde.KWin /Scripting org.kde.kwin.Scripting.isScriptLoaded chatgptquick
+
+# Reconfigure KWin
+qdbus org.kde.KWin /KWin org.kde.KWin.reconfigure
+```
+
+---
+
+## ⚠️ Known Limitations
+
+1. **Requires ChatGPT login** - Must log in to ChatGPT once in the CDP browser
+2. **Single browser instance** - Uses dedicated profile, separate from main Brave
+3. **No conversation history access** - Always starts a new conversation
+4. **CDP port fixed** - Always uses port 9222
+
+---
+
+## 🔄 Configuration
+
+### Changing the Shortcut
+
+The shortcut is registered in the KWin script. To change it:
+
+1. Edit `/etc/nixos/modules/desktop/chatgpt-quick.nix`
+2. Find the `registerShortcut` call in the KWin script section
+3. Change `"Meta+F12"` to your preferred shortcut
+4. Rebuild: `nixos-rebuild switch --flake .#cmos`
+
+### Adjusting Timing
+
+If text injection fails, you may need to adjust delays in the Python script:
+
+```python
+# In chatgpt-cdp-send.py
+time.sleep(1.5)  # Wait for page navigation
+time.sleep(0.1)  # Wait for focus
+time.sleep(0.2)  # Wait for React to process
+```
+
+---
+
+## 📖 Related Documentation
+
+- **[Desktop Overview](overview.md)** - All keyboard shortcuts
+- **[Bluetooth Toggle](bluetooth.md)** - Similar KWin script pattern (Meta+F11)
+- **[Brave Browser](brave.md)** - Browser configuration
+- **[Wayland Paste Issue](../troubleshooting/issue-2026-01-11-chatgpt-quick-wayland-paste.md)** - Original problem and investigation
+
+---
+
+**Last Updated**: 2026-01-11
+**Status**: ✅ Working
+**Shortcut**: Meta+F12
+
+---
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🖥️ [Desktop](overview.md)*

@@ -1,0 +1,69 @@
+---
+title: "Greenhouse Data Migration — ATS Decommissioning"
+description: "The organization was decommissioning its applicant tracking system and needed a complete export of all recruitment data — candidates, jobs, applications, int..."
+---
+
+## The Problem
+
+The organization was decommissioning its applicant tracking system and needed a complete export of all recruitment data — candidates, jobs, applications, interviews, scorecards, offers, and all attachments — for compliance retention. All 21 required compliance fields needed to be preserved. No built-in bulk export existed.
+
+## What Was Built
+
+A complete export pipeline (~3,500 lines of Python across multiple tools) with rate limiting, checkpoint/resume, and a built-in web viewer so HR could browse archived data without API access.
+
+### API Client
+
+- Basic Auth via 1Password CLI credential retrieval
+- Rate limit tracking with proactive throttling at 20% remaining capacity (don't wait for the 429)
+- Exponential backoff retry logic
+- Link-header pagination (500 records/page)
+- Throttle events tracked in summary statistics for visibility
+
+### Export Engine (12+ Data Types)
+
+Two-mode system for efficiency:
+
+- `--export-reference-only` caches reference data once (departments, offices, users, job posts)
+- `--reference-cache` reuses cached data for subsequent date-filtered exports (saves 200-1,600 API calls per re-run, 5-15 minutes faster)
+
+**Export flow:**
+1. Export reference data (always exported in full, cacheable)
+2. Export date-filtered records: candidates, applications, interviews, scorecards, offers (paginated at 500/page)
+3. Download attachments per candidate: resumes, cover letters, portfolios stored in per-candidate directories with metadata.json mapping filenames to records. Deduplication on filename collisions.
+4. Fetch activity feeds per candidate (individual API call per candidate — not available in list endpoint). Notes, stage changes, timestamps. Graceful per-candidate failure handling.
+5. Generate export summary: record counts, attachment metrics, API stats (total requests, throttle events), date range metadata
+
+**Dual output format:** Every endpoint exports in two formats simultaneously — JSONL (one record per line for streaming/bulk processing) and individual pretty-printed JSON files (one per record for inspection and the web viewer).
+
+### Post-Processing Tools
+
+| Tool | Purpose |
+|------|---------|
+| `construct-tc-export` | Construct export package for compliance handoff |
+| `cleanup-candidates` | Clean and normalize candidate data |
+| `enhance-export` | JSONL enrichment with cross-referenced data |
+| `directory-splitter` | Split large exports into manageable directories |
+| HTML → PDF generation | WeasyPrint conversion for human-readable candidate records |
+
+### Web Viewer (Flask, 1,210 lines)
+
+Built so HR could audit historical recruitment data without API access or JSON parsing:
+
+- Search and filter across all data types
+- Sortable columns
+- Record detail views with cross-referencing (candidate → application → job)
+- Attachment viewer and downloads
+- Pagination
+- Runs locally on any machine with Python
+
+### Checkpoint/Resume
+
+Idempotent exports — safely re-runnable without duplicating data. Per-candidate failure isolation so one bad record doesn't kill the whole run.
+
+## Impact
+
+- Full recruitment history preserved for compliance — all 21 required fields across candidates, interviews, scorecards, offers, attachments
+- Proactive rate limiting (throttles at 20% remaining capacity) ensured zero API bans during extraction
+- Reference data caching saved 5-15 minutes per re-export across multiple date-range runs
+- Flask web viewer let HR audit historical data through a browser — no technical knowledge required
+- Idempotent exports safely re-runnable without duplicating data

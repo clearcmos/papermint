@@ -3,8 +3,10 @@
  * Intercepts Cmd+K / Ctrl+K and queries the local search API.
  */
 (function () {
+  // Use relative URL in production (no port = behind proxy), port-based in dev
   const SEARCH_API =
-    window.__SEARCH_API_URL || window.location.origin.replace(/:\d+$/, ":3002");
+    window.__SEARCH_API_URL ||
+    (window.location.port ? window.location.origin.replace(/:\d+$/, ":3002") : "");
 
   // --- Styles ---
   const STYLES = `

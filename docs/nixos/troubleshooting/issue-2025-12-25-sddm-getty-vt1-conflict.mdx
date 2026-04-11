@@ -1,0 +1,203 @@
+---
+title: "SDDM/Getty VT1 Conflict - KDE Crash on Login"
+description: "Date: 2025-12-25 (Updated: 2025-12-29)"
+---
+
+**Issue:** KDE crashes immediately to terminal after SDDM login with "atomic commit failed: Permission denied"
+**Severity:** Critical (blocks all GUI logins)
+
+## Problem Description
+
+After logging in via SDDM, KDE Plasma crashes to a terminal immediately. The user sees the SDDM greeter, enters credentials, and instead of the desktop appearing, gets a black screen followed by a terminal console.
+
+## Error Signature
+
+The key error in journal logs (`journalctl -u display-manager -n 100`):
+```
+kwin_wayland_drm: atomic commit failed: Permission denied
+```
+
+## Root Cause
+
+**SDDM 0.20+ changed default VT behavior:**
+- SDDM versions &lt; 0.20: Used VT7 (tty7) by default
+- SDDM versions >= 0.20: Uses VT1 (tty1) by default, ignoring `MinimumVT` setting
+
+**NixOS display-manager service conflict:**
+- NixOS `display-manager.service` only conflicts with `getty@tty7.service`
+- When SDDM runs on VT1, `getty@tty1.service` is still active and holds DRM master
+- KWin Wayland can't acquire DRM master → "Permission denied" on atomic commits
+
+**Why this wasn't a problem before:**
+- Likely triggered by a NixOS channel update that pulled in SDDM >= 0.20
+- Or system was previously using X11 session which has different DRM handling
+
+## Diagnosis Steps
+
+1. **Check where SDDM greeter is running:**
+```bash
+loginctl session-status $(loginctl list-sessions | grep seat0 | awk '{print $1}')
+# Look for "VTNr" - if it says 1, SDDM is on VT1
+```
+
+2. **Check if getty is running on VT1:**
+```bash
+systemctl status getty@tty1.service
+# If active, this is the conflict
+```
+
+3. **Check DRM master status:**
+```bash
+cat /sys/kernel/debug/dri/0/clients
+# Shows which process has DRM master
+```
+
+4. **Verify the error in logs:**
+```bash
+journalctl -u display-manager -n 50 | grep -i "permission denied\|atomic commit"
+```
+
+## Solution Applied (Updated 2025-12-29)
+
+**IMPORTANT:** The original `conflicts` approach caused display-manager to be stopped during every `nixos-rebuild switch`. The correct solution is to disable getty/autovt on tty1 entirely.
+
+In `hosts/cmos/default.nix`:
+
+```nix
+# Fix SDDM/getty conflict: SDDM 0.20+ uses tty1, but NixOS display-manager
+# only conflicts with getty@tty7. This causes DRM permission denied errors.
+# See: https://wiki.archlinux.org/title/SDDM (MinimumVT ignored since 0.20)
+# Solution: Mask both getty and autovt on tty1 so they never start.
+# This is safer than using conflicts (which restarts display-manager on rebuild).
+systemd.services."getty@tty1".enable = lib.mkForce false;
+systemd.services."autovt@tty1".enable = lib.mkForce false;
+```
+
+**Why this approach:**
+- `enable = false` masks the service completely - it will never start
+- Unlike `conflicts`, this doesn't cause display-manager to be re-evaluated during rebuilds
+- Both `getty@tty1` and `autovt@tty1` must be disabled (autovt starts automatically when tty1 is accessed)
+
+## Solution Evolution
+
+### Original Solution (2025-12-25) - PROBLEMATIC
+```nix
+# DO NOT USE - causes display-manager restart on every rebuild
+systemd.services.display-manager.conflicts = [ "getty@tty1.service" ];
+```
+
+**Problem discovered:** The `conflicts` directive causes `display-manager.service` to be stopped during `nixos-rebuild switch`, even though it has `X-RestartIfChanged=false`. This is because systemd re-evaluates conflicts during daemon-reload.
+
+### Attempted Fix (2025-12-29) - INCOMPLETE
+```nix
+# INCOMPLETE - doesn't prevent autovt from starting
+systemd.services."getty@tty1".wantedBy = lib.mkForce [];
+```
+
+**Problem:** This only prevents getty@tty1 from auto-starting, but `autovt@tty1` (systemd's automatic VT getty) still activates when the terminal is accessed after logout.
+
+### Current Solution (2025-12-29) - RECOMMENDED
+```nix
+# CORRECT - completely disables both services
+systemd.services."getty@tty1".enable = lib.mkForce false;
+systemd.services."autovt@tty1".enable = lib.mkForce false;
+```
+
+## Related Issue: nixos-rebuild Causes Session Corruption
+
+### Symptom
+After `nixos-rebuild switch`, bluetooth audio disconnects and won't reconnect ("br-connection-profile-unavailable" error). The graphical session may become unresponsive or show "closing" state.
+
+### Root Cause Chain
+1. Adding/removing packages from `environment.systemPackages` changes the `system-path` derivation
+2. dbus config includes system-path in its service directories
+3. dbus `X-Restart-Triggers` changes → user dbus session reloads
+4. pipewire/wireplumber have `BindsTo=dbus.service` → they get disrupted
+5. Bluetooth A2DP endpoints unregister → audio dies
+6. Session enters corrupted "closing" state
+
+### Diagnosis
+```bash
+# Check session state
+loginctl session-status $(loginctl list-sessions | grep nicholas | grep seat0 | awk '{print $1}')
+# If "State: closing" - session is corrupted
+
+# Check bluetooth endpoints
+journalctl -b --since "5 minutes ago" | grep -E "endpoint registered|endpoint unregistered"
+# Rapid register/unregister indicates problem
+
+# Check dbus restart triggers changed
+diff /run/booted-system/etc/systemd/user/dbus.service.d/overrides.conf \
+     /run/current-system/etc/systemd/user/dbus.service.d/overrides.conf
+```
+
+### Resolution
+**For immediate fix:** Log out completely from KDE and log back in. This creates a fresh session with clean D-Bus bus.
+
+**To prevent:** This only occurs when `system-path` changes (adding/removing packages from `systemPackages`). Regular rebuilds without package changes won't trigger this.
+
+### Technical Details
+The pipewire user service has this binding in its override:
+```ini
+[Unit]
+BindsTo=dbus.service
+```
+
+When dbus reloads/restarts, pipewire loses its D-Bus connection. Wireplumber then can't communicate with bluetoothd, causing A2DP endpoints to be unregistered.
+
+## Understanding Getty and VTs
+
+**What is getty?**
+- Getty (get tty) is a program that manages physical or virtual terminals
+- It provides the login prompt you see on text consoles (Ctrl+Alt+F1, F2, etc.)
+- `getty@tty1.service` manages VT1 (the first virtual terminal)
+- `autovt@tty1.service` is started automatically by systemd when tty1 is accessed
+
+**What are VTs (Virtual Terminals)?**
+- Linux provides multiple virtual terminals (tty1-tty6 typically)
+- You can switch between them with Ctrl+Alt+F1-F6
+- Display managers (SDDM, GDM) historically used VT7+ to avoid conflict with getty
+
+**DRM Master:**
+- Only one process can be "DRM master" and control the GPU display
+- Getty holds DRM master on its VT to display the login prompt
+- When SDDM/KWin start on the same VT, they can't acquire DRM master
+
+## Files Modified
+
+| File | Change |
+|------|--------|
+| `hosts/cmos/default.nix` | Changed from `conflicts` to `enable = false` for getty@tty1 and autovt@tty1 |
+| `modules/desktop/kde.nix` | Added `users.users.sddm.extraGroups = [ "video" "render" ]` |
+| `modules/desktop/nixnav.nix` | Added `after = [ "plasma-kwin_wayland.service" ]` |
+| `modules/desktop/screen-off.nix` | Replaced sleep with KWin D-Bus wait |
+| `modules/desktop/bluetooth.nix` | Replaced sleep with KWin D-Bus wait |
+| `modules/desktop/gaming/default.nix` | Disabled sunshine.nix import |
+
+## Verification
+
+After applying the fix and rebooting:
+```bash
+# Login via SDDM should work
+# Verify no getty on tty1 during graphical session:
+systemctl status getty@tty1.service autovt@tty1.service
+# Both should show "masked" or "disabled"
+
+# Verify DRM master is held by kwin:
+cat /sys/kernel/debug/dri/0/clients 2>/dev/null | head -20
+# Should show kwin_wayland_wrapper as master
+
+# Test rebuild doesn't log you out:
+nixos-rebuild switch --flake .#cmos
+# Session should remain active
+```
+
+## References
+
+- [Arch Wiki - SDDM](https://wiki.archlinux.org/title/SDDM) - Documents MinimumVT deprecation in 0.20+
+- [NixOS display-manager.service source](https://github.com/NixOS/nixpkgs/blob/master/nixos/modules/services/x11/display-managers/default.nix) - Shows default getty@tty7 conflict
+- [SDDM 0.20.0 Release Notes](https://github.com/sddm/sddm/releases/tag/v0.20.0) - VT handling changes
+- [NixOS Issue #18390](https://github.com/NixOS/nixpkgs/issues/18390) - display-manager.service restarts after nixos-rebuild
+
+---
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🚨 [Troubleshooting](overview.md)*

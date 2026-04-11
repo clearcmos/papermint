@@ -1,0 +1,134 @@
+---
+title: "Claude Code \"Path was not found\" Errors"
+description: "Date: 2026-01-11"
+---
+
+**Issue:** Claude Code displays "Path X was not found" errors on startup for stale additional directories
+**Severity:** Low (cosmetic - doesn't affect functionality)
+
+## Problem Description
+
+When invoking `claude` from the terminal, multiple error messages appear before the CLI starts:
+
+```
+[root@cmos:/etc/nixos]# claude
+Path /nix/store/wfpnplbdly4z5shr1agjzh429lqqksdw-qtbase-6.9.1/lib/qt-6/plugins/platforms was not found.
+Path /nix/store/zkni7nzw5wh984q9g2shmq4ipg8k5ivc-qtwayland-6.9.1/lib/qt-6/plugins/platforms was not found.
+Path /opt/docker-compose/guacamole/data was not found.
+Path /run/secrets.d/22/rendered was not found.
+Path /opt/docker-compose/guacamole/init was not found.
+Path /run/secrets.d/23/rendered was not found.
+Path /opt/docker-compose/guacamole was not found.
+```
+
+Claude Code still works normally after these warnings.
+
+## Root Cause
+
+Claude Code stores **additional working directories** in project-level settings files. These are paths that were added during previous debugging sessions to allow Claude to read/write files outside the main project directory.
+
+The settings file persists these paths across sessions, but the paths themselves may become invalid due to:
+
+1. **Garbage-collected nix store paths** - Old Qt package paths like `/nix/store/wfpnplbdly4z5shr1agjzh429lqqksdw-qtbase-6.9.1/...` are deleted after `nix-collect-garbage`
+2. **Removed services** - Paths like `/opt/docker-compose/guacamole/` from services that were later removed
+3. **Ephemeral runtime paths** - Paths like `/run/secrets.d/22/rendered` that only exist during specific service runtime
+
+## Diagnosis
+
+1. **Check the project settings file:**
+   ```bash
+   cat /etc/nixos/.claude/settings.local.json | jq '.permissions.additionalDirectories'
+   ```
+
+2. **Identify stale paths** - Look for:
+   - `/nix/store/` paths with specific hashes (will break after garbage collection)
+   - `/opt/docker-compose/` paths for removed containers
+   - `/run/secrets.d/` ephemeral paths
+   - Any path that returns `false` for: `test -d "/path/to/check" && echo "exists"`
+
+3. **View debug logs for details:**
+   ```bash
+   ls -lt ~/.claude/debug/*.txt | head -1 | xargs cat | grep "cliArg"
+   ```
+
+## Resolution
+
+Edit the settings file to remove stale paths from `additionalDirectories`:
+
+```bash
+# View current additional directories
+cat /etc/nixos/.claude/settings.local.json | jq '.permissions.additionalDirectories'
+
+# Edit the file
+vim /etc/nixos/.claude/settings.local.json
+# or
+nano /etc/nixos/.claude/settings.local.json
+```
+
+**Remove these types of paths:**
+- Any `/nix/store/HASH-package-version/...` paths (will break after garbage collection)
+- Paths for removed services (e.g., `/opt/docker-compose/guacamole/`)
+- Ephemeral runtime paths (e.g., `/run/secrets.d/*/rendered`)
+
+**Keep these valid paths:**
+- `/etc/systemd` - systemd configuration
+- `/mnt` - mount points
+- `/home/nicholas` - user home directory
+- `/var/lib/sddm/.cache` - display manager cache
+- `/tmp` - temporary files
+- `/dev/vfio` - VFIO devices for VM passthrough
+- `/run/user/1000` - user runtime directory
+- `/etc/wireplumber` - audio configuration
+- `/nix/store` - entire nix store (safe, always exists)
+
+**Example cleaned configuration:**
+```json
+{
+  "permissions": {
+    "additionalDirectories": [
+      "/etc/systemd",
+      "/mnt",
+      "/home/nicholas",
+      "/var/lib/sddm/.cache",
+      "/tmp",
+      "/dev/vfio",
+      "/run/user/1000",
+      "/etc/wireplumber",
+      "/nix/store"
+    ]
+  }
+}
+```
+
+## Prevention
+
+**Avoid adding specific nix store paths** - Instead of adding `/nix/store/HASH-package/...`, add `/nix/store` which covers all packages and survives garbage collection.
+
+**Clean up after removing services** - When you remove a service (like guacamole), also clean up any additional directories that were added for that service.
+
+**Prefer stable paths** - Use paths that will persist across system changes:
+- `/etc/...` - system configuration
+- `/home/...` - user directories
+- `/mnt/...` - mount points
+- `/nix/store` - entire store (not specific packages)
+
+## File Locations
+
+| File | Purpose |
+|------|---------|
+| `/etc/nixos/.claude/settings.local.json` | Project-level Claude settings (per working directory) |
+| `/root/.claude/settings.json` | User-level Claude settings |
+| `/home/nicholas/.claude/settings.local.json` | Nicholas's user Claude settings |
+| `~/.claude/debug/*.txt` | Debug logs showing permission updates |
+
+## Related
+
+- **Nix Store Path Anti-Pattern** - See CLAUDE.md section "Nix Store Path Anti-Pattern" for why specific nix store paths are dangerous
+- **Garbage Collection** - `sudo nix-collect-garbage -d` removes old store paths
+
+---
+
+**Last Updated**: 2026-01-11
+
+---
+*[Home](../README.md) | [Navigation](../NAVIGATION.md) | [Troubleshooting Overview](overview.md)*

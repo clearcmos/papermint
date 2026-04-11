@@ -1,0 +1,230 @@
+---
+title: "ATS Data Migration & Decommissioning"
+description: "Technical Brief - sanitized, no proprietary details"
+---
+
+::: sanitize-note
+This document is sanitized. No company names, API keys, internal system names, or proprietary code. All details describe architecture, patterns, and decisions - not source code.
+:::
+
+:::: section
+::: pitch
+Complete decommissioning of an applicant tracking system. I built an export pipeline that captured **12+ data types across the full hiring lifecycle** - candidates, applications, scorecards, offers, attachments - with rate limiting, checkpoint/resume, and a built-in web viewer so HR could browse the archived data without API access. All 21 required compliance fields preserved.
+:::
+::::
+
+:::::::::::::::::::::::::::::: section
+## Architecture
+
+:::::::::::: card
+### Migration Pipeline
+
+::::::::::: layers
+:::: {.layer .layer-api}
+[API Client]{.layer-title} [- Rate-limited, retry-capable client with proactive throttling at 20% capacity.]{.layer-desc}
+
+::: layer-items
+Basic Auth (1Password) Rate limit tracking Exponential backoff Link-header pagination
+:::
+::::
+
+:::: {.layer .layer-export}
+[Export Engine]{.layer-title} [- 12 data types across 6 categories. Date-filtered with reference caching.]{.layer-desc}
+
+::: layer-items
+Candidates Applications Scorecards Offers Attachments Activity Feeds Jobs Departments Users
+:::
+::::
+
+:::: {.layer .layer-transform}
+[Post-Processing]{.layer-title} [- Cleanup, enrichment, and human-readable PDF generation.]{.layer-desc}
+
+::: layer-items
+Candidate cleanup JSONL enrichment HTML → PDF (WeasyPrint) Directory splitting
+:::
+::::
+
+:::: {.layer .layer-present}
+[Presentation]{.layer-title} [- Flask web viewer for HR to browse archived data without API access.]{.layer-desc}
+
+::: layer-items
+Search & filter Sortable columns Attachment viewer Cross-referencing
+:::
+::::
+:::::::::::
+::::::::::::
+
+::::::::::::::::::: card
+### Export Flow
+
+:::::::::::::::::: workflow
+::::: wf-step
+::: wf-num
+1
+:::
+
+::: wf-content
+#### Export reference data
+
+Departments, offices, users, job posts. Always exported in full. Can be cached for reuse across multiple date-range exports.
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+2
+:::
+
+::: wf-content
+#### Export date-filtered records
+
+Candidates, applications, interviews, scorecards, offers. Paginated at 500/page with Link-header detection for total pages.
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+3
+:::
+
+::: wf-content
+#### Download attachments per candidate
+
+Resumes, cover letters, portfolios. Stored in per-candidate directories with metadata.json mapping filenames to records. Deduplication on filename collisions.
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+4
+:::
+
+::: wf-content
+#### Fetch activity feeds per candidate
+
+Individual API call per candidate (not available in list endpoint). Notes, stage changes, timestamps. Graceful per-candidate failure handling.
+:::
+:::::
+
+::::: wf-step
+::: wf-num
+5
+:::
+
+::: wf-content
+#### Generate export summary
+
+Statistics JSON: record counts, attachment metrics, API stats (total requests, throttle events), and date range metadata.
+:::
+:::::
+::::::::::::::::::
+:::::::::::::::::::
+::::::::::::::::::::::::::::::
+
+::::::::::::::::::: section
+## Key Technical Decisions
+
+:::::: card
+### Dual Output Format (JSONL + Individual JSON)
+
+::: decision
+[Problem]{.decision-label .problem} [Downstream consumers have different needs: bulk processing tools want streaming, humans want readable files, and the web viewer needs per-record lookups.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [Export every endpoint in two formats simultaneously: JSONL (one record per line for streaming) and individual pretty-printed JSON files (one per record for inspection).]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [Works for every consumer. JSONL for data pipelines, individual JSON for the web viewer, and both for archival.]{.decision-text}
+:::
+::::::
+
+:::::: card
+### Built-In Web Viewer Instead of Raw JSON
+
+::: decision
+[Problem]{.decision-label .problem} [HR needs to browse historical recruitment data after decommissioning. They can\'t parse JSON files, and they won\'t have API access to the old system.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [Built a 1,210-line Flask web application with search, sort, pagination, record detail views, attachment downloads, and cross-referencing (candidate → application → job).]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [HR team can audit all historical hiring data through a browser. No technical knowledge required. Runs locally on any machine with Python.]{.decision-text}
+:::
+::::::
+
+:::::: card
+### Proactive Rate Limiting
+
+::: decision
+[Problem]{.decision-label .problem} [API has hard rate limits. Hitting a 429 means the export stalls and risks incomplete data. Thousands of API calls needed per export.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [Monitor `X-RateLimit-Remaining` headers on every response. Proactively throttle at 20% remaining capacity - don\'t wait for the 429.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [Exports complete without hitting rate limits. Throttle events tracked in summary statistics for visibility.]{.decision-text}
+:::
+::::::
+
+:::::: card
+### Reference Data Caching
+
+::: decision
+[Problem]{.decision-label .problem} [Multiple export runs needed (different date ranges, re-runs after fixes). Reference data (departments, offices, users) is the same every time - 200-1,600 wasted API calls per re-run.]{.decision-text}
+:::
+
+::: decision
+[Choice]{.decision-label .choice} [Two-mode system: `--export-reference-only` caches reference data once, then `--reference-cache` reuses it for subsequent date-filtered exports.]{.decision-text}
+:::
+
+::: decision
+[Result]{.decision-label .result} [5-15 minutes faster per re-export. Reference data fetched once, reused many times.]{.decision-text}
+:::
+::::::
+:::::::::::::::::::
+
+:::::::::::: section
+## Talking Points
+
+::::::::::: {.card .stories}
+### \"Tell me about this project\"
+
+:::: talk-point
+::: answer
+We were decommissioning our applicant tracking system. Years of recruitment data needed to be preserved for compliance - 21 specific fields required. I built an export pipeline that captured the full hiring lifecycle (candidates, applications, scorecards, offers, resumes), then built a **web viewer so HR could actually use the data** without API access. Clean decommissioning, 100% compliance coverage.
+:::
+::::
+
+### \"Why build a web viewer?\"
+
+:::: talk-point
+::: answer
+Because **the real customer is HR, not the filesystem.** They need to search candidates, view scorecards, download resumes. Telling them \"it\'s in a JSON file\" is the same as telling them it doesn\'t exist. So I built a Flask app that reads the export directory and presents it as a searchable, sortable interface. Runs locally, no server needed. HR treats it like the old platform but offline.
+:::
+::::
+
+### \"What was the hardest part?\"
+
+:::: talk-point
+::: answer
+Making it reliable and complete. The API has rate limits, exports take a long time, and some data (activity feeds) requires a per-candidate API call that isn\'t available in bulk. I built **proactive rate limiting** (throttle at 20% remaining, don\'t wait for the 429), a checkpoint/resume system for interrupted exports, and per-candidate failure isolation so one bad record doesn\'t kill the whole run.
+:::
+::::
+
+### \"What did you learn?\"
+
+:::: talk-point
+::: answer
+**Think about who consumes the output, not just how to produce it.** The export engine was maybe 40% of the work. The web viewer, PDF generator, and data enrichment tools that made the data actually usable by non-technical people - that was the other 60%. A migration isn\'t done when the data is on disk. It\'s done when the stakeholders can use it.
+:::
+::::
+:::::::::::
+::::::::::::
+
+Project brief - not for distribution. All details sanitized.

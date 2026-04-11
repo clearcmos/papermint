@@ -1,0 +1,466 @@
+---
+title: "Ollama Configuration Reference"
+description: "Complete reference for the Ollama AI service configuration on CMOS."
+---
+
+## Service Configuration
+
+### Location
+- **Main config**: `/etc/nixos/modules/desktop/ollama.nix`
+- **Host config**: `/etc/nixos/hosts/cmos/ai-config.nix`
+- **Core integration**: `/etc/nixos/modules/desktop/ai-core.nix`
+
+### Basic Service Setup
+
+```nix
+# /etc/nixos/modules/desktop/ollama.nix
+services.ollama = {
+  enable = true;
+  
+  # GPU acceleration
+  acceleration = "rocm";
+  package = pkgs.ollama-rocm;
+  rocmOverrideGfx = "10.3.0";  # gfx1030 for RX 6800 XT
+  
+  # Network configuration
+  host = "127.0.0.1";
+  port = 11434;
+  openFirewall = true;
+};
+```
+
+## Performance Configuration
+
+### Gaming-Optimized Settings
+
+```nix
+environmentVariables = {
+  # Performance tuning
+  OLLAMA_MAX_LOADED_MODELS = "2";      # Limit for VRAM conservation
+  OLLAMA_NUM_PARALLEL = "6";           # 50% more than previous setup
+  OLLAMA_MAX_QUEUE = "1024";           # 2x larger queue
+  OLLAMA_CONTEXT_LENGTH = "8192";      # 8K context window
+  
+  # GPU optimization
+  OLLAMA_GPU_OVERHEAD = "0";           # Minimize GPU overhead
+  OLLAMA_FLASH_ATTENTION = "1";        # Memory optimization
+  OLLAMA_KEEP_ALIVE = "3m0s";          # Fast unloading for gaming
+  
+  # System resource management
+  OMP_NUM_THREADS = "8";               # Controlled CPU threads
+  HIP_LAUNCH_BLOCKING = "0";           # Async GPU operations
+  ROCR_VISIBLE_DEVICES = "0";          # Explicit GPU selection
+};
+```
+
+### Environment Variables Reference
+
+| Variable | Value | Purpose |
+|----------|--------|---------|
+| `OLLAMA_MAX_LOADED_MODELS` | `"2"` | Maximum models in VRAM simultaneously |
+| `OLLAMA_NUM_PARALLEL` | `"6"` | Parallel requests per model |
+| `OLLAMA_MAX_QUEUE` | `"1024"` | Maximum queued requests |
+| `OLLAMA_CONTEXT_LENGTH` | `"8192"` | Context window size (tokens) |
+| `OLLAMA_GPU_OVERHEAD` | `"0"` | Minimize GPU memory overhead |
+| `OLLAMA_FLASH_ATTENTION` | `"1"` | Enable memory-efficient attention |
+| `OLLAMA_KEEP_ALIVE` | `"3m0s"` | Model retention time after last use (see below) |
+| `OMP_NUM_THREADS` | `"8"` | CPU threads for AI processing |
+| `HIP_LAUNCH_BLOCKING` | `"0"` | Non-blocking GPU operations |
+| `ROCR_VISIBLE_DEVICES` | `"0"` | GPU device selection |
+
+### OLLAMA_KEEP_ALIVE Configuration
+
+Controls how long models stay loaded in VRAM after the last request. This significantly impacts response latency.
+
+**Valid Values:**
+
+| Value | Behavior | Use Case |
+|-------|----------|----------|
+| `"-1"` | **Never unload** - Keep model in VRAM permanently | Instant responses, like llama.cpp behavior |
+| `"0"` | **Immediate unload** - Remove from VRAM right after response | Minimal VRAM usage, max warmup delay |
+| `"5m"` | **Default** - Unload after 5 minutes of inactivity | Balanced approach |
+| `"30m"` | Keep loaded for 30 minutes | Good for active work sessions |
+| `"24h"` | Keep loaded all day | Near-instant responses during workday |
+| `"1m"` | Aggressive unloading after 1 minute | Gaming-optimized, frees VRAM quickly |
+
+**Format Options:**
+- Duration strings: `"10m"`, `"24h"`, `"90s"`
+- Numeric seconds: `300` (equals 5 minutes)
+- Negative for permanent: `"-1"` or `"-1m"`
+
+**Performance Trade-offs:**
+
+```nix
+# Instant responses (like llama.cpp) - uses most VRAM
+OLLAMA_KEEP_ALIVE = "-1";
+
+# Balanced - good for active use
+OLLAMA_KEEP_ALIVE = "30m";
+
+# Gaming-optimized - frees VRAM quickly
+OLLAMA_KEEP_ALIVE = "1m";
+```
+
+**Current Configuration:** The system uses `"1m"` for gaming compatibility, freeing VRAM quickly for KDE/games. This causes ~2-5 second warmup when re-loading models from disk.
+
+**Note:** Individual API requests can override this with the `keep_alive` parameter.
+
+### Multi-Model Configuration
+
+When using multiple models, `OLLAMA_MAX_LOADED_MODELS` and `OLLAMA_KEEP_ALIVE` interact critically:
+
+**Scenario 1: Single Model with Instant Response**
+```nix
+OLLAMA_MAX_LOADED_MODELS = "1";      # Only 1 model in VRAM
+OLLAMA_KEEP_ALIVE = "-1";            # Never unload
+```
+- **Behavior**: First model loaded stays in VRAM indefinitely
+- **Switching models**: Unloads current model, loads new one (warmup delay)
+- **Best for**: Single-model workflows, minimal VRAM usage
+
+**Scenario 2: Two Models with Instant Switching**
+```nix
+OLLAMA_MAX_LOADED_MODELS = "2";      # 2 models in VRAM
+OLLAMA_KEEP_ALIVE = "-1";            # Never unload
+```
+- **Behavior**: Up to 2 models stay loaded, instant switching between them
+- **Switching to 3rd model**: LRU (least recently used) gets unloaded
+- **VRAM usage**: ~10-14GB (two 7B models)
+- **Best for**: Workflows using 2 main models (e.g., coder + general)
+
+**Scenario 3: Multiple Models with Timed Unload**
+```nix
+OLLAMA_MAX_LOADED_MODELS = "2";      # 2 models in VRAM
+OLLAMA_KEEP_ALIVE = "30m";           # Unload after 30 min
+```
+- **Behavior**: Up to 2 models loaded, auto-cleanup after inactivity
+- **Switching between 3+ models**: Recent models stay loaded, old ones unload
+- **VRAM usage**: Scales down during idle periods
+- **Best for**: Workflows using 3+ models throughout the day
+
+**VRAM Sizing Guide (RX 6800 XT - 16GB Total):**
+
+| Models | 7B VRAM Each | Total Used | KDE Reserve | Config |
+|--------|--------------|------------|-------------|--------|
+| 1 model | ~6GB | 6GB | 10GB free | `MAX_LOADED_MODELS = "1"` |
+| 2 models | ~6GB | 12GB | 4GB free | `MAX_LOADED_MODELS = "2"` (recommended) |
+| 3 models | ~6GB | 18GB | ❌ Exceeds VRAM | Not safe with 16GB |
+
+**Recommended Configurations:**
+
+```nix
+# Gaming priority - minimize VRAM, accept warmup
+OLLAMA_MAX_LOADED_MODELS = "1";
+OLLAMA_KEEP_ALIVE = "30m";
+
+# Productivity priority - instant switching between 2 main models
+OLLAMA_MAX_LOADED_MODELS = "2";
+OLLAMA_KEEP_ALIVE = "-1";
+
+# Balanced - 2 models with auto-cleanup
+OLLAMA_MAX_LOADED_MODELS = "2";
+OLLAMA_KEEP_ALIVE = "1h";
+```
+
+## Model Management
+
+### Automatic Model Download
+
+```nix
+# Pre-download service configuration
+systemd.services.ollama-model-preload = {
+  description = "Pre-download Ollama models if they don't exist";
+  after = [ "network-online.target" "ollama.service" ];
+  wantedBy = [ "multi-user.target" ];
+  
+  serviceConfig = {
+    Type = "oneshot";
+    RemainAfterExit = true;
+    Environment = [
+      "HOME=/var/lib/ollama"
+      "OLLAMA_HOST=http://127.0.0.1:11434"
+    ];
+  };
+};
+```
+
+### Required Models
+
+The system automatically downloads these models:
+
+1. **qwen2.5-coder:7b-instruct**
+   - Purpose: Coding assistance (smart-commit)
+   - Size: ~4.7GB
+   - Quantization: Q4_K_M
+
+2. **qwen2.5:7b-instruct**
+   - Purpose: General knowledge tasks (keeper, sage)
+   - Size: ~4.7GB
+   - Quantization: Q4_K_M
+
+3. **bge-m3**
+   - Purpose: Text embeddings (keeper)
+   - Size: ~1.1GB
+   - Type: Embedding model
+
+## ROCm Configuration
+
+### GPU Settings
+
+```nix
+# AMD RX 6800 XT specific configuration
+rocmOverrideGfx = "10.3.0";  # Override for gfx1030 architecture
+
+# ROCm packages
+environment.systemPackages = with pkgs; [
+  rocmPackages.clr
+  rocmPackages.rocm-smi
+  rocmPackages.rocminfo
+  rocmPackages.clr.icd
+];
+```
+
+### GPU Access Groups
+
+```nix
+# Ensure proper GPU access
+users.groups.render = {};
+
+# User must be in render group for GPU access
+users.users.ollama.extraGroups = [ "video" "render" ];
+```
+
+## Network Configuration
+
+### Port Configuration
+
+```nix
+# Service binding
+host = "127.0.0.1";           # Local access only
+port = 11434;                 # Standard Ollama port
+openFirewall = true;          # Allow local connections
+
+# Firewall rules (in hosts/cmos/default.nix)
+networking.firewall.allowedTCPPorts = [ 11434 ];
+```
+
+### API Access
+
+```nix
+# Allow local applications to connect
+OLLAMA_ORIGINS = "http://localhost:*,http://127.0.0.1:*";
+```
+
+## Storage Configuration
+
+### Model Storage
+
+```nix
+# Default Ollama storage locations
+home = "/var/lib/ollama";              # Service home directory
+models = "/var/lib/ollama/models";     # Model storage (default)
+
+# Directory setup
+systemd.tmpfiles.rules = [
+  "d /var/lib/ollama 0755 root root -"
+];
+```
+
+### Storage Requirements
+
+| Component | Size | Location |
+|-----------|------|----------|
+| **Models** | ~11GB total | `/var/lib/ollama/models/` |
+| **Cache** | ~5GB | `/var/lib/ollama/` |
+| **Logs** | ~100MB | Systemd journal |
+| **Total** | ~16GB | Various |
+
+## System Integration
+
+### Kernel Optimizations
+
+```nix
+# System-level performance optimizations
+boot.kernel.sysctl = {
+  # Memory management
+  "vm.swappiness" = 10;
+  "vm.dirty_ratio" = 15;
+  "vm.dirty_background_ratio" = 5;
+  
+  # Network optimizations for API performance
+  "net.core.rmem_default" = 262144;
+  "net.core.rmem_max" = 16777216;
+  "net.core.wmem_default" = 262144;
+  "net.core.wmem_max" = 16777216;
+  "net.ipv4.tcp_rmem" = "4096 65536 16777216";
+  "net.ipv4.tcp_wmem" = "4096 65536 16777216";
+};
+```
+
+### Service Dependencies
+
+```nix
+# Service ordering and dependencies
+systemd.services.ollama-model-preload = {
+  after = [ "network-online.target" "ollama.service" ];
+  wants = [ "network-online.target" ];
+  requires = [ "ollama.service" ];
+};
+```
+
+## Validation Scripts
+
+### Health Check Script
+
+Location: `/etc/ollama-validate.sh`
+
+```bash
+# Check GPU hardware
+lspci | grep -qi "AMD.*Radeon"
+
+# Verify ROCm functionality
+rocminfo >/dev/null 2>&1
+
+# Test Ollama service
+systemctl is-active ollama >/dev/null
+
+# Validate API endpoint
+curl -s http://localhost:11434/api/version >/dev/null
+
+# Check model availability
+ollama list 2>/dev/null
+```
+
+### Model Management Script
+
+Location: `/etc/ollama-models.sh`
+
+```bash
+# Usage examples
+bash /etc/ollama-models.sh list     # List installed models
+bash /etc/ollama-models.sh status   # Show active models
+bash /etc/ollama-models.sh test     # Test each model
+```
+
+## Configuration Management
+
+### Rebuild Process
+
+```bash
+# Apply configuration changes
+sudo nixos-rebuild switch --flake .#cmos
+
+# Verify service status
+systemctl status ollama.service
+
+# Check model availability
+curl -s http://localhost:11434/api/tags | jq '.models[].name'
+```
+
+### Configuration Validation
+
+```bash
+# Test configuration before rebuild
+sudo nixos-rebuild dry-run --flake .#cmos
+
+# Validate service configuration
+systemctl show ollama.service | grep Environment
+
+# Check GPU access
+rocm-smi --showmeminfo vram
+```
+
+## Customization Options
+
+### Performance Tuning
+
+To modify performance settings, edit the `environmentVariables` section:
+
+```nix
+# For maximum performance (uses more VRAM)
+OLLAMA_MAX_LOADED_MODELS = "3";      # Allow all models
+OLLAMA_NUM_PARALLEL = "8";           # More parallel requests
+
+# For maximum gaming compatibility (uses less VRAM)
+OLLAMA_MAX_LOADED_MODELS = "1";      # Only one model at a time
+OLLAMA_KEEP_ALIVE = "1m0s";          # Faster unloading
+```
+
+### Model Selection
+
+To add or change models, modify the preload service:
+
+```nix
+# In ollama-model-preload service
+MODELS=(
+  "qwen2.5-coder:7b-instruct"
+  "qwen2.5:7b-instruct"
+  "bge-m3"
+  # Add new models here
+  "new-model:version"
+)
+```
+
+## Security Considerations
+
+### Network Security
+
+```nix
+# Local access only
+host = "127.0.0.1";           # No external access
+openFirewall = true;          # Local firewall only
+
+# Restricted origins
+OLLAMA_ORIGINS = "http://localhost:*,http://127.0.0.1:*";
+```
+
+### File Permissions
+
+```nix
+# Secure directory permissions
+systemd.tmpfiles.rules = [
+  "d /var/lib/ollama 0755 root root -"  # Root owned, group readable
+];
+```
+
+### Service Isolation
+
+```nix
+# Service runs as dedicated user with limited privileges
+# Automatic user creation by NixOS services.ollama
+```
+
+## Troubleshooting Configuration
+
+### Common Issues
+
+1. **Service won't start**: Check ROCm installation and GPU access
+2. **Models not downloading**: Verify network connectivity and disk space
+3. **Poor performance**: Review GPU memory usage and thread allocation
+4. **API not responding**: Check firewall rules and service binding
+
+### Debug Mode
+
+Enable debug logging:
+
+```nix
+# Add to environmentVariables
+OLLAMA_DEBUG = "1";           # Enable debug logging
+```
+
+View debug output:
+
+```bash
+journalctl -fu ollama.service | grep -i debug
+```
+
+## Related Documentation
+
+- [Models](models.md) - Model specifications and management
+- [Performance](performance.md) - Performance optimization guide
+- [Monitoring](monitoring.md) - System monitoring and diagnostics
+- [Troubleshooting](troubleshooting.md) - Problem resolution
+
+---
+
+*Last updated: October 22, 2025*

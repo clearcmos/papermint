@@ -1,0 +1,143 @@
+---
+title: "ChatGPT Quick Input - Wayland Paste Issue"
+description: "Date: 2026-01-11"
+---
+
+**Status**: RESOLVED
+**Environment**: NixOS, KDE Plasma 6, Wayland, Brave Browser
+
+## Summary
+
+Unable to programmatically paste clipboard contents into Brave browser (ChatGPT PWA) on KDE Plasma 6 Wayland. All keyboard simulation tools fail to deliver Ctrl+V paste command to the browser, despite reporting success.
+
+**Solution**: Chrome DevTools Protocol (CDP) bypasses Wayland's input-injection restrictions entirely by operating inside the browser.
+
+## Goal
+
+Create a system-wide keyboard shortcut (Meta+F12) that:
+1. Opens a modern GTK4/libadwaita popup for text input
+2. ~~Copies the entered text to clipboard~~ (No longer needed with CDP)
+3. Activates the ChatGPT browser window
+4. Opens a new chat (Ctrl+Shift+O)
+5. **Injects** text directly via CDP (bypasses clipboard/paste)
+6. Submits with click/Enter
+
+## Solution Implemented
+
+### Chrome DevTools Protocol (CDP) Approach
+
+CDP injects text directly into the browser's JavaScript context, completely bypassing:
+- Wayland's input-injection security model
+- KWin's uinput filtering
+- Clipboard limitations
+
+### Architecture
+
+```
+Meta+F12
+   └── KWin Script (D-Bus call)
+          └── systemd user service (chatgpt-quick.service)
+                 └── chatgpt-router (bash)
+                        ├── chatgpt-quick (GTK4 popup) → get text
+                        ├── Launch Brave with CDP flags (if not running)
+                        ├── kdotool windowactivate (visual focus)
+                        └── chatgpt-cdp-send (Python CDP client)
+                               ├── WebSocket to Brave CDP
+                               ├── Ctrl+Shift+O (new chat)
+                               ├── Input.insertText (inject text)
+                               └── Click send button
+```
+
+### Key Implementation Details
+
+**Brave Launch Flags:**
+```bash
+brave \
+  --remote-debugging-port=9222 \
+  --remote-debugging-address=127.0.0.1 \
+  --remote-allow-origins="http://127.0.0.1:9222" \
+  --user-data-dir="~/.local/share/brave-chatgpt-cdp" \
+  --start-maximized \
+  --app=https://chatgpt.com/
+```
+
+**CDP Text Injection:**
+- Connect via WebSocket to `ws://127.0.0.1:9222`
+- Use `Input.dispatchKeyEvent` for Ctrl+Shift+O (new conversation)
+- Use `Runtime.evaluate` to focus prompt textarea
+- Use `Input.insertText` for reliable text injection
+- Use `Runtime.evaluate` to click send button
+
+**Window Management:**
+- kdotool activates window at desktop level (KDE Wayland compatible)
+- CDP's `Page.bringToFront` brings tab to front within browser
+- Window class: `brave-chatgpt.com__-Default` (auto-generated from URL)
+
+### Files
+
+| File | Purpose |
+|------|---------|
+| `/etc/nixos/modules/desktop/chatgpt-quick.nix` | NixOS module with all components |
+| `/etc/nixos/modules/desktop/chatgpt-cdp-send.py` | Python CDP client script |
+| `~/.local/share/kwin/scripts/chatgptquick/` | KWin script for Meta+F12 |
+| `~/.local/share/brave-chatgpt-cdp/` | Dedicated Brave profile for CDP |
+
+## Why uinput-Based Tools Failed
+
+### Tools Tested
+
+| Tool | Method | Result |
+|------|--------|--------|
+| dotool | uinput kernel module | Exit 0, paste doesn't occur |
+| ydotool | uinput via daemon | Exit 0, paste doesn't occur |
+| wtype | Wayland virtual keyboard protocol | Compositor not supported |
+| xdotool | X11 protocol | Cannot get active window on Wayland |
+
+### Root Cause
+
+1. **Wayland security model**: Wayland isolates applications from each other. The compositor (KWin) mediates all input.
+
+2. **Native Wayland vs XWayland**: Brave runs as a native Wayland client. Native Wayland apps receive input through the compositor, not directly from kernel input devices.
+
+3. **KWin input handling**: KWin intentionally does not forward uinput events to native Wayland applications. The virtual keyboard events only reach XWayland applications.
+
+4. **No virtual keyboard protocol**: KDE does not implement the `zwp_virtual_keyboard_v1` Wayland protocol that wtype requires.
+
+## Alternative Approaches (Rejected)
+
+| Approach | Reason Rejected |
+|----------|-----------------|
+| Browser Extension | User preference - wanted native solution |
+| Force XWayland (`--ozone-platform=x11`) | User preference - wanted native Wayland |
+| Input Method (ibus/fcitx) | Significant setup complexity |
+| AT-SPI (accessibility) | Requires enabling accessibility in browser |
+
+## Debugging Commands
+
+```bash
+# Check CDP availability
+curl -s http://127.0.0.1:9222/json/version
+
+# List CDP targets (tabs)
+curl -s http://127.0.0.1:9222/json
+
+# View router logs
+journalctl --user -u chatgpt-quick -n 50
+
+# Check window class (useful for icon matching)
+qdbus org.kde.KWin /KWin org.kde.KWin.queryWindowInfo
+
+# Activate window manually
+kdotool search --class "brave-chatgpt.com__-Default" | xargs kdotool windowactivate
+```
+
+## Current Code Location
+
+- `/etc/nixos/modules/desktop/chatgpt-quick.nix` - Complete NixOS module
+- `/etc/nixos/modules/desktop/chatgpt-cdp-send.py` - CDP Python client
+
+## Relevant Sources
+
+- [KDE Discuss: Not possible to create shortcuts to simulate keyboard input in Plasma 6](https://discuss.kde.org/t/not-possible-to-create-shortcuts-to-simulate-keyboard-input-in-plasma-6/17788)
+- [Chrome DevTools Protocol Documentation](https://chromedevtools.github.io/devtools-protocol/)
+- [GitHub: kdotool - KWin window control](https://github.com/jinliu/kdotool)

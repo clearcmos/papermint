@@ -1,0 +1,383 @@
+---
+title: "jimmich - Secondary Server"
+description: "*File services, backup, and storage server*"
+---
+
+## 🎯 Overview
+
+**jimmich** is the secondary server in the infrastructure, dedicated to file services, backup storage, and providing redundancy for critical data. This host runs a minimal server configuration focused on reliability and storage capacity.
+
+**Role**: Secondary Server, File Services, Backup Target, Storage Host
+
+---
+
+## 💻 Hardware Specifications
+
+### System Information
+- **Hostname**: `jimmich.home.arpa`
+- **Platform**: Standard server hardware
+- **Architecture**: x86_64
+- **Boot Loader**: Default (configured in hardware-configuration.nix)
+- **Form Factor**: Server/Desktop
+
+### Storage
+- **Configuration**: Managed in `hardware-configuration.nix`
+- **Purpose**: High-capacity storage for files and backups
+- **File System**: ext4 (typical)
+
+### Network Hardware
+- **Interface**: `enp8s0` (standard Ethernet adapter)
+- **Connection**: Gigabit Ethernet
+
+---
+
+## 🌐 Network Configuration
+
+### Network Interface
+- **Interface**: `enp8s0`
+- **IP Address**: `192.168.1.10/24` (static)
+- **Gateway**: `192.168.1.1`
+- **DNS**: `192.168.1.1`
+- **Domain**: `home.arpa`
+
+### Firewall Configuration
+
+**Allowed TCP Ports**:
+- `22` - SSH
+- `80` - HTTP (if Traefik enabled)
+- `443` - HTTPS (if Traefik enabled)
+- `445` - Samba/CIFS file sharing
+- `9090` - Cockpit web management (from core)
+
+**Allowed UDP Ports**:
+- `137, 138` - NetBIOS
+
+**Firewall Profile**: Server-only (no desktop services)
+
+---
+
+## 📁 File Services
+
+### Samba Share
+**Module**: `modules/core/samba-server.nix` (from core)
+**Share Name**: `//jimmich-home/`
+**Path**: `/home/nicholas/`
+**Access**: Password-protected (nicholas user)
+
+**Purpose**:
+- Cross-host file sharing
+- Backup storage for other hosts
+- Media file storage
+- General file server
+
+**Clients**:
+- cmos (desktop workstation)
+- misc (primary server)
+- nixvm (development VM)
+
+**Mounting on other hosts**:
+```bash
+# Example mount on cmos
+mount -t cifs //jimmich.home.arpa/nicholas-home /mnt/jimmich-home \
+  -o credentials=/run/agenix/smb-credentials,uid=1000,gid=100
+```
+
+---
+
+## 🔐 Security Configuration
+
+### SSH
+**Port**: 22
+**Authentication**:
+- SSH keys (primary)
+- OAuth device flow via Keycloak (`ssh-oauth.nix`)
+
+**Authorized Keys**: Managed via agenix
+
+### Agenix Integration
+**Identity Path**: `/etc/nixos/keys/jimmich-agenix.key`
+**Secrets**: Encrypted configuration files
+**Runtime**: `/run/agenix/`
+
+**Managed Secrets**:
+- SSH keys
+- Samba credentials
+- Service authentication
+
+### Firewall
+**Profile**: Server-only
+**Policy**: Minimal exposure
+**Services**: SSH, Samba, Cockpit only
+
+---
+
+## 🛠️ Installed Services
+
+### Core Services
+All core services from `modules/core/default.nix`:
+- **SSH**: Secure shell access
+- **Samba**: File sharing via CIFS/SMB
+- **Cockpit**: Web-based management (port 9090)
+- **systemd-networkd**: Network management
+- **agenix**: Secret management
+
+### SSH OAuth
+**Module**: `ssh-oauth.nix`
+**Purpose**: OAuth device flow authentication via Keycloak
+**Benefits**: Centralized authentication with MFA support
+
+### Optional Services
+**Traefik**: HTTP/HTTPS reverse proxy (if enabled)
+- Currently configured in firewall rules
+- Not actively used (reserved for future expansion)
+
+---
+
+## 🚀 Deployment
+
+### Bootstrap Deployment
+**Method**: Automated ISO Installation (same as misc)
+**Documentation**: `docs/operations-bootstrap-automated-iso.md`
+
+**Note**: Can be adapted from misc bootstrap ISO by changing:
+- Hostname: `misc` → `jimmich`
+- IP address: `192.168.1.5` → `192.168.1.10`
+- Interface: `enp3s0f0` → `enp8s0`
+
+### Remote Deployment
+```bash
+# From cmos or any host
+nixos-rebuild switch --flake .#jimmich --target-host jimmich.home.arpa
+```
+
+### Testing Changes
+```bash
+# Test without activating
+nixos-rebuild test --flake .#jimmich --target-host jimmich.home.arpa
+
+# Dry run
+nixos-rebuild dry-run --flake .#jimmich --target-host jimmich.home.arpa
+```
+
+---
+
+## 🧪 Troubleshooting
+
+### SSH Access Issues
+
+**Can't connect via SSH**:
+```bash
+# From another host
+ping jimmich.home.arpa
+
+# Check SSH service
+ssh root@192.168.1.10 'systemctl status sshd'
+```
+
+**OAuth authentication problems**:
+```bash
+# Check OAuth service
+ssh root@jimmich.home.arpa 'systemctl status keycloak-ssh-agent'
+journalctl -u keycloak-ssh-agent -f
+```
+
+### Samba Issues
+
+**Can't access Samba shares**:
+```bash
+# Test from another host
+smbclient -L jimmich.home.arpa -U nicholas
+
+# Check Samba status
+ssh root@jimmich.home.arpa 'systemctl status smbd nmbd'
+```
+
+**Check Samba configuration**:
+```bash
+ssh root@jimmich.home.arpa 'testparm -s'
+```
+
+**View Samba logs**:
+```bash
+ssh root@jimmich.home.arpa 'journalctl -u smbd -f'
+```
+
+### Storage Issues
+
+**Check disk space**:
+```bash
+ssh root@jimmich.home.arpa 'df -h'
+```
+
+**Check storage health**:
+```bash
+ssh root@jimmich.home.arpa 'smartctl -a /dev/sda'
+```
+
+### Network Issues
+
+**Check network configuration**:
+```bash
+ssh root@jimmich.home.arpa 'ip addr show enp8s0'
+ssh root@jimmich.home.arpa 'ip route'
+```
+
+**Test connectivity**:
+```bash
+# From jimmich to gateway
+ssh root@jimmich.home.arpa 'ping -c 3 192.168.1.1'
+
+# From jimmich to cmos
+ssh root@jimmich.home.arpa 'ping -c 3 192.168.1.2'
+```
+
+---
+
+## 📊 Monitoring
+
+### System Monitoring
+- **Cockpit Dashboard**: http://jimmich.home.arpa:9090
+  - System metrics (CPU, RAM, disk, network)
+  - Service management
+  - Log viewer
+  - Storage management
+
+### Service Health
+```bash
+# Check all services
+ssh root@jimmich.home.arpa 'systemctl --failed'
+
+# Check critical services
+ssh root@jimmich.home.arpa 'systemctl status sshd smbd nmbd'
+```
+
+### Storage Monitoring
+```bash
+# Disk usage
+ssh root@jimmich.home.arpa 'df -h'
+
+# Disk I/O
+ssh root@jimmich.home.arpa 'iotop -ao'
+
+# SMART status
+ssh root@jimmich.home.arpa 'smartctl -H /dev/sda'
+```
+
+---
+
+## 🔄 Backup Strategy
+
+### As Potential Backup Target
+**Note**: Currently, cmos uses remote backup to `offsite.bedrosn.com` instead of jimmich.
+
+**Current Backup Architecture**:
+- **cmos**: Local Borg (`/mnt/data/backups/cmos/borg`) + Remote Borg (`offsite.bedrosn.com`)
+- **jimmich**: Not currently receiving automated backups from other hosts
+
+**Potential Future Use**:
+- Could serve as local network backup target via Samba
+- Useful for large file storage and secondary backup location
+- Sufficient storage capacity for backup hosting
+
+See **[storage-backup.md](../storage/backup.md)** for complete backup documentation.
+
+### Manual Backup Copy (if needed)
+```bash
+# From cmos (via Samba)
+mount -t cifs //jimmich.home.arpa/nicholas-home /mnt/jimmich \
+  -o credentials=/run/agenix/smb-credentials
+
+# Manual backup copy to jimmich
+rsync -av /mnt/data/backups/ /mnt/jimmich/backups/
+```
+
+---
+
+## 📦 Package Management
+
+### Minimal Package Set
+**Philosophy**: Server-only, minimal installation
+
+**Installed Packages**:
+- Core system utilities (from `modules/core/packages.nix`)
+- SSH and network tools
+- Samba server
+- Monitoring utilities (htop, iotop)
+- Storage management tools (smartmontools)
+
+**No Desktop Packages**: This is a headless server
+
+---
+
+## 🔗 Related Documentation
+
+- **[Host Overview](../README.md)** - All hosts overview
+- **[Samba Configuration](../services/overview.md)** - File sharing setup
+- **[Backup Procedures](../storage/backup.md)** - Backup strategy
+- **[SSH Configuration](../security/overview.md)** - SSH OAuth setup
+- **[Bootstrap Guide](../operations/bootstrap-overview.md)** - Fresh installation
+
+---
+
+## 📝 Configuration Files
+
+**Primary Config**: `/etc/nixos/hosts/jimmich/default.nix`
+**SSH OAuth**: `/etc/nixos/hosts/jimmich/ssh-oauth.nix`
+**Hardware Config**: `/etc/nixos/hosts/jimmich/hardware-configuration.nix`
+
+**Imported Modules**:
+- `modules/core/default.nix` - All core services
+- `ssh-oauth.nix` - OAuth authentication
+
+---
+
+## 💡 Usage Examples
+
+### Accessing Files from Other Hosts
+
+**Mount Samba share**:
+```bash
+# From cmos
+sudo mkdir -p /mnt/jimmich-home
+sudo mount -t cifs //jimmich.home.arpa/nicholas-home /mnt/jimmich-home \
+  -o credentials=/run/agenix/smb-credentials,uid=1000,gid=100
+```
+
+**Copy files to jimmich**:
+```bash
+# From any host
+scp -r /local/files/ root@jimmich.home.arpa:/home/nicholas/storage/
+```
+
+**SSH access for management**:
+```bash
+# From any host
+ssh root@jimmich.home.arpa
+
+# Run commands remotely
+ssh root@jimmich.home.arpa 'df -h'
+ssh root@jimmich.home.arpa 'systemctl status smbd'
+```
+
+---
+
+## 🔮 Future Expansion
+
+**Potential Services** (currently firewall-configured but not active):
+- **Traefik**: Reverse proxy for additional web services
+- **Media Server**: Plex, Jellyfin, or similar
+- **Backup Automation**: Automated backup orchestration
+- **NFS**: Additional file sharing protocol
+- **Syncthing**: Peer-to-peer file synchronization
+
+**Reserved Ports**: 80, 443 for future HTTP/HTTPS services
+
+---
+
+**Last Updated**: 2025-10-14
+**System State Version**: 24.05
+**Maintained By**: Infrastructure Team
+
+---
+
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🖥️ [Hosts](../README.md)*

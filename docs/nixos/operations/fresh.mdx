@@ -1,0 +1,273 @@
+---
+title: "Fresh Host Deployment Guide"
+description: "*The declarative DevOps approach for homelab NixOS deployment*"
+---
+
+## 🎯 Overview
+
+This guide outlines the standard workflow for deploying NixOS hosts in this homelab environment. All deployments follow a centralized, declarative approach using flakes and remote deployment from the primary host (cmos).
+
+---
+
+## 🏗️ Architecture Principles
+
+### 1. Central Git Repository (Foundation)
+
+All configuration is version-controlled and managed from a single source:
+
+```bash
+# All hosts pull from same repo
+cd /etc/nixos
+git remote -v
+# origin: https://github.com/yourusername/homelab-nixos.git
+```
+
+### 2. Flake-Based Configuration
+
+- **Centralized definitions**: `flake.nix` defines all hosts
+- **Host-specific configs**: `hosts/&lt;hostname>/` for hardware/unique settings
+- **Shared modules**: `modules/` for common functionality
+- **Secret management**: `secrets/` with agenix encryption
+
+### 3. Remote Deployment Model
+
+**From cmos (control host):**
+```bash
+# Deploy to any host remotely
+nixos-rebuild switch --flake .#misc --target-host misc.home.arpa
+nixos-rebuild switch --flake .#jimmich --target-host jimmich.home.arpa
+nixos-rebuild switch --flake .#nixvm --target-host nixvm.home.arpa
+
+# Local deployment (cmos itself)
+nixos-rebuild switch --flake .#cmos
+```
+
+---
+
+## 📋 Bootstrap Methods
+
+For fresh installations on new or wiped hardware, this repository provides two bootstrap approaches:
+
+### 🤖 Automated ISO Installation
+**Recommended for: Server hosts (misc, jimmich)**
+
+Fully automated USB boot installation with zero manual intervention. The ISO automatically detects hardware, partitions disks, installs NixOS with SSH and networking, and prepares for flake deployment.
+
+**Advantages:**
+- ✅ Zero manual intervention
+- ✅ 5-10 minute installation time
+- ✅ Standardized disk layout
+- ✅ Immediate SSH access after reboot
+
+**See:** [Bootstrap - Automated ISO Installation](bootstrap/automated-iso.md)
+
+### 🔐 YubiKey Secure Bootstrap
+**Recommended for: Desktop hosts, remote deployments**
+
+Hardware-authenticated bootstrap using YubiKey PIV for encryption and signing. Suitable for deployment over untrusted networks or when bootstrap files must be publicly hosted.
+
+**Advantages:**
+- ✅ Hardware-encrypted secrets
+- ✅ Safe for public hosting
+- ✅ Physical touch requirement
+- ✅ Cryptographic signature verification
+
+**See:** [Bootstrap - YubiKey Secure](bootstrap/yubikey-secure.md)
+
+---
+
+## 🔄 Standard Deployment Workflow
+
+### For Fresh Installations
+
+1. **Choose bootstrap method** based on host type and security needs
+2. **Create installation media** (USB ISO or secure loader)
+3. **Boot target host** and let bootstrap run
+4. **Deploy agenix key** to target host
+5. **Deploy flake configuration** from cmos
+6. **Verify deployment** (services, secrets, networking)
+
+### For Ongoing Management
+
+All future deployments after initial bootstrap:
+
+```bash
+# Update configuration in /etc/nixos
+vim modules/services/some-service.nix
+
+# Test locally first (if applicable)
+nixos-rebuild test --flake .#cmos
+
+# Deploy to target
+nixos-rebuild switch --flake .#misc --target-host misc.home.arpa
+```
+
+---
+
+## 📖 Detailed Bootstrap Documentation
+
+For comprehensive bootstrap procedures, see the **Bootstrap System Documentation**:
+
+- **[Bootstrap Overview](bootstrap/README.md)** - Choose the right method
+- **[Automated ISO Installation](bootstrap/automated-iso.md)** - USB-based automated deployment
+- **[YubiKey Secure Bootstrap](bootstrap/yubikey-secure.md)** - Hardware-authenticated deployment
+- **[Bootstrap Scripts Reference](bootstrap/scripts.md)** - Script documentation
+
+---
+
+## 🔑 Secret Management in Fresh Deployments
+
+### Initial Secret Deployment
+
+After bootstrap but before full configuration:
+
+```bash
+# Copy agenix decryption key to target
+ssh root@<target-ip> 'mkdir -p /etc/nixos/keys'
+scp /etc/nixos/keys/<hostname>-agenix.key root@<target-ip>:/etc/nixos/keys/
+
+# Now deploy full configuration (secrets will decrypt)
+nixos-rebuild switch --flake .#<hostname> --target-host <target-ip>
+```
+
+### Adding New Hosts to Secrets
+
+When adding a new host that needs access to existing secrets:
+
+```bash
+# 1. Generate agenix key on new host or via bootstrap
+# 2. Add public key to secrets/secrets.nix
+# 3. Re-encrypt ALL shared secrets
+cd /etc/nixos/secrets
+nix run github:ryantm/agenix -- -r -i ../keys/cmos-agenix.key
+```
+
+**See:** [Secret Management Documentation](../security/secrets-agenix.md)
+
+---
+
+## 🌐 Network Configuration Considerations
+
+### Interface Naming
+
+Network interfaces are configured **per-host** in `hosts/&lt;hostname>/default.nix`:
+
+```nix
+# Each host has different interface names
+# cmos/jimmich: enp8s0
+# misc: enp3s0f0
+# nixvm: enp1s0 (virtio)
+```
+
+**Always verify interface name** after fresh install:
+```bash
+ssh root@<target-ip> 'ip link show'
+```
+
+### Static IP Assignments
+
+Server hosts use static IPs configured in their host-specific configs:
+- **misc**: 192.168.1.5
+- **jimmich**: 192.168.1.10
+- **cmos**: DHCP (desktop)
+
+---
+
+## 🔍 Troubleshooting Fresh Deployments
+
+### Can't SSH After Bootstrap
+
+```bash
+# Remove old host key
+ssh-keygen -R <target-ip>
+ssh-keygen -R <hostname>.home.arpa
+
+# Verify target is reachable
+ping <target-ip>
+
+# Check SSH service on target (if console access available)
+systemctl status sshd
+```
+
+### Secrets Won't Decrypt
+
+```bash
+# Verify agenix key exists on target
+ssh root@<target> 'ls -la /etc/nixos/keys/'
+
+# Check agenix service
+ssh root@<target> 'systemctl status agenix'
+
+# Verify host's public key is in secrets.nix
+grep "<hostname>" /etc/nixos/secrets/secrets.nix
+```
+
+### Flake Deployment Fails
+
+```bash
+# Ensure all new files are git tracked
+git status
+git add <new-files>
+
+# Test build without deploying
+nix build .#nixosConfigurations.<hostname>.config.system.build.toplevel
+
+# Deploy with verbose output
+nixos-rebuild switch --flake .#<hostname> --target-host <target> --show-trace
+```
+
+---
+
+## 🛠️ Alternative Deployment Tools
+
+While this infrastructure uses direct `nixos-rebuild` with flakes, other tools exist:
+
+### nixos-anywhere
+**Purpose**: Install NixOS from scratch remotely
+```bash
+nix run github:nix-community/nixos-anywhere -- --flake .#<host> root@<ip>
+```
+
+### deploy-rs
+**Purpose**: Declarative multi-host deployment
+```bash
+nix run github:serokell/deploy-rs .#<host>
+```
+
+**Current approach**: Direct `nixos-rebuild` for simplicity and transparency
+
+---
+
+## ✅ Fresh Deployment Checklist
+
+- [ ] Choose bootstrap method (Automated ISO or YubiKey Secure)
+- [ ] Build/prepare installation media
+- [ ] Boot target host from installation media
+- [ ] Verify bootstrap completes successfully
+- [ ] Target host reboots and is SSH accessible
+- [ ] Copy agenix key to target
+- [ ] Deploy full flake configuration
+- [ ] Verify all services start without failures
+- [ ] Check secrets are decrypted (`ls /run/agenix/`)
+- [ ] Test host-specific functionality
+- [ ] Update DNS/firewall if needed
+- [ ] Commit configuration changes to git
+
+---
+
+## 📖 Related Documentation
+
+- **[Bootstrap System](bootstrap/README.md)** - Complete bootstrap documentation
+- **[Secret Management](../security/secrets-agenix.md)** - Agenix workflow
+- **[Network Configuration](../infrastructure/overview.md)** - Network setup
+- **[Operations Guide](../README.md)** - General operations documentation
+
+---
+
+**Last Updated**: 2025-10-03
+**Maintained By**: Infrastructure Team
+**Next Review**: 2025-11-03
+
+---
+
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🔧 [Operations](../README.md)*

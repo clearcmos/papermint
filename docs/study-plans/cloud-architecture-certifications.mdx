@@ -1,0 +1,225 @@
+---
+title: "Study Plan: Cloud Architecture & Infrastructure Certifications"
+description: "Goal: Formalize existing cloud architecture and Terraform skills with industry certifications. Add LinkedIn credibility signals that match the work already b..."
+---
+
+Goal: **Formalize existing cloud architecture and Terraform skills with industry certifications. Add LinkedIn credibility signals that match the work already being done.**
+Status: **No rush** | Self-paced
+
+---
+
+## What This Plan Is
+
+Two certifications that validate skills you already have, plus free system design material to sharpen your architecture vocabulary. None of this involves learning to code. All of it makes your LinkedIn and resume stronger.
+
+---
+
+## Gap Analysis
+
+| Topic | Current Level | Gap Size |
+|---|---|---|
+| GCP Cloud Functions, Pub/Sub, Cloud Logging | Production daily use | **None** |
+| GCP BigQuery | Production use (archive cleanup) | **Minimal** |
+| GCP IAM & service accounts | Production (domain-wide delegation, OIDC, multiple auth models) | **Minimal** |
+| GCP Compute Engine, GKE, Kubernetes | Conceptual awareness, no hands-on | **Medium** |
+| GCP networking (VPC, load balancing, CDN) | Limited exposure | **Medium** |
+| GCP storage options (Cloud SQL, Spanner, Bigtable, Firestore) | Cloud SQL yes, others conceptual | **Medium** |
+| GCP cost optimization & billing | Basic awareness | **Medium** |
+| GCP AI/ML services (Vertex AI) | Used Gemini API, not Vertex platform | **Medium** |
+| Terraform fundamentals (providers, state, modules, for_each) | Production daily use (Okta IaC) | **None** |
+| Terraform Cloud / HCP Terraform | Not used | **Small** |
+| Terraform lifecycle rules, validation, ephemeral values | Used create_before_destroy, others less so | **Small** |
+| System design vocabulary & patterns | Strong intuitively, informal terminology | **Small** |
+
+---
+
+## Phase 1: Google Cloud Professional Cloud Architect
+
+This is the main event. The cert covers 6 domains - you're already strong in several, and the gaps are learnable without writing code.
+
+### Primary Path (Coursera)
+
+**[Preparing for Google Cloud Certification: Cloud Architect Professional Certificate](https://www.coursera.org/professional-certificates/gcp-cloud-architect) - Google Cloud**
+
+6-course series. Take them in order:
+
+1. **Google Cloud Fundamentals: Core Infrastructure** - Review/skim. You know most of this from production use. Focus on areas outside your daily work (Compute Engine, App Engine, GKE).
+
+2. **Essential Google Cloud Infrastructure: Foundation** - VPCs, networking, IAM deep dive. Your IAM knowledge from Okta transfers here but GCP's model is different. Pay attention.
+
+3. **Essential Google Cloud Infrastructure: Core Services** - Storage options (Cloud SQL, Spanner, Bigtable, Firestore), resource management, monitoring. You know Cloud Logging and BigQuery - this fills in the rest.
+
+4. **Elastic Google Cloud Infrastructure: Scaling and Automation** - Load balancing, autoscaling, infrastructure automation. Some Terraform overlap. Focus on GCP-native scaling patterns.
+
+5. **Reliable Google Cloud Infrastructure: Design and Process** - This is the architecture course. Designing for reliability, security, compliance. Closest to what you actually do. This is where your production experience becomes an advantage.
+
+6. **Preparing for your Professional Cloud Architect Journey** - Exam prep. Case studies, practice questions, domain review.
+
+### Supplementary (Free)
+
+- **[Google Cloud Architecture Framework](https://cloud.google.com/architecture/framework)** - Official docs. The exam tests against this framework. Skim the pillars: operational excellence, security, reliability, cost optimization, performance.
+
+- **[Google Cloud Professional Cloud Architect exam guide](https://cloud.google.com/learn/certification/cloud-architect)** - Official exam page with domain breakdown. Read this first to know exactly what's tested.
+
+- **[Tutorials Dojo GCP PCA Study Guide](https://tutorialsdojo.com/gcp-professional-cloud-architect-exam-study-guide/)** - Community study guide with topic-by-topic breakdown and cheat sheets.
+
+### What to Focus On (Based on Your Gaps)
+
+**Spend more time on:**
+- Compute options beyond Cloud Functions (Compute Engine, GKE, Cloud Run, App Engine) - when to use which
+- Networking (VPC design, load balancing, Cloud CDN, Cloud Armor)
+- Database selection (when Spanner vs Cloud SQL vs Bigtable vs Firestore)
+- Cost optimization (committed use discounts, sustained use, right-sizing)
+- Vertex AI basics (the 2026 exam added AI/ML architecture questions)
+- Case studies (the exam has 2-4 case studies you need to analyze)
+
+**Skim or skip:**
+- IAM fundamentals (you live this)
+- Cloud Functions, Pub/Sub, Cloud Logging (your daily tools)
+- BigQuery basics (you already query it in production)
+- Service accounts and domain-wide delegation (you set these up)
+
+### Exam Details
+
+- **Format:** 50 multiple choice / multiple select questions, 2 hours
+- **Cost:** $200 USD
+- **Validity:** 2 years
+- **Where:** Online proctored or test center
+- **Passing score:** Not published, estimated ~70-80%
+
+### Milestone
+
+> You can explain GCP architecture decisions across compute, storage, networking, and security - not just for the services you use daily, but for the full platform. You pass the exam and add "Google Cloud Professional Cloud Architect" to LinkedIn.
+
+---
+
+## Phase 2: HashiCorp Terraform Associate (004)
+
+Quick win. You already use Terraform in production. This is mostly exam prep, not learning.
+
+**Important:** The 003 exam was retired January 2026. You need to take the **004** version, which covers Terraform 1.12 and adds HCP Terraform topics.
+
+### Primary Path (Coursera)
+
+**[Exam Prep: HashiCorp Certified Terraform Associate (003)](https://www.coursera.org/learn/exam-prep-hashicorp-certified-terraform-associate-003) - Whizlabs**
+
+Note: This course targets 003 but the fundamentals are the same. Supplement with the 004-specific topics below.
+
+### Supplementary (Free)
+
+- **[HashiCorp Official Terraform Associate 004 Study Guide](https://developer.hashicorp.com/terraform/tutorials/certification-004/associate-study-004)** - The official learning path. This is the most important resource. Follow this, not the Coursera course, for 004-specific content.
+
+- **[Terraform Associate 004 Exam Content List](https://developer.hashicorp.com/terraform/tutorials/certification-004/associate-review-004)** - Exact list of what's tested. Check every box against your knowledge.
+
+- **[Terraform Associate 004 Sample Questions](https://developer.hashicorp.com/terraform/tutorials/certification-003/associate-questions)** - Official practice questions from HashiCorp.
+
+### What to Focus On (Based on Your Gaps)
+
+**Spend more time on:**
+- HCP Terraform (Terraform Cloud) workspaces and projects - you haven't used this
+- Ephemeral values and write-only arguments - new in 004
+- Custom validation conditions for variables - new in 004
+- State management commands (terraform state mv, rm, import) - you may not use these daily
+- Module versioning and registry publishing
+
+**Skim or skip:**
+- Provider configuration (you do this daily)
+- Resource blocks, variables, outputs (you know this)
+- for_each, count, dynamic blocks (you use these in the Okta modules)
+- create_before_destroy lifecycle (you've used this with MD5 hashing)
+- State concepts (you understand remote state from the team repo)
+
+### Exam Details
+
+- **Format:** Multiple choice, multiple answer, true/false. 57 questions, 60 minutes
+- **Cost:** $70.50 USD
+- **Validity:** 2 years (with optional renewal)
+- **Where:** Online proctored (PSI)
+- **Passing score:** Not published, estimated ~70%
+
+### Milestone
+
+> You pass the exam and add "HashiCorp Certified: Terraform Associate" to LinkedIn. You can confidently discuss Terraform patterns, state management, and module design in any technical conversation using standard terminology.
+
+---
+
+## Phase 3: System Design Vocabulary (Ongoing, No Exam)
+
+This isn't a certification - it's sharpening your ability to talk about architecture using industry-standard terms. You already design systems. This gives you the shared language.
+
+### Resources (All Free)
+
+- **[ByteByteGo System Design 101](https://github.com/ByteByteGoHq/system-design-101)** - GitHub repo. Visual explanations of system design patterns: load balancing, caching, message queues, API gateways, microservices, database patterns. No code. Browse topics that are relevant to your work, skip the FAANG-style app design problems.
+
+- **[ByteByteGo YouTube Channel](https://www.youtube.com/@ByteByteGo)** - Short animated videos explaining system design concepts. Watch at 1.5x when you have downtime. Good ones for you: API gateway patterns, message queue architectures, caching strategies, microservices communication.
+
+- **[ByteByteGo System Design Cheat Sheet (PDF)](https://bytebytego.com/guides/system-design-cheat-sheet/)** - One-page visual reference of common patterns.
+
+### How to Use This
+
+Don't grind through it. Browse the topics, and when you see something you recognize from your own work, read how they describe it. The goal is to map your practical experience to standard terminology. When you built the Cloud Functions error notifier with Pub/Sub and a self-excluding log sink - that's the "fan-out messaging pattern with dead letter prevention." You already know how to build it. Now you know what to call it.
+
+### Milestone
+
+> When someone asks "how would you design X" you can answer using both your practical experience AND standard system design vocabulary. You're not learning new concepts - you're learning the shared language for concepts you already apply.
+
+---
+
+## Resource Index
+
+### Coursera (Premium)
+
+| Phase | Course | Provider |
+|---|---|---|
+| 1 | Preparing for Google Cloud Certification: Cloud Architect (6-course certificate) | Google Cloud |
+| 2 | Exam Prep: HashiCorp Certified Terraform Associate (003) | Whizlabs |
+
+### Free Resources
+
+| Phase | Resource | Type |
+|---|---|---|
+| 1 | Google Cloud Architecture Framework | Official docs |
+| 1 | GCP PCA Exam Guide | Official exam page |
+| 1 | Tutorials Dojo GCP PCA Study Guide | Community guide |
+| 2 | Terraform Associate 004 Official Study Guide | HashiCorp tutorials |
+| 2 | Terraform Associate 004 Exam Content List | HashiCorp docs |
+| 2 | Terraform Associate 004 Sample Questions | HashiCorp practice |
+| 3 | ByteByteGo System Design 101 (GitHub) | Visual reference |
+| 3 | ByteByteGo YouTube Channel | Video explainers |
+| 3 | ByteByteGo System Design Cheat Sheet | PDF reference |
+
+---
+
+## Suggested Order
+
+1. **Start with Phase 2 (Terraform)** - It's the fastest win. A few days of focused review, take the exam, add the badge. Quick confidence boost.
+2. **Then Phase 1 (GCP Cloud Architect)** - This is the longer commitment but the bigger payoff. Work through the Coursera courses at your own pace.
+3. **Phase 3 (System Design)** - Ongoing background reading. No deadline, no pressure.
+
+---
+
+## Your Advantages Going In
+
+Things you bring that most cert-studiers don't:
+
+- **You've already built production systems on GCP.** Cloud Functions, Pub/Sub, BigQuery, Cloud Logging, GCS, Cloud Scheduler, OIDC auth - you don't need to learn what these are. You need to learn the exam's way of asking about them.
+- **You've already done Terraform in a team setting.** PR-based workflow, CircleCI plan/apply, modules, state management, lifecycle rules. Most people studying for Terraform Associate have only done tutorials.
+- **You understand multi-system architecture.** The GCP exam tests "which service for which problem" - you already make those decisions daily across 15+ platforms.
+- **You think about failure modes.** Error accumulation, checkpoint/resume, graceful degradation, self-excluding log sinks. The GCP reliability domain will feel natural.
+- **Identity and IAM is your home turf.** The GCP exam has a security/IAM domain. With your Okta Terraform and SCIM experience, this is free points.
+
+---
+
+## What These Certs Do For You
+
+- **Google Cloud Professional Cloud Architect** - The most recognized cloud architecture cert. Shows up as a LinkedIn badge. Tells hiring managers "this person can design cloud infrastructure, and Google verified it." Directly relevant to every role you'd target.
+- **HashiCorp Terraform Associate** - Shows IaC competency. Quick to get, well-recognized in DevOps/infrastructure circles. Pairs perfectly with the GCP cert.
+- **Combined signal:** "I build production cloud infrastructure as code" - backed by two industry certs and a portfolio of real work. That's a strong LinkedIn profile.
+
+Sources:
+- [Coursera GCP Cloud Architect Certificate](https://www.coursera.org/professional-certificates/gcp-cloud-architect)
+- [Coursera Terraform Associate Exam Prep](https://www.coursera.org/learn/exam-prep-hashicorp-certified-terraform-associate-003)
+- [HashiCorp Terraform Associate 004 Study Guide](https://developer.hashicorp.com/terraform/tutorials/certification-004/associate-study-004)
+- [HashiCorp Terraform Associate 004 Exam Content](https://developer.hashicorp.com/terraform/tutorials/certification-004/associate-review-004)
+- [Google Cloud Architecture Framework](https://cloud.google.com/architecture/framework)
+- [ByteByteGo System Design 101](https://github.com/ByteByteGoHq/system-design-101)

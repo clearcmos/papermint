@@ -1,0 +1,121 @@
+---
+title: "Font Optimization for Crisp Text Rendering"
+description: "Linux font rendering often appears softer and less crisp compared to Windows or macOS due to different text rendering pipelines and default settings. This is..."
+---
+
+## Problem Statement
+
+Linux font rendering often appears softer and less crisp compared to Windows or macOS due to different text rendering pipelines and default settings. This is particularly noticeable on:
+
+- Wayland with fractional scaling (1.5x)
+- High-DPI displays
+- Comparison with Windows ClearType/DirectWrite or macOS CoreText
+
+## Root Causes
+
+1. **Disabled Sub-pixel Anti-aliasing**: Many Linux distributions disable sub-pixel AA by default, falling back to grayscale AA
+2. **Conservative Hinting**: "Slight" hinting preserves font shapes but doesn't snap stems to pixels like Windows
+3. **Fractional Scaling Issues**: Wayland compositors often disable sub-pixel AA under fractional scaling
+4. **Font Design Differences**: Open source fonts often have lighter hinting compared to proprietary system fonts
+
+## Solution Implemented
+
+### NixOS Configuration (`kde.nix`)
+
+```nix
+fonts = {
+  fontconfig = {
+    enable = true;
+    subpixel.rgba = "rgb";        # Enable sub-pixel AA (RGB)
+    hinting.enable = true;
+    hinting.style = "medium";     # Crisp hinting like Windows
+    antialias = true;
+    localConf = ''
+      <fontconfig>
+        <match target="font">
+          <edit name="lcdfilter" mode="assign"><const>lcddefault</const></edit>
+          <edit name="rgba" mode="assign"><const>rgb</const></edit>
+          <edit name="hintstyle" mode="assign"><const>hintmedium</const></edit>
+        </match>
+      </fontconfig>
+    '';
+  };
+};
+```
+
+### What This Achieves
+
+- **Sub-pixel RGB rendering**: Sharp text edges using RGB sub-pixels
+- **Medium hinting**: Balance between shape preservation and pixel alignment
+- **LCD filtering**: Reduces color fringing from sub-pixel rendering
+
+## Verification Commands
+
+Check current font rendering settings:
+```bash
+fc-match -v | grep -E 'rgba|hint|antialias|lcdfilter'
+ls -l /etc/fonts/conf.d | grep -E 'sub-pixel|hint|lcdfilter'
+```
+
+Expected output after applying configuration:
+- `rgba: 1(i)(w)` (RGB enabled, was 5 for none)
+- `hintstyle: 2(i)(w)` (medium hinting, was 1 for slight)
+- `10-sub-pixel-rgb.conf` symlink present
+- `10-hinting-medium.conf` symlink present
+
+## Alternative Tweaks (Not Currently Applied)
+
+### For Maximum Crispness
+Change hinting to "full" in the configuration:
+```nix
+hinting.style = "full";     # Maximum crispness
+```
+
+### Different LCD Filters
+```nix
+# In localConf, try different filters:
+<edit name="lcdfilter" mode="assign"><const>lcdlight</const></edit>  # Less filtering
+<edit name="lcdfilter" mode="assign"><const>lcdlegacy</const></edit> # Original filter
+```
+
+### Font Choices for Better Screen Rendering
+Consider switching from Noto Sans to:
+- **Inter**: Excellent on Linux UIs
+- **IBM Plex Sans**: Good screen presence
+- **Cantarell**: GNOME's UI font, tuned for screens
+
+### Advanced FreeType Properties
+For further tweaking, set environment variable:
+```bash
+export FREETYPE_PROPERTIES="cff:no-stem-darkening=0;type1:no-stem-darkening=0;autofitter:warping=1"
+```
+
+## Troubleshooting
+
+### Text Still Looks Soft
+1. Verify sub-pixel rendering is actually active (check `rgba` value)
+2. Ensure KDE System Settings → Fonts matches NixOS config
+3. Try "full" hinting instead of "medium"
+4. Check if fractional scaling is interfering
+
+### Color Fringing
+1. Try `lcdfilter=light` instead of `lcddefault`
+2. Ensure monitor RGB sub-pixel order is correct
+3. Consider disabling sub-pixel rendering if fringing is severe
+
+### Application-Specific Issues
+- **Firefox**: Enable Wayland with `MOZ_ENABLE_WAYLAND=1`
+- **Chromium**: Use `--ozone-platform=wayland`
+- **Electron apps**: Add `--enable-features=UseOzonePlatform --ozone-platform=wayland`
+
+### Reverting Changes
+To revert to softer rendering, change in `kde.nix`:
+```nix
+subpixel.rgba = "none";
+hinting.style = "slight";
+```
+
+## Configuration History
+
+- **2025-08-23**: Initial implementation with RGB sub-pixel rendering and medium hinting
+- Applied to resolve soft text rendering compared to Windows systems

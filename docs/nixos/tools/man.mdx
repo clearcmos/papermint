@@ -1,0 +1,83 @@
+---
+title: "Man"
+description: "For our custom NixOS packages that don’t come with man pages by default, I want to establish a standard so that documentation is created, packaged, and deplo..."
+---
+
+For our **custom NixOS packages** that don’t come with man pages by default, I want to establish a standard so that documentation is created, packaged, and deployed in a clean, declarative way across all hosts.
+
+Here is the full context:
+
+---
+
+### 1. Source Location
+
+* All man page sources will live under:
+
+  ```
+  /etc/nixos/docs/man/src/
+  ```
+* Each custom package will have its own Markdown source file under this directory as needed (e.g., `mypackage.md`).
+
+---
+
+### 2. Creation Process (Gold Standard)
+
+For each custom package, the man page should follow the **standard man page format** used across Linux.
+
+* **Write in Markdown** for easier editing:
+
+  * Sections to include (at minimum):
+
+    ```
+    NAME
+    SYNOPSIS
+    DESCRIPTION
+    OPTIONS
+    EXAMPLES
+    SEE ALSO
+    ```
+* **Convert Markdown → man format** with `pandoc`:
+
+  ```bash
+  pandoc -s ./docs/man/src/mypackage.md -t man -o ./docs/man/man1/mypackage.1
+  ```
+* The resulting `.1` (or `.5`, `.8`) file is the actual man page source for the system.
+
+This ensures consistency with how native Linux man pages are authored while keeping our sources readable and version-controlled.
+
+---
+
+### 3. Packaging & Build Process
+
+* During the Nix build of the corresponding package:
+
+  1. Take the Markdown source from `src/`.
+  2. Convert it into the correct section (`man1`, `man5`, `man8`).
+  3. Place it under `$out/share/man/manX/` in the package output.
+
+This is the standard location expected by `man` so no additional manual configuration is needed.
+
+---
+
+### 4. Declarative Deployment Behavior
+
+* The man page should only be installed **if the corresponding package is installed** on the system.
+* This must be fully declarative so that:
+
+  * Any host running the package automatically has the correct man page installed system-wide.
+  * Hosts without the package won’t have unrelated docs installed.
+
+---
+
+### 5. Case-by-Case Creation
+
+* I will request man pages **case by case** for our custom packages that lack documentation.
+* Once requested, the above process ensures we have a consistent workflow across all packages and hosts without manual steps.
+
+---
+
+This way we get:
+
+* Gold standard man pages following Linux conventions.
+* Declarative and automatic installation across all NixOS hosts.
+* Clean separation between source files, build artifacts, and deployed files.

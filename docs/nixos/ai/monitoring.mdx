@@ -1,0 +1,599 @@
+---
+title: "AI System Monitoring Guide"
+description: "Comprehensive monitoring and diagnostics guide for the Ollama AI infrastructure."
+---
+
+## Monitoring Overview
+
+The AI system includes multiple monitoring layers to ensure optimal performance, resource utilization, and early detection of issues. This guide covers system health checks, performance monitoring, and troubleshooting tools.
+
+## Quick Health Checks
+
+### System Status Commands
+
+```bash
+# Overall AI system health
+bash /etc/ollama-validate.sh
+
+# Service status
+systemctl status ollama.service
+
+# Model availability
+curl -s http://localhost:11434/api/tags | jq '.models[].name'
+
+# Currently loaded models
+curl -s http://localhost:11434/api/ps | jq '.models[]'
+```
+
+### One-Line Status Check
+```bash
+# Quick system overview
+echo "Service: $(systemctl is-active ollama.service) | Models: $(curl -s http://localhost:11434/api/tags | jq -r '.models | length') installed | Loaded: $(curl -s http://localhost:11434/api/ps | jq -r '.models | length') | VRAM: $(rocm-smi --showmeminfo vram --csv | grep -E "^[0-9]" | cut -d',' -f2)"
+```
+
+## Service Monitoring
+
+### Ollama Service Health
+
+**Service Status Monitoring**:
+```bash
+# Detailed service status
+systemctl status ollama.service
+
+# Service logs (recent)
+journalctl -u ollama.service -n 50
+
+# Real-time log monitoring
+journalctl -fu ollama.service
+
+# Service configuration check
+systemctl show ollama.service | grep -E "(Environment|ExecStart)"
+```
+
+**API Endpoint Health**:
+```bash
+# Test API responsiveness
+curl -w "Response time: %{time_total}s\n" \
+     -s http://localhost:11434/api/version
+
+# Check API endpoints
+curl -s http://localhost:11434/api/tags     # List models
+curl -s http://localhost:11434/api/ps       # Active models
+curl -s http://localhost:11434/api/version  # Service version
+```
+
+### Model Preload Service
+
+**Monitor Model Download Service**:
+```bash
+# Check preload service status
+systemctl status ollama-model-preload.service
+
+# View download logs
+journalctl -u ollama-model-preload.service -n 100
+
+# Manual service restart (if needed)
+sudo systemctl restart ollama-model-preload.service
+```
+
+## GPU and Hardware Monitoring
+
+### VRAM Usage Monitoring
+
+**Real-Time VRAM Monitoring**:
+```bash
+# Continuous VRAM monitoring
+watch -n 1 'rocm-smi --showmeminfo vram'
+
+# VRAM usage with timestamps
+while true; do
+  echo "$(date): $(rocm-smi --showmeminfo vram --csv | grep -E "^[0-9]" | cut -d',' -f2,3)"
+  sleep 5
+done
+```
+
+**VRAM Usage Breakdown**:
+```bash
+# Detailed memory information
+rocm-smi --showmeminfo vram --csv
+
+# Memory usage by process (if available)
+rocm-smi --showpids
+
+# GPU utilization
+rocm-smi --showuse
+```
+
+### GPU Performance Monitoring
+
+**GPU Utilization**:
+```bash
+# Real-time GPU usage
+watch -n 1 'rocm-smi --showuse --showtemp --showpower'
+
+# GPU clock speeds
+rocm-smi --showclocks
+
+# GPU details
+rocm-smi --showhw
+```
+
+**Temperature and Power Monitoring**:
+```bash
+# Monitor temperatures
+watch -n 2 'rocm-smi --showtemp'
+
+# Power consumption
+watch -n 2 'rocm-smi --showpower'
+
+# Fan speeds (if available)
+rocm-smi --showfan
+```
+
+### Gaming Performance Impact
+
+**VRAM Allocation Monitoring**:
+```bash
+#!/bin/bash
+# Monitor VRAM allocation for gaming compatibility
+
+total_vram=$(rocm-smi --showmeminfo vram --csv | grep -E "^[0-9]" | cut -d',' -f3 | sed 's/ MB//')
+used_vram=$(rocm-smi --showmeminfo vram --csv | grep -E "^[0-9]" | cut -d',' -f2 | sed 's/ MB//')
+available_vram=$((total_vram - used_vram))
+
+echo "VRAM Status for Gaming:"
+echo "  Total: ${total_vram}MB"
+echo "  Used by AI: ${used_vram}MB" 
+echo "  Available for WoW: ${available_vram}MB"
+
+if [ $available_vram -gt 6000 ]; then
+  echo "  Status: ✅ Sufficient VRAM for gaming"
+elif [ $available_vram -gt 4000 ]; then
+  echo "  Status: ⚠️  Limited VRAM for gaming"
+else
+  echo "  Status: ❌ Insufficient VRAM for gaming"
+fi
+```
+
+## Model Performance Monitoring
+
+### Model Loading and Response Times
+
+**Response Time Monitoring**:
+```bash
+#!/bin/bash
+# Benchmark model response times
+
+models=("qwen2.5-coder:7b-instruct" "qwen2.5:7b-instruct" "bge-m3")
+
+for model in "${models[@]}"; do
+  echo "Testing $model..."
+  
+  # Cold start (model not loaded)
+  curl -X POST http://localhost:11434/api/generate \
+    -d "{\"model\": \"$model\", \"keep_alive\": 0}" > /dev/null 2>&1
+  
+  start_time=$(date +%s.%N)
+  response=$(curl -s -X POST http://localhost:11434/api/generate \
+    -d "{\"model\": \"$model\", \"prompt\": \"test\", \"stream\": false}")
+  end_time=$(date +%s.%N)
+  
+  response_time=$(echo "$end_time - $start_time" | bc -l)
+  
+  if [[ $model == "bge-m3" ]]; then
+    # Test embeddings for bge-m3
+    start_time=$(date +%s.%N)
+    curl -s -X POST http://localhost:11434/api/embeddings \
+      -d "{\"model\": \"$model\", \"prompt\": \"test\"}" > /dev/null
+    end_time=$(date +%s.%N)
+    response_time=$(echo "$end_time - $start_time" | bc -l)
+  fi
+  
+  printf "  Response time: %.2fs\n" $response_time
+  echo
+done
+```
+
+**Model Loading Monitoring**:
+```bash
+# Monitor model loading/unloading
+journalctl -fu ollama.service | grep -E "(loading|unloading|model)" --line-buffered
+
+# Check model memory usage
+curl -s http://localhost:11434/api/ps | jq '.models[] | {name, size_vram}'
+```
+
+### Concurrent Request Monitoring
+
+**Load Testing**:
+```bash
+#!/bin/bash
+# Test concurrent request handling
+
+model="qwen2.5:7b-instruct"
+concurrent_requests=6
+prompt="Test concurrent request"
+
+echo "Testing $concurrent_requests concurrent requests..."
+start_time=$(date +%s.%N)
+
+for i in $(seq 1 $concurrent_requests); do
+  curl -s -X POST http://localhost:11434/api/generate \
+    -d "{\"model\": \"$model\", \"prompt\": \"$prompt $i\", \"stream\": false}" \
+    > "/tmp/response_$i.json" &
+done
+
+wait
+end_time=$(date +%s.%N)
+
+total_time=$(echo "$end_time - $start_time" | bc -l)
+avg_time=$(echo "$total_time / $concurrent_requests" | bc -l)
+
+printf "Total time: %.2fs\n" $total_time
+printf "Average time per request: %.2fs\n" $avg_time
+
+# Cleanup
+rm -f /tmp/response_*.json
+```
+
+## Application-Specific Monitoring
+
+### smart-commit Monitoring
+
+**Usage Analytics**:
+```bash
+# Monitor smart-commit usage patterns
+grep "smart-commit" /var/log/syslog | tail -20
+
+# Test smart-commit performance
+cd /path/to/git/repo
+time smart-commit --dry-run
+```
+
+### keeper Monitoring
+
+**AI Service Status**:
+```bash
+# keeper built-in monitoring
+cd /home/nicholas/git/mine/keeper
+./scripts/keeper-cli ai status
+
+# Test categorization performance
+time ./scripts/keeper-cli ai create "Test note for performance monitoring"
+```
+
+### sage Monitoring
+
+**System Administration Queries**:
+```bash
+# Test sage response time
+time sage howto systemctl "check service status"
+
+# Monitor sage usage
+ps aux | grep sage
+```
+
+## System Resource Monitoring
+
+### CPU Usage Monitoring
+
+**AI Process Monitoring**:
+```bash
+# Monitor Ollama CPU usage
+top -p $(pgrep ollama)
+
+# Thread usage monitoring
+ps -eLf | grep ollama | wc -l
+
+# CPU temperature monitoring
+sensors | grep -E "(Core|Package)"
+```
+
+**Thread Allocation Monitoring**:
+```bash
+# Check OMP thread allocation
+echo "OMP_NUM_THREADS: $OMP_NUM_THREADS"
+
+# Monitor CPU core usage
+htop -u ollama
+
+# System load monitoring
+uptime
+```
+
+### Memory and Storage Monitoring
+
+**System Memory Usage**:
+```bash
+# Overall memory usage
+free -h
+
+# Process memory usage
+ps aux --sort=-%mem | grep -E "(ollama|smart-commit|keeper|sage)" | head -10
+
+# Memory fragmentation
+cat /proc/meminfo | grep -E "(MemFree|MemAvailable|Buffers|Cached)"
+```
+
+**Storage Monitoring**:
+```bash
+# Model storage usage
+du -sh /var/lib/ollama/
+
+# Detailed model sizes
+find /var/lib/ollama/models -name "*.bin" -o -name "*.gguf" | xargs ls -lh
+
+# Available disk space
+df -h /var/lib/ollama
+```
+
+## Network and API Monitoring
+
+### API Performance Monitoring
+
+**Request Latency Monitoring**:
+```bash
+# Monitor API response times
+while true; do
+  start_time=$(date +%s.%N)
+  curl -s http://localhost:11434/api/version > /dev/null
+  end_time=$(date +%s.%N)
+  latency=$(echo "($end_time - $start_time) * 1000" | bc -l)
+  printf "$(date '+%H:%M:%S') API latency: %.1fms\n" $latency
+  sleep 5
+done
+```
+
+**Connection Monitoring**:
+```bash
+# Monitor active connections
+ss -tuln | grep 11434
+
+# Connection statistics
+netstat -an | grep 11434
+
+# Network traffic monitoring (if needed)
+iftop -i lo -f "port 11434"
+```
+
+### Request Queue Monitoring
+
+**Queue Status**:
+```bash
+# Monitor request queue (custom implementation)
+# This would require additional API endpoints or log parsing
+
+# Check for connection timeouts
+journalctl -u ollama.service | grep -i timeout | tail -10
+
+# Monitor concurrent connections
+ss -tn | grep :11434 | wc -l
+```
+
+## Performance Alerting
+
+### Automated Monitoring Scripts
+
+**Health Check Script** (`/etc/ollama-health.sh`):
+```bash
+#!/bin/bash
+# Comprehensive health check with alerting
+
+VRAM_THRESHOLD=90    # Alert if VRAM usage > 90%
+RESPONSE_THRESHOLD=5 # Alert if response time > 5 seconds
+TEMP_THRESHOLD=80    # Alert if GPU temp > 80°C
+
+# Check service status
+if ! systemctl is-active ollama.service > /dev/null; then
+  echo "ALERT: Ollama service is not running"
+  exit 1
+fi
+
+# Check VRAM usage
+vram_used=$(rocm-smi --showmeminfo vram --csv | grep -E "^[0-9]" | cut -d',' -f2 | sed 's/ MB//')
+vram_total=$(rocm-smi --showmeminfo vram --csv | grep -E "^[0-9]" | cut -d',' -f3 | sed 's/ MB//')
+vram_percent=$((vram_used * 100 / vram_total))
+
+if [ $vram_percent -gt $VRAM_THRESHOLD ]; then
+  echo "ALERT: High VRAM usage: ${vram_percent}%"
+fi
+
+# Check API response time
+start_time=$(date +%s.%N)
+curl -s http://localhost:11434/api/version > /dev/null
+end_time=$(date +%s.%N)
+response_time=$(echo "$end_time - $start_time" | bc -l)
+
+if (( $(echo "$response_time > $RESPONSE_THRESHOLD" | bc -l) )); then
+  printf "ALERT: Slow API response: %.2fs\n" $response_time
+fi
+
+# Check GPU temperature
+gpu_temp=$(rocm-smi --showtemp --csv | grep -E "^[0-9]" | cut -d',' -f2 | sed 's/°C//')
+if [ $gpu_temp -gt $TEMP_THRESHOLD ]; then
+  echo "ALERT: High GPU temperature: ${gpu_temp}°C"
+fi
+
+echo "Health check completed: $(date)"
+```
+
+**Automated Monitoring Cron Job**:
+```bash
+# Add to crontab (crontab -e)
+# Run health check every 5 minutes
+*/5 * * * * /bin/bash /etc/ollama-health.sh >> /var/log/ollama-health.log 2>&1
+
+# Daily performance report
+0 6 * * * /bin/bash /etc/ollama-models.sh test >> /var/log/ollama-performance.log 2>&1
+```
+
+## Logging and Log Analysis
+
+### Service Logs
+
+**Ollama Service Logs**:
+```bash
+# Recent logs
+journalctl -u ollama.service -n 100
+
+# Logs since specific time
+journalctl -u ollama.service --since "1 hour ago"
+
+# Follow logs in real-time
+journalctl -fu ollama.service
+
+# Filter by log level
+journalctl -u ollama.service -p err  # Errors only
+journalctl -u ollama.service -p warning  # Warnings and above
+```
+
+**Model Preload Logs**:
+```bash
+# Check model download history
+journalctl -u ollama-model-preload.service --no-pager
+
+# Monitor model downloads
+journalctl -fu ollama-model-preload.service
+```
+
+### Performance Logs
+
+**Custom Performance Logging**:
+```bash
+# Create performance log
+echo "$(date),$(curl -w '%{time_total}' -s http://localhost:11434/api/version),$(rocm-smi --showmeminfo vram --csv | grep -E "^[0-9]" | cut -d',' -f2)" >> /var/log/ollama-performance.csv
+
+# Analyze performance trends
+tail -100 /var/log/ollama-performance.csv | awk -F',' '{sum+=$2; count++} END {print "Average response time:", sum/count "s"}'
+```
+
+### Log Rotation
+
+**Configure Log Rotation**:
+```bash
+# Create logrotate configuration
+sudo tee /etc/logrotate.d/ollama-custom << EOF
+/var/log/ollama-*.log {
+    daily
+    rotate 30
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 644 root root
+}
+EOF
+```
+
+## Troubleshooting with Monitoring
+
+### Common Issues and Monitoring Solutions
+
+**High VRAM Usage**:
+```bash
+# Identify VRAM consumers
+rocm-smi --showmeminfo vram
+curl -s http://localhost:11434/api/ps | jq '.models[] | {name, size_vram}'
+
+# Force model unloading
+curl -X POST http://localhost:11434/api/generate \
+  -d '{"model": "model-name", "keep_alive": 0}'
+```
+
+**Slow Response Times**:
+```bash
+# Check system load
+uptime
+top -n 1
+
+# Check I/O wait
+iostat 1 5
+
+# Monitor GPU utilization
+rocm-smi --showuse
+```
+
+**Service Crashes**:
+```bash
+# Check crash logs
+journalctl -u ollama.service --since "1 hour ago" | grep -E "(crash|error|fatal)"
+
+# Check system resources at time of crash
+dmesg | tail -50
+
+# Check OOM (Out of Memory) kills
+grep -i "killed process" /var/log/syslog
+```
+
+## Monitoring Dashboard Setup
+
+### Simple Dashboard Script
+
+**Real-Time Dashboard** (`/usr/local/bin/ollama-dashboard`):
+```bash
+#!/bin/bash
+# Simple monitoring dashboard
+
+while true; do
+  clear
+  echo "╔════════════════════════════════════════════════════════════════════╗"
+  echo "║                    OLLAMA AI SYSTEM DASHBOARD                     ║"
+  echo "╚════════════════════════════════════════════════════════════════════╝"
+  echo
+  
+  # Service Status
+  echo "🔧 SERVICE STATUS:"
+  echo "   Ollama: $(systemctl is-active ollama.service)"
+  echo "   API: $(curl -s -w 'Response: %{http_code} (%{time_total}s)' http://localhost:11434/api/version -o /dev/null)"
+  echo
+  
+  # Models
+  echo "🧠 MODELS:"
+  installed_count=$(curl -s http://localhost:11434/api/tags | jq -r '.models | length')
+  loaded_count=$(curl -s http://localhost:11434/api/ps | jq -r '.models | length')
+  echo "   Installed: $installed_count"
+  echo "   Loaded: $loaded_count"
+  echo
+  
+  # GPU Status
+  echo "🎮 GPU STATUS:"
+  vram_info=$(rocm-smi --showmeminfo vram --csv | grep -E "^[0-9]" | cut -d',' -f2,3)
+  echo "   VRAM: $vram_info"
+  
+  gpu_temp=$(rocm-smi --showtemp --csv | grep -E "^[0-9]" | cut -d',' -f2)
+  echo "   Temperature: $gpu_temp"
+  
+  gpu_util=$(rocm-smi --showuse --csv | grep -E "^[0-9]" | cut -d',' -f2)
+  echo "   Utilization: $gpu_util"
+  echo
+  
+  # System Load
+  echo "💻 SYSTEM LOAD:"
+  echo "   $(uptime)"
+  echo
+  
+  echo "Press Ctrl+C to exit | Refreshing in 5 seconds..."
+  sleep 5
+done
+```
+
+Make it executable:
+```bash
+sudo chmod +x /usr/local/bin/ollama-dashboard
+```
+
+Usage:
+```bash
+ollama-dashboard
+```
+
+## Related Documentation
+
+- [Configuration](configuration.md) - Service configuration details
+- [Performance](performance.md) - Performance optimization
+- [Troubleshooting](troubleshooting.md) - Problem resolution guide
+- [Applications](applications.md) - Application integration monitoring
+
+---
+
+*Last updated: September 21, 2025*

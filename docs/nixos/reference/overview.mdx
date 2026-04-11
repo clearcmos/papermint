@@ -1,0 +1,368 @@
+---
+title: "Reference Materials"
+description: "*Technical specifications, manual pages, and reference documentation*"
+---
+
+## 🎯 Reference Overview
+
+This section contains technical reference materials, manual pages, specifications, and external resources for the NixOS infrastructure.
+
+### 📚 Reference Categories
+
+```
+Reference Materials
+├── 📖 Manual Pages        (man pages, help documents)
+├── 📊 Technical Specs     (Configuration references)
+├── 🔗 External Resources  (Links to official docs)
+├── 📝 Glossary           (Terms and definitions)
+└── 🛠️ Quick References   (Command cheatsheets)
+```
+
+---
+
+## 📚 Reference Documentation Index
+
+### 📖 Manual Pages
+**[📁 man/](man/)**
+
+| Tool | Manual | Purpose | Status |
+|------|--------|---------|--------|
+| **gissue** | [reference-man-gissue.md](../reference/man-gissue.md) | Git issue management | ✅ Available |
+| **create-repo** | [reference-man-create-repo.md](../reference/man-create-repo.md) | GitHub repository creation | ✅ Available |
+| **suricata** | [reference-man-suricata.md](../reference/man-suricata.md) | Alert suppression | ✅ Available |
+| **NixOS commands** | System references | System administration | ✅ Available |
+| **Infrastructure tools** | Custom tools | Local tool documentation | 🔄 Expanding |
+
+### 📊 Technical Specifications
+
+| Component | Specification | Purpose | Status |
+|-----------|---------------|---------|--------|
+| **Network Architecture** | IP ranges, ports, protocols | Infrastructure planning | ✅ Current |
+| **Security Configuration** | Auth flows, encryption specs | Security implementation | ✅ Current |
+| **Service APIs** | REST endpoints, formats | Integration development | ✅ Current |
+| **Hardware Specifications** | Host capabilities, limits | Capacity planning | ✅ Current |
+
+### 🔗 External Resources
+
+| Resource | Purpose | Relevance | Status |
+|----------|---------|-----------|--------|
+| **NixOS Manual** | Official NixOS documentation | Primary reference | ✅ Current |
+| **Nix Package Search** | Package discovery | Development | ✅ Current |
+| **Service Documentation** | Official service docs | Configuration | ✅ Current |
+| **Security Advisories** | CVE tracking, patches | Security maintenance | ✅ Monitored |
+
+---
+
+## 📖 Manual Pages
+
+### 🛠️ Custom Tools Documentation
+
+**gissue - Git Issue Management**:
+```bash
+# View manual page
+man gissue
+
+# Quick usage
+gissue --help
+
+# Create new issue
+gissue create "Issue title" "Issue description"
+
+# List issues
+gissue list --status open
+```
+
+**Infrastructure-Specific Commands**:
+- **nixos-rebuild variants**: Host-specific rebuild commands
+- **Service management**: Custom service control scripts
+- **Monitoring tools**: System health and performance tools
+- **Backup utilities**: Data protection and recovery tools
+
+### 📋 Command Quick References
+
+**NixOS System Management**:
+```bash
+# System rebuilds
+nixos-rebuild switch --flake .#$(hostname)
+nixos-rebuild test --flake .#$(hostname)
+nixos-rebuild dry-run --flake .#$(hostname)
+
+# Package management
+nix search nixpkgs <package-name>
+nix-env -iA nixos.<package-name>
+nix-collect-garbage -d
+
+# Service management
+systemctl status <service>
+systemctl start|stop|restart <service>
+journalctl -u <service> -f
+```
+
+**Infrastructure Commands**:
+```bash
+# Remote deployment
+nixos-rebuild switch --flake .#misc --target-host misc.home.arpa
+
+# Secret management (from /etc/nixos/secrets)
+nix run github:ryantm/agenix -- -e secret.age -i ../keys/host-key
+
+# AI services
+curl -s http://localhost:11434/api/tags | jq
+systemctl status ollama
+
+# Network diagnostics
+ping -c 4 hostname
+dig hostname
+nmap -p 22,80,443 hostname
+```
+
+---
+
+## 📊 Technical Specifications
+
+### 🌐 Network Architecture Reference
+
+**IP Address Allocations**:
+```
+Network: 192.168.1.0/24
+├── 192.168.1.1    - Router/Gateway
+├── 192.168.1.2    - cmos.home.arpa (desktop)
+├── 192.168.1.5    - misc.home.arpa (server)
+├── 192.168.1.10   - jimmich.home.arpa (server)
+└── 192.168.1.14   - nixvm.home.arpa (VM)
+```
+
+**Port Allocations**:
+```
+Core Services:
+├── 22/tcp    - SSH (all hosts)
+├── 80/tcp    - HTTP (servers)
+├── 443/tcp   - HTTPS (servers)
+├── 9090/tcp  - Cockpit (all hosts)
+├── 445/tcp   - SMB/CIFS (all hosts)
+└── 5353/udp  - mDNS (all hosts)
+
+Host-Specific:
+├── cmos:
+│   ├── 8001/tcp  - radeontop-web
+│   └── 11434/tcp - Ollama
+└── misc:
+    ├── 8080/tcp  - Various web services
+    └── 8090/tcp  - Additional services
+```
+
+### 🔐 Security Configuration Reference
+
+**Authentication Flow**:
+```
+External Request → Cloudflare → Traefik → OAuth2-Proxy → Service
+                                              ↓
+                                          Keycloak (OIDC)
+                                              ↓
+                                     Google SSO + User DB
+```
+
+**TLS Configuration**:
+- **Minimum Version**: TLS 1.2
+- **Cipher Suites**: Modern, secure ciphers only
+- **Certificate Authority**: Let's Encrypt
+- **HSTS**: Enabled with preload
+- **Certificate Renewal**: Automated
+
+### 🖥️ Hardware Specifications
+
+**Host Capabilities**:
+```
+cmos (Desktop):
+├── CPU: AMD Ryzen (8+ cores)
+├── GPU: AMD RX 6800 XT (16GB VRAM)
+├── RAM: 32GB DDR4
+├── Storage: 2TB NVMe SSD
+└── Network: Gigabit Ethernet
+
+misc (Server):
+├── CPU: Intel Server Platform
+├── RAM: 16GB+ DDR4
+├── Storage: 500GB SSD
+└── Network: Gigabit Ethernet
+
+jimmich (Storage):
+├── CPU: Multi-core processor
+├── RAM: 16GB+ DDR4
+├── Storage: 8TB RAID Array
+└── Network: Gigabit Ethernet
+```
+
+---
+
+## 🔗 External Resources
+
+### 📚 Official Documentation
+
+**NixOS Ecosystem**:
+- **[NixOS Manual](https://nixos.org/manual/nixos/stable/)** - Complete NixOS documentation
+- **[Nix Package Search](https://search.nixos.org/packages)** - Package repository search
+- **[NixOS Options](https://search.nixos.org/options)** - Configuration option reference
+- **[Nix Pills](https://nixos.org/guides/nix-pills/)** - Deep dive into Nix concepts
+
+**Service Documentation**:
+- **[Keycloak](https://www.keycloak.org/documentation)** - Identity and access management
+- **[OAuth2-Proxy](https://oauth2-proxy.github.io/oauth2-proxy/)** - OAuth2/OIDC authentication proxy
+- **[Traefik](https://doc.traefik.io/traefik/)** - Reverse proxy and load balancer
+- **[Ollama](https://ollama.ai/)** - Local LLM deployment
+- **[KDE Plasma](https://kde.org/plasma-desktop/)** - Desktop environment
+
+### 🔒 Security Resources
+
+**Security References**:
+- **[CVE Database](https://cve.mitre.org/)** - Common vulnerabilities and exposures
+- **[NVD](https://nvd.nist.gov/)** - National vulnerability database
+- **[OWASP](https://owasp.org/)** - Web application security
+- **[CIS Benchmarks](https://www.cisecurity.org/cis-benchmarks/)** - Security configuration guides
+
+**Compliance and Standards**:
+- **[NIST Cybersecurity Framework](https://www.nist.gov/cyberframework)** - Security standards
+- **[ISO 27001](https://www.iso.org/isoiec-27001-information-security.html)** - Information security management
+- **[SOC 2](https://www.aicpa.org/interestareas/frc/assuranceadvisoryservices/aicpasoc2report.html)** - Security and availability standards
+
+---
+
+## 📝 Glossary
+
+### 🎯 Infrastructure Terms
+
+**A**
+- **Agenix**: Age-based secret encryption for NixOS
+- **API**: Application Programming Interface
+
+**F**
+- **Flake**: Nix's new system for reproducible builds
+- **FQDN**: Fully Qualified Domain Name
+
+**N**
+- **NixOS**: Linux distribution built on the Nix package manager
+- **Nix**: Purely functional package manager
+
+**O**
+- **OAuth2**: Open standard for access delegation
+- **Ollama**: Platform for running large language models locally
+
+**T**
+- **Traefik**: Modern reverse proxy and load balancer
+- **TLS**: Transport Layer Security
+
+### 🔒 Security Terms
+
+**2FA**: Two-Factor Authentication  
+**CSRF**: Cross-Site Request Forgery  
+**HSTS**: HTTP Strict Transport Security  
+**JWT**: JSON Web Token  
+**OIDC**: OpenID Connect  
+**PKCE**: Proof Key for Code Exchange  
+**SSO**: Single Sign-On  
+**WAF**: Web Application Firewall
+
+### 🛠️ Technical Terms
+
+**API**: Application Programming Interface  
+**CDN**: Content Delivery Network  
+**CORS**: Cross-Origin Resource Sharing  
+**DNS**: Domain Name System  
+**HTTP/HTTPS**: HyperText Transfer Protocol (Secure)  
+**JSON**: JavaScript Object Notation  
+**REST**: Representational State Transfer  
+**SLA**: Service Level Agreement  
+**URL**: Uniform Resource Locator
+
+---
+
+## 🛠️ Quick Reference Cards
+
+### 🚀 Emergency Commands
+
+**System Recovery**:
+```bash
+# Boot previous generation
+# (Select from GRUB menu)
+
+# Emergency rollback
+nixos-rebuild switch --rollback
+
+# Service emergency restart
+systemctl restart <critical-service>
+
+# Check system health
+systemctl --failed
+journalctl --priority=err --since="1 hour ago"
+```
+
+**Network Diagnostics**:
+```bash
+# Basic connectivity
+ping -c 4 8.8.8.8
+
+# DNS resolution
+nslookup hostname
+dig hostname
+
+# Service availability
+curl -I https://service.domain.com
+telnet hostname port
+```
+
+### 📊 Monitoring Commands
+
+**System Status**:
+```bash
+# Overall system health
+systemctl status
+df -h
+free -h
+uptime
+
+# Service-specific status
+systemctl status ollama
+systemctl status keycloak
+systemctl status traefik
+systemctl status fail2ban
+```
+
+**Performance Monitoring**:
+```bash
+# Real-time monitoring
+htop
+iotop
+nethogs
+watch "df -h"
+
+# Historical analysis
+journalctl --since="1 hour ago"
+sar -u 1 10
+iostat -x 1 10
+```
+
+---
+
+## 📖 Related Documentation
+
+### 🏗️ Infrastructure
+- **[Infrastructure Overview](../infrastructure/overview.md)** - System architecture
+- **[Network Configuration](../infrastructure-overview.md#network-architecture)** - Network details
+
+### 🛠️ Tools
+- **[Command-line Tools](../tools/overview.md)** - Tool documentation
+- **[Development Environment](../tools-overview.md#development-environment)** - Development tools
+
+### 🚨 Troubleshooting
+- **[Diagnostic Procedures](../troubleshooting-overview.md#diagnostic-tools)** - Troubleshooting tools
+- **[Emergency Procedures](../troubleshooting-overview.md#emergency-procedures)** - Emergency response
+
+---
+
+**Last Updated**: 2025-10-18
+**Reference Standard**: Technical accuracy verified
+**Next Review**: 2025-11-18
+**External Links**: Verified and current
+
+---
+*🏠 [Home](../README.md) | 📚 [Navigation](../NAVIGATION.md) | 🛠️ [Tools](../tools/overview.md) | 📖 [Manual Pages](man/)*

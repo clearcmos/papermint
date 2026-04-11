@@ -1,0 +1,165 @@
+---
+title: "AI Infrastructure Documentation"
+description: "Complete documentation for the Ollama-based AI infrastructure on CMOS."
+---
+
+## Overview
+
+This system uses **Ollama** as the single AI service providing local large language model capabilities for all applications. The setup is optimized for both high-performance AI processing and gaming workloads on an AMD RX 6800 XT GPU system.
+
+## Quick Start
+
+```bash
+# Check AI service status
+systemctl status ollama.service
+
+# List available models
+curl -s http://localhost:11434/api/tags | jq '.models[].name'
+
+# Test AI response
+curl -X POST http://localhost:11434/api/generate \
+  -H "Content-Type: application/json" \
+  -d '{"model": "qwen2.5-coder:7b-instruct", "prompt": "Hello", "stream": false}'
+
+# Validate full system
+bash /etc/ollama-validate.sh
+```
+
+## Architecture
+
+### Single Service Design
+- **Service**: Ollama on port 11434
+- **Models**: 3 specialized models for different tasks
+- **GPU**: AMD RX 6800 XT with ROCm acceleration
+- **Storage**: `/var/lib/ollama/models` (standard location)
+
+### Model Allocation
+- **qwen2.5-coder:7b-instruct**: Coding assistance (smart-commit)
+- **qwen2.5:7b-instruct**: General knowledge tasks (keeper, sage)
+- **bge-m3**: Text embeddings (keeper)
+
+## Documentation Structure
+
+| Document | Purpose |
+|----------|---------|
+| [Configuration](configuration.md) | Complete service configuration reference |
+| [Models](models.md) | Model management and specifications |
+| [Performance](performance.md) | Optimization and benchmarking |
+| [Monitoring](monitoring.md) | System monitoring and diagnostics |
+| [Applications](applications.md) | Integration with smart-commit, keeper, sage |
+| [CPU Mode](cpu.md) | Running models on CPU instead of GPU |
+| [Troubleshooting](../troubleshooting/ollama.md) | Common issues and solutions |
+
+## Key Features
+
+### 🚀 **Performance Optimized**
+- Gaming-friendly resource allocation
+- Dynamic model loading/unloading
+- Optimized for AMD RX 6800 XT with ROCm
+- Optimized concurrency for multiple requests
+
+### 🎮 **Gaming Compatible**
+- VRAM usage limited to preserve resources for WoW
+- Fast model unloading (3 minutes)
+- Non-blocking GPU operations
+- Controlled CPU thread allocation
+
+### 🔧 **Developer Friendly**
+- Single API endpoint for all models
+- OpenAI-compatible API format
+- Automatic model management
+- Comprehensive monitoring tools
+
+## Applications Using AI
+
+### Smart-Commit
+- **Model**: qwen2.5-coder:7b-instruct
+- **Purpose**: AI-powered Git commit message generation
+- **Endpoint**: `http://localhost:11434/api/generate`
+- **Status**: ✅ Working
+
+### Keeper
+- **Models**: qwen2.5:7b-instruct (categorization), bge-m3 (embeddings)
+- **Purpose**: Google Keep note management and AI categorization
+- **Endpoint**: `http://localhost:11434/api/generate` & `/api/embeddings`
+- **Status**: ✅ Ready for testing
+
+### Sage
+- **Model**: qwen2.5:7b-instruct
+- **Purpose**: AI-powered Linux system management assistant
+- **Endpoint**: `http://localhost:11434/api/generate`
+- **Status**: ✅ Ready for testing
+
+### Audio Separator (UVR5)
+- **Technology**: PyTorch ROCm + MDX-Net/Demucs models
+- **Purpose**: GPU-accelerated vocal/instrumental audio separation
+- **Commands**: `uvr`, `uvr-models`, `uvr-help`
+- **Status**: ✅ Working
+
+## Resource Usage
+
+### VRAM Allocation (16GB Total)
+- **AI Models**: 9-10GB maximum (2 models loaded)
+- **WoW/Gaming**: 6-7GB reserved
+- **System**: 1GB for desktop/apps
+
+### Performance Specifications
+- **Parallel Requests**: 6 per model
+- **Queue Size**: 1024 requests
+- **Context Length**: 8192 tokens
+- **Model Unload Time**: 3 minutes after last use
+
+## Getting Help
+
+### Quick Diagnostics
+```bash
+# System health check
+bash /etc/ollama-validate.sh
+
+# Model management
+bash /etc/ollama-models.sh status
+
+# Performance monitoring
+bash /etc/ollama-health.sh
+```
+
+### Documentation Navigation
+- **New to Ollama?** Start with [Configuration](configuration.md)
+- **Performance issues?** See [Performance](performance.md) and [Monitoring](monitoring.md)
+- **Application integration?** Check [Applications](applications.md)
+- **CPU-only mode?** Read [CPU Mode](cpu.md)
+- **Problems?** Consult [Troubleshooting](troubleshooting.md)
+
+## System Requirements
+
+### Hardware
+- **GPU**: AMD RX 6800 XT (16GB VRAM)
+- **RAM**: 32GB+ recommended for full model loading
+- **CPU**: Multi-core (8+ threads for optimal performance)
+- **Storage**: 50GB+ for models and cache
+
+### Software
+- **OS**: NixOS with ROCm support
+- **ROCm**: Version compatible with gfx1030 architecture
+- **Network**: Internet connection for model downloads
+
+## System Benefits
+
+### Key Advantages
+- ✅ **Simplified management**: Single service architecture
+- ✅ **Optimal resource utilization**: Dynamic model loading and unloading
+- ✅ **High performance**: Optimized concurrency and queue management
+- ✅ **Gaming compatibility**: Reserved VRAM for gaming workloads
+- ✅ **Process stability**: Automatic cleanup and management
+- ✅ **Modern API**: OpenAI-compatible endpoints
+
+### Technical Specifications
+- ✅ **Context length**: 8K tokens per request
+- ✅ **Thread allocation**: 8 CPU threads for AI processing
+- ✅ **Model quality**: High-quality quantization for performance
+- ✅ **Application integration**: Seamless API integration
+
+---
+
+**Last Updated**: December 3, 2025
+**System**: CMOS - Gaming + AI Workstation
